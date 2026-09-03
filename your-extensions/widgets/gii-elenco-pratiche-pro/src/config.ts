@@ -96,6 +96,7 @@ export interface Config {
   oggettoBadgeWidth: number
   oggettoBadgeContentOffset: number
   oggettoBadgeOpacity: number
+  oggettoBadgeColorBozza: string
   oggettoBadgeColorNuovaRilevazione: string
   oggettoBadgeColorAssegnazione: string
   oggettoBadgeColorTrasmissione: string
@@ -260,6 +261,7 @@ export const defaultConfig: IMConfig = {
   oggettoBadgeWidth: 8,
   oggettoBadgeContentOffset: 10,
   oggettoBadgeOpacity: 1,
+  oggettoBadgeColorBozza: '#6b7280',
   oggettoBadgeColorNuovaRilevazione: '#7dd3fc',
   oggettoBadgeColorAssegnazione: '#2f6fed',
   oggettoBadgeColorTrasmissione: '#8b5cf6',

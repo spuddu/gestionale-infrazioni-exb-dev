@@ -136,7 +136,9 @@ const V_NUMERO_VERBALE_LEGACY = "__numero_atto_accertamento_display__";
 function isNumeroAttoVirtualField (field: string): boolean { return field === V_NUMERO_VERBALE || field === V_NUMERO_VERBALE_LEGACY }
 const V_ULTIMO = "__ultimo_agg__";
 const V_PROSSIMA = "__prossima__";
+const V_PROSSIMA_RUOLO = "__prossima_ruolo__";
 const V_MITTENTE = "__mittente__";
+const V_MITTENTE_RUOLO = "__mittente_ruolo__";
 const V_CAUSALE = "__causale__";
 const V_DATA_MSG = "__data_msg__";
 
@@ -188,11 +190,14 @@ function normalizeMioStatoLabel(label: any): string {
     l === "sanzione approvata"
   )
     return "Trasmesso";
-  if (l === "assegnato a istruttore amministrativo" || l === "assegnato all’istruttore amministrativo")
-    return "Assegnato all’Istruttore amministrativo";
-  if (l === "assegnato a istruttore tecnico" || l === "assegnato all’istruttore tecnico")
-    return "Assegnato all’Istruttore tecnico";
-  if (l.startsWith("assegnato")) return raw;
+  if (
+    l === "istruttoria assegnata" ||
+    l === "assegnato a istruttore amministrativo" ||
+    l === "assegnato all’istruttore amministrativo" ||
+    l === "assegnato a istruttore tecnico" ||
+    l === "assegnato all’istruttore tecnico"
+  )
+    return "Istruttoria assegnata";
   if (l === "respinto" || l.startsWith("respint")) return "Respinto";
 
   // Nessun fallback descrittivo: lo schema Excel ammette solo gli stati sopra.
@@ -204,6 +209,7 @@ function normalizeMioStatoView<T extends { label: string }>(view: T): T {
 }
 
 const ALLOWED_OGGETTI = new Set([
+  "BOZZA",
   "NUOVA RILEVAZIONE",
   "ASSEGNAZIONE ISTRUTTORIA",
   "TRASMISSIONE ISTRUTTORIA",
@@ -1442,15 +1448,6 @@ function getUtenteEntrySettoreCode(utente?: UtentiEntry | null): string {
   return resolveSettoreCode(utente.settore, utente.settoreCod);
 }
 
-function getDisplayRoleFromUtente(
-  utente: UtentiEntry | null | undefined,
-  fallbackRole: any,
-): string {
-  const role = normalizeRoleDisplayCode(utente?.ruoloCod || fallbackRole);
-  const area = getUtenteEntryAreaCode(utente) || normalizePersonaAreaForMatch("", fallbackRole);
-  return role || normalizeRoleDisplayCode(fallbackRole);
-}
-
 function resolveUtenteForPersona(
   utentiMap: Map<string, UtentiEntry> | null,
   ruolo: string,
@@ -1486,7 +1483,12 @@ function resolveUtenteForPersona(
       if (uname && String(entry.username || "").trim().toLowerCase() !== uname) continue;
       if (matchesContext(entry)) return entry;
     }
-    for (const entry of utentiMap.values()) if (matchesContext(entry)) return entry;
+    // Se e' stato fornito uno username, non si deve mai sostituire la persona
+    // con un altro utente che possiede il ruolo richiesto. Il ruolo operativo
+    // appartiene all'evento/pratica; GII_utenti serve a risolvere l'anagrafica.
+    if (!uname) {
+      for (const entry of utentiMap.values()) if (matchesContext(entry)) return entry;
+    }
   }
 
   if (direct) return direct; // fallback anagrafico: nome/cognome restano comunque corretti
@@ -1503,7 +1505,7 @@ function resolveUtenteForPersona(
 function formatPersonaDisplay(nomeCognome: string, qualifica: string): string {
   const name = cleanNomeCognome(nomeCognome) || "—";
   const role = String(qualifica || "").trim();
-  return role ? `${name}\n(${role})` : name;
+  return role ? `${name}\n${role}` : name;
 }
 
 function getPersonaDisplayParts(value: any): { name: string; role: string } {
@@ -1520,7 +1522,7 @@ function getPersonaDisplayParts(value: any): { name: string; role: string } {
 
 function getPersonaDisplayTitle(value: any): string {
   const p = getPersonaDisplayParts(value);
-  return p.role ? `${p.name} (${p.role})` : p.name;
+  return p.role ? `${p.name} — ${p.role}` : p.name;
 }
 
 function PersonaCell(props: { value: string }) {
@@ -1528,7 +1530,12 @@ function PersonaCell(props: { value: string }) {
   return (
     <div className="personaCell">
       <div className="personaName">{p.name}</div>
-      {p.role && <div className="personaRole">({p.role})</div>}
+      {p.role && (
+        <>
+          <span className="myStateCellSeparator" aria-hidden />
+          <div className="personaRole">{p.role}</div>
+        </>
+      )}
     </div>
   );
 }
@@ -1536,7 +1543,7 @@ function PersonaCell(props: { value: string }) {
 /**
  * Formatta una persona (mittente) nel formato visuale richiesto:
  *   Nome Cognome
- *   (Qualifica)
+ *   Qualifica
  */
 function formatPersona(
   ruolo: string,
@@ -1554,7 +1561,9 @@ function formatPersona(
   );
   return formatPersonaDisplay(
     getUtenteNomeCognome(utente),
-    getQualificaLabel(getDisplayRoleFromUtente(utente, ruolo)),
+    // Il ruolo visualizzato e' quello svolto nell'evento di workflow, non il
+    // ruolo principale/di grado maggiore eventualmente presente in GII_utenti.
+    getQualificaLabel(ruolo),
   );
 }
 
@@ -1579,7 +1588,9 @@ function formatPersonaDest(
   );
   return formatPersonaDisplay(
     getUtenteNomeCognome(destEntry),
-    getQualificaLabel(getDisplayRoleFromUtente(destEntry, ruoloDest)),
+    // Anche per il destinatario la qualifica appartiene al passaggio di
+    // workflow; un eventuale multi-ruolo dello stesso utente non deve cambiarla.
+    getQualificaLabel(ruoloDest),
   );
 }
 
@@ -2670,15 +2681,22 @@ export default function Widget(props: Props) {
       // corrente deve agire adesso. La tab "In attesa di altri" contiene
       // le pratiche ancora operative presso altri ruoli; le pratiche respinte
       // sono chiuse e restano consultabili solo in "Tutte le pratiche".
+      const isDraftIt = isInitialItDraft(d);
+      const displayRole = normalizeWorkflowRole(stato.ruolo);
       const isAttesaMia =
-        label === "da prendere in carico" || label === "in carico";
+        label === "da prendere in carico" ||
+        label === "in carico" ||
+        (isDraftIt && displayRole === "IT");
       const isRespinto =
         isRapportoRespintoChiuso(d) ||
         label === "respinto" ||
         label.startsWith("respint");
 
       if (tabId === "attesa_mia") return isAttesaMia;
-      if (tabId === "attesa_altri") return !isAttesaMia && !isRespinto && label !== "—";
+      if (tabId === "attesa_altri") {
+        if (isDraftIt) return displayRole !== "IT";
+        return !isAttesaMia && !isRespinto && label !== "—";
+      }
       return true;
       // eslint-disable-next-line react-hooks/exhaustive-deps
     },
@@ -2781,15 +2799,18 @@ export default function Widget(props: Props) {
       if (!statoRuoloField) return recs;
       const rank = (r: DataRecord): number => {
         const d = r.getData?.() || {};
-        const label = labelNorm(txt(computeDisplaySintetico(d).label))
+        const view = computeDisplaySintetico(d);
+        const label = labelNorm(txt(view.label))
           .trim()
           .toLowerCase();
         if (label === "da prendere in carico") return 0;
         if (label === "in carico") return 1;
+        if (isInitialItDraft(d))
+          return normalizeWorkflowRole(view.ruolo) === "IT" ? 1 : 2;
         if (
           label === "rimandato" ||
           label === "trasmesso" ||
-          label.startsWith("assegnato")
+          label === "istruttoria assegnata"
         )
           return 2;
         if (label === "respinto") return 3;
@@ -3317,7 +3338,7 @@ export default function Widget(props: Props) {
     if (l.startsWith("in carico")) return CHIP_CELESTE;
     if (l.startsWith("rimandato")) return CHIP_ORANGE;
     if (l.startsWith("trasmesso")) return CHIP_BLUE;
-    if (l.startsWith("assegnato")) return CHIP_BLUE;
+    if (l === "istruttoria assegnata") return CHIP_BLUE;
     if (l.startsWith("respint")) return CHIP_RED;
     return CHIP_NEUTRAL;
   };
@@ -3325,6 +3346,8 @@ export default function Widget(props: Props) {
   const getOggettoAccentColor = (oggetto: string): string => {
     const o = normalizeOggettoLabel(oggetto);
     if (!oggettoBadgeEnabled || !o || o === "—") return "transparent";
+    if (o === "BOZZA")
+      return txt(cfg.oggettoBadgeColorBozza || "#6b7280");
     if (o.includes("RESPINTA"))
       return txt(cfg.oggettoBadgeColorRespingimento || CHIP_RED.background);
     if (o.includes("NOTIFIC"))
@@ -3368,10 +3391,12 @@ export default function Widget(props: Props) {
 
   const getOggettoLegendDescription = (oggetto: string): string => {
     const o = normalizeOggettoLabel(oggetto);
+    if (o === "BOZZA")
+      return "Il colore identifica una rilevazione creata dall’Istruttore tecnico e non ancora trasmessa al Capo Settore.";
     if (o === "NUOVA RILEVAZIONE")
-      return "Il colore identifica una nuova rilevazione, creata dall’Istruttore tecnico o inviata dal Tecnico rilevatore, non ancora trasformata in rapporto tecnico ufficiale.";
+      return "Il colore identifica una nuova rilevazione trasmessa dall’Istruttore tecnico o inviata dal Tecnico rilevatore, non ancora trasformata in rapporto tecnico ufficiale.";
     if (o === "ASSEGNAZIONE ISTRUTTORIA")
-      return "Il colore identifica l’assegnazione della pratica all’Istruttore tecnico incaricato della compilazione.";
+      return "Il colore identifica l’assegnazione della pratica all’Istruttore competente.";
     if (o === "TRASMISSIONE ISTRUTTORIA")
       return "Il colore identifica la trasmissione dell’istruttoria al ruolo successivo del procedimento.";
     if (o === "TRASMISSIONE BOZZA DETERMINAZIONE" || o === "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE")
@@ -3496,6 +3521,55 @@ export default function Widget(props: Props) {
       ...(['IT', 'CS', 'RIT'].includes(String(role || '').toUpperCase()) ? [] : [parseToMs(d[`dt_esito_${role}`])]),
     ].filter((v): v is number => v !== null);
     return vals.length ? Math.max(...vals) : null;
+  };
+
+  // Rilevazione creata direttamente da IT e non ancora trasmessa al CS.
+  // È una condizione procedimentale reale, distinta dagli stati di ruolo: finché
+  // non avviene il primo invio IT → CS nessun ruolo ha formalmente ricevuto la pratica.
+  const isInitialItDraft = (d: any): boolean => {
+    if (!d) return false;
+
+    const opRaw = pickField(d, "origine_pratica");
+    const opNum =
+      opRaw !== null && opRaw !== undefined && opRaw !== ""
+        ? Number(opRaw)
+        : null;
+    if (opNum !== 2) return false;
+    if (pickOfficialRapportoNumber(d)) return false;
+
+    // Il primo invio IT → CS apre il nodo CS e chiude quello IT. Questi campi
+    // permettono di riconoscere subito l'avvenuta trasmissione anche mentre il
+    // LOG viene ancora caricato, senza inventare stati provvisori.
+    const statoIt = readRoleNumber(d, "IT", "stato");
+    if (
+      statoIt === statoIntegrazione ||
+      statoIt === statoApprovata ||
+      statoIt === statoRespinta
+    )
+      return false;
+
+    if (hasRuoloData(d, "CS") || getRoleLastTouchMs(d, "CS") !== null)
+      return false;
+    if (
+      hasRuoloData(d, "RIT") ||
+      hasRuoloData(d, "DT") ||
+      hasRuoloData(d, "RIA") ||
+      hasRuoloData(d, "IA")
+    )
+      return false;
+
+    const log = getLogForRecord(d);
+    if (log) {
+      const events = [
+        String(log.evento || "").trim().toUpperCase(),
+        ...(log.history || []).map((h) =>
+          String(h?.evento || "").trim().toUpperCase(),
+        ),
+      ].filter(Boolean);
+      if (events.some((e) => e !== "CREAZIONE")) return false;
+    }
+
+    return true;
   };
 
   // ── Determina se il Rapporto è entrato in fase sanzionatoria ─────────────
@@ -3809,6 +3883,10 @@ export default function Widget(props: Props) {
   const computeSintetico = (
     d: any,
   ): { ruolo: string; label: string; statoForChip: number | null } => {
+    if (isInitialItDraft(d)) {
+      return { ruolo: "IT", label: "—", statoForChip: null };
+    }
+
     const bozzaTrasmessaRia = isBozzaDeterminazioneTrasmessaRia(d);
     const statoRia = readRoleNumber(d, "RIA", "stato");
     if (bozzaTrasmessaRia && (statoRia === null || statoRia === statoDaPrendere)) {
@@ -4021,8 +4099,9 @@ export default function Widget(props: Props) {
     const opNum =
       op !== null && op !== undefined && op !== "" ? Number(op) : null;
     if (opNum === 2) {
-      // IT ha creato il Rapporto, non ancora trasmesso a CS
-      return { ruolo: "IT", label: "In carico", statoForChip: statoPresa };
+      // Caso anomalo non classificabile come bozza iniziale: non attribuire
+      // artificialmente una presa in carico a IT.
+      return { ruolo: "IT", label: "—", statoForChip: null };
     }
     // origine=1 (TR) o non valorizzato: implicitamente trasmesso a CS
     return {
@@ -4193,6 +4272,10 @@ export default function Widget(props: Props) {
       return getStateView(role, "Respinto", statoRespinta);
     }
 
+    if (isInitialItDraft(d)) {
+      return getStateView(role, "—", null);
+    }
+
     const log = getLogForRecord(d);
     const logRole = normalizeWorkflowRole(log?.ruolo);
     const logDest = normalizeWorkflowRole(log?.ruoloDest);
@@ -4245,7 +4328,7 @@ export default function Widget(props: Props) {
       ) {
         return getStateView(
           role,
-          logDest === "IA" ? "Assegnato all’Istruttore amministrativo" : "Assegnato all’Istruttore tecnico",
+          "Istruttoria assegnata",
           statoApprovata,
         );
       }
@@ -4265,7 +4348,7 @@ export default function Widget(props: Props) {
     }
 
     // Casi di assegnazione CS → IT: il nodo IT è attivo ma CS non ha un campo esito dedicato,
-    // per CS deve leggersi come "Assegnato all’Istruttore tecnico", non come "In carico".
+    // per CS deve leggersi come "Istruttoria assegnata", non come "In carico".
     if (role === "CS") {
       const tiInfo = getTiIstruttoriaInfo(d);
       if (
@@ -4275,7 +4358,7 @@ export default function Widget(props: Props) {
         !hasRuoloData(d, "DT") &&
         !hasRuoloData(d, "DA")
       ) {
-        return getStateView("CS", "Assegnato all’Istruttore tecnico", statoApprovata);
+        return getStateView("CS", "Istruttoria assegnata", statoApprovata);
       }
     }
 
@@ -4353,8 +4436,13 @@ export default function Widget(props: Props) {
     }).sort((x, y) => x.rank - y.rank || y.last - x.last || x.idx - y.idx);
     const best = ranked[0];
     const bestLabel = normalizeMioStatoLabel(String(best.state?.label || "")).toLowerCase();
+    // La bozza iniziale creata direttamente da IT non ha ancora prodotto un passaggio
+    // di workflow, ma appartiene gia' operativamente all'IT che l'ha creata. Questo e'
+    // essenziale anche per i profili multi-ruolo (es. RIT + IT): il ruolo operativo IT
+    // deve restare visibile e accompagnare la selezione della pratica gia' in bozza.
+    const isInitialDraftOwnedByIt = isInitialItDraft(d) && best.role === "IT";
     const hasCurrentOperationalRole =
-      bestLabel === "da prendere in carico" || bestLabel === "in carico";
+      bestLabel === "da prendere in carico" || bestLabel === "in carico" || isInitialDraftOwnedByIt;
     return {
       ...best.state,
       ruolo: best.role || best.state.ruolo,
@@ -4367,13 +4455,20 @@ export default function Widget(props: Props) {
   function getOperationalSelectionMeta(d: any): { operationalRole: string; operationalRoleLabel: string } {
     const view = computeDisplaySintetico(d || {});
     const label = normalizeMioStatoLabel(String(view?.label || "")).toLowerCase();
+    const role = normalizeWorkflowRole(view?.ruolo);
+    // Anche senza una presa in carico formale successiva, la bozza originata da IT e'
+    // gia' nella disponibilita' dell'IT creatore. Non svuotare quindi operationalRole:
+    // Azioni e la pagina di modifica devono lavorare come IT, non ricadere sul profilo
+    // principale dell'utente (che nei casi multi-ruolo puo' essere RIT).
+    const isInitialDraftOwnedByIt = isInitialItDraft(d) && role === "IT";
     const hasCurrentOperationalRole =
-      label === "da prendere in carico" || label === "in carico";
+      label === "da prendere in carico" || label === "in carico" || isInitialDraftOwnedByIt;
     if (!hasCurrentOperationalRole) {
       return { operationalRole: "", operationalRoleLabel: "" };
     }
+
     return {
-      operationalRole: normalizeWorkflowRole(view?.ruolo),
+      operationalRole: role,
       operationalRoleLabel: String(view?.ruoloOperativoLabel || view?.ruolo || '').trim(),
     };
   }
@@ -4431,10 +4526,43 @@ export default function Widget(props: Props) {
     return Math.max(...candidates);
   };
 
+  const getPersonaRoleSortValue = (d: any, field: string): string => {
+    const isMittenteRole = field === V_MITTENTE_RUOLO;
+    const isDestinatarioRole = field === V_PROSSIMA_RUOLO;
+    if (!isMittenteRole && !isDestinatarioRole) return "";
+
+    if (isBozzaDeterminazioneTrasmessaRia(d)) {
+      const display = getBozzaDeterminazioneTrasmissionDisplay(d);
+      return getPersonaDisplayParts(
+        isMittenteRole ? display.mittente : display.destinatario,
+      ).role;
+    }
+
+    const log = getLogForRecord(d);
+    if (log) {
+      const roleCode = isMittenteRole ? log.ruolo : log.ruoloDest;
+      return roleCode ? getQualificaLabel(roleCode) : "";
+    }
+
+    if (isInitialItDraft(d) || !logLoadedRef.current) return "";
+
+    if (shouldUseInitialOggettoFallback(d)) {
+      const opRaw = d.origine_pratica ?? d.ORIGINE_PRATICA;
+      const opN = opRaw != null && opRaw !== "" ? Number(opRaw) : null;
+      if (opN === 1) {
+        return getQualificaLabel(isMittenteRole ? "TR" : "CS");
+      }
+    }
+
+    return "";
+  };
+
   const getSortValue = (r: DataRecord, field: string): any => {
     const d = r.getData?.() || {};
     if (field === V_STATO) return computeDisplaySintetico(d).label;
     if (field === V_RUOLO_OPERATIVO) return computeDisplaySintetico(d).ruoloOperativoLabel || "";
+    if (field === V_MITTENTE_RUOLO || field === V_PROSSIMA_RUOLO)
+      return getPersonaRoleSortValue(d, field);
     if (field === V_FASE) return computeFaseIstruttoria(d);
     if (field === V_TIPO_PRATICA) return getTipoPraticaDisplay(r);
     if (field === V_NUMERO_RILEVAZIONE) return getRilevazioneDisplay(r);
@@ -4469,8 +4597,10 @@ export default function Widget(props: Props) {
     }
     if (field === V_CAUSALE) {
       if (isBozzaDeterminazioneTrasmessaRia(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).causale;
+      if (isInitialItDraft(d)) return "BOZZA";
       const log = getLogForRecord(d);
-      return log ? formatCausaleForLog(log, d) : "";
+      if (log) return formatCausaleForLog(log, d);
+      return shouldUseInitialOggettoFallback(d) ? "NUOVA RILEVAZIONE" : "";
     }
     if (field === V_DATA_MSG) {
       // "Ultimo agg." deve rappresentare l'ultimo movimento effettivo della pratica
@@ -5823,6 +5953,17 @@ export default function Widget(props: Props) {
       padding-top: 2px;
       padding-bottom: 2px;
     }
+    .headerRoleSubLabel {
+      width: 100%;
+      min-height: 22px;
+      display: flex;
+      align-items: center;
+      padding-top: 2px;
+      padding-bottom: 2px;
+      color: inherit;
+      font: inherit;
+      line-height: 1;
+    }
 
     .myStateCellSeparator {
       display: block;
@@ -5830,9 +5971,9 @@ export default function Widget(props: Props) {
       border-top: 1px solid rgba(0, 0, 0, 0.12);
     }
     .myStateRoleLabel {
-      font-size: 11px;
-      line-height: 1.15;
-      color: var(--ref-palette-neutral-700, #555);
+      font-size: 12px;
+      line-height: 1.05;
+      color: rgba(17, 24, 39, 0.68);
       white-space: normal;
     }
 
@@ -5981,9 +6122,12 @@ export default function Widget(props: Props) {
 
     .personaCell {
       min-width: 0;
+      width: 100%;
       display: flex;
       flex-direction: column;
       justify-content: center;
+      align-items: stretch;
+      gap: 4px;
       line-height: 1.06;
     }
     .personaName {
@@ -5995,7 +6139,7 @@ export default function Widget(props: Props) {
     }
     .personaRole {
       min-width: 0;
-      margin-top: 3px;
+      margin-top: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -6040,6 +6184,7 @@ export default function Widget(props: Props) {
     };
 
     const isMyState = p.field === V_STATO;
+    const isPersonHeader = p.field === V_MITTENTE || p.field === V_PROSSIMA;
 
     return (
       <div className={`headerCell ${p.first ? "first" : ""}`}>
@@ -6077,6 +6222,38 @@ export default function Widget(props: Props) {
               {renderSortBadge(V_STATO)}
             </button>
           )
+        ) : isPersonHeader ? (
+          <div className="myStateHeaderSorts">
+            <button
+              type="button"
+              className="hdrBtn hdrBtnMyStatePart"
+              onClick={() => toggleSort(p.field)}
+              title={`Ordina per ${p.label}. Click successivi: crescente, decrescente, rimuovi ordinamento.`}
+            >
+              <span>{p.label}</span>
+              {renderSortBadge(p.field)}
+            </button>
+            <span className="myStateSeparator" aria-hidden />
+            <button
+              type="button"
+              className="hdrBtn hdrBtnMyStatePart"
+              onClick={() =>
+                toggleSort(
+                  p.field === V_MITTENTE
+                    ? V_MITTENTE_RUOLO
+                    : V_PROSSIMA_RUOLO,
+                )
+              }
+              title={`Ordina per ruolo ${p.label.toLowerCase()}. Click successivi: crescente, decrescente, rimuovi ordinamento.`}
+            >
+              <span>Ruolo</span>
+              {renderSortBadge(
+                p.field === V_MITTENTE
+                  ? V_MITTENTE_RUOLO
+                  : V_PROSSIMA_RUOLO,
+              )}
+            </button>
+          </div>
         ) : (
           <button
             type="button"
@@ -6715,22 +6892,6 @@ export default function Widget(props: Props) {
 
                       const displaySintetico = computeDisplaySintetico(d);
                       const faseIstruttoria = computeFaseIstruttoria(d);
-                      const originePraticaRaw =
-                        d.origine_pratica ?? d.ORIGINE_PRATICA;
-                      const originePraticaNum =
-                        originePraticaRaw != null && originePraticaRaw !== ""
-                          ? Number(originePraticaRaw)
-                          : null;
-                      const statoInizialeTi = normalizeMioStatoLabel(
-                        txt(displaySintetico.label),
-                      ).toLowerCase();
-                      const isNewTiDetection =
-                        originePraticaNum === 2 &&
-                        !pickOfficialRapportoNumber(d) &&
-                        normalizeWorkflowRole(displaySintetico.ruolo) === "IT" &&
-                        (statoInizialeTi.startsWith("in carico") ||
-                          statoInizialeTi.startsWith("da prendere"));
-
                       const statoLabel = labelNorm(txt(displaySintetico.label));
                       const statoChipNum = displaySintetico.statoForChip;
 
@@ -6772,24 +6933,26 @@ export default function Widget(props: Props) {
                         // Stato/Mittente/Destinatario, ma non deve bloccare la data se
                         // dopo quel LOG ci sono state prese in carico o nuove trasmissioni.
                         dataMsgVal = ultimoMs ? formatDateIt(ultimoMs) : "—";
+                      } else if (isInitialItDraft(d)) {
+                        // La pratica è ancora una bozza dell'IT: non esiste alcuna
+                        // trasmissione, quindi Mittente e Destinatario restano vuoti.
+                        // Ultimo agg. resta valorizzato per rendere individuabili le
+                        // bozze ferme da troppo tempo.
+                        const draftMs = computeUltimoAggMs(d);
+                        mittenteVal = "—";
+                        destinatario = "—";
+                        causaleVal = "BOZZA";
+                        dataMsgVal = draftMs ? formatDateIt(draftMs) : "—";
                       } else if (!logLoadedRef.current) {
-                        // Per una rilevazione appena creata dal IT il significato è già
-                        // certo anche prima del caricamento del LOG: mostra subito il
-                        // badge giallo, evitando una riga temporaneamente priva di colore.
                         const fallbackMs = computeUltimoAggMs(d);
                         mittenteVal = "—";
                         destinatario = "—";
-                        causaleVal = isNewTiDetection
-                          ? "NUOVA RILEVAZIONE"
-                          : "—";
+                        causaleVal = "—";
                         dataMsgVal = fallbackMs
                           ? formatDateIt(fallbackMs)
                           : "—";
-                      } else if (
-                        shouldUseInitialOggettoFallback(d) ||
-                        isNewTiDetection
-                      ) {
-                        // Nessun record LOG e pratica realmente iniziale: IT auto-assegnato o TR da survey.
+                      } else if (shouldUseInitialOggettoFallback(d)) {
+                        // Nessun record LOG e pratica realmente iniziale proveniente da TR.
                         causaleVal = "NUOVA RILEVAZIONE";
                         const creator = String(
                           d.Creator ?? d.creator ?? d.CREATOR ?? "",
@@ -6797,105 +6960,63 @@ export default function Widget(props: Props) {
                         const creatorLc = creator.toLowerCase();
                         const creatorEntry =
                           utentiMapRef.current?.get(creatorLc);
-                        if (creatorEntry) {
+                        const opRaw = d.origine_pratica ?? d.ORIGINE_PRATICA;
+                        const opN =
+                          opRaw != null && opRaw !== "" ? Number(opRaw) : null;
+
+                        if (opN === 1) {
+                          // Una rilevazione proveniente da Survey nasce e viene trasmessa
+                          // nell'esercizio della funzione TR. Con utenti multi-ruolo non
+                          // dobbiamo quindi dedurre la qualifica dalla prima assegnazione
+                          // dello username (che potrebbe essere RIT, DT, IT, ...).
+                          const trEntry = resolveUtenteForPersona(
+                            utentiMapRef.current,
+                            "TR",
+                            getAreaCodeFromRecord(d),
+                            getSettoreCodeFromRecord(d),
+                            creator,
+                          );
                           const aLbl =
-                            creatorEntry.areaCod ||
-                            (
-                              { 1: "AMM", 2: "AGR", 3: "TEC" } as Record<
-                                number,
-                                string
-                              >
-                            )[creatorEntry.area ?? 0] ||
-                            "";
+                            getAreaCodeFromRecord(d) ||
+                            getUtenteEntryAreaCode(trEntry) ||
+                            getUtenteEntryAreaCode(creatorEntry);
                           const sLbl =
-                            creatorEntry.settoreCod ||
-                            (
-                              {
-                                1: "CR",
-                                2: "GI",
-                                3: "D1",
-                                4: "D2",
-                                5: "D3",
-                                6: "D4",
-                                7: "D5",
-                                8: "D6",
-                                9: "DS",
-                              } as Record<number, string>
-                            )[creatorEntry.settore ?? 0] ||
-                            "";
-                          const rLbl = creatorEntry.ruoloCod || "";
+                            getSettoreCodeFromRecord(d) ||
+                            getUtenteEntrySettoreCode(trEntry) ||
+                            getUtenteEntrySettoreCode(creatorEntry);
+
                           mittenteVal = formatPersona(
-                            rLbl,
+                            "TR",
                             aLbl,
                             sLbl,
                             creator,
                             utentiMapRef.current,
                           );
-                        } else {
-                          mittenteVal = formatPersonaDisplay("", "");
-                        }
-                        const initialMs = computeUltimoAggMs(d);
-                        dataMsgVal = initialMs ? formatDateIt(initialMs) : "—";
-                        // Destinatario: TR (origine=1) → CS del settore con nome.
-                        // IT (origine=2) appena creato e non ancora trasmesso → resta presso il IT.
-                        const opRaw = d.origine_pratica ?? d.ORIGINE_PRATICA;
-                        const opN =
-                          opRaw != null && opRaw !== "" ? Number(opRaw) : null;
-                        if (
-                          opN === 1 &&
-                          creatorEntry &&
-                          creatorEntry.area != null
-                        ) {
-                          const aLbl =
-                            creatorEntry.areaCod ||
-                            (
-                              { 1: "AMM", 2: "AGR", 3: "TEC" } as Record<
-                                number,
-                                string
-                              >
-                            )[creatorEntry.area ?? 0] ||
-                            "";
-                          const sLbl =
-                            creatorEntry.settoreCod ||
-                            (
-                              {
-                                1: "CR",
-                                2: "GI",
-                                3: "D1",
-                                4: "D2",
-                                5: "D3",
-                                6: "D4",
-                                7: "D5",
-                                8: "D6",
-                                9: "DS",
-                              } as Record<number, string>
-                            )[creatorEntry.settore ?? 0] ||
-                            "";
-                          let csUsername = "";
-                          if (utentiMapRef.current) {
-                            for (const [uname, ue] of utentiMapRef.current) {
-                              if (
-                                getUtenteEntryRoleCode(ue) === "CS" &&
-                                getUtenteEntryAreaCode(ue) === getUtenteEntryAreaCode(creatorEntry) &&
-                                getUtenteEntrySettoreCode(ue) === getUtenteEntrySettoreCode(creatorEntry)
-                              ) {
-                                csUsername = uname;
-                                break;
-                              }
-                            }
-                          }
+
+                          // Il destinatario iniziale dipende dal contesto della pratica,
+                          // non da una delle eventuali assegnazioni personali del TR.
+                          const csEntry = resolveUtenteForPersona(
+                            utentiMapRef.current,
+                            "CS",
+                            aLbl,
+                            sLbl,
+                            "",
+                          );
                           destinatario = formatPersona(
                             "CS",
                             aLbl,
                             sLbl,
-                            csUsername,
+                            String(csEntry?.username || ""),
                             utentiMapRef.current,
                           );
-                        } else if (opN === 2) {
-                          destinatario = mittenteVal || "—";
                         } else {
+                          // Questo fallback e' destinato alle nuove rilevazioni TR; per
+                          // origini diverse non inventiamo mittente/destinatario.
+                          mittenteVal = "—";
                           destinatario = "—";
                         }
+                        const initialMs = computeUltimoAggMs(d);
+                        dataMsgVal = initialMs ? formatDateIt(initialMs) : "—";
                       } else {
                         // Nessun LOG disponibile ma il record mostra gia' avanzamenti: evita
                         // oggetti iniziali provvisori destinati a essere sostituiti dopo il refresh.
@@ -7093,11 +7214,12 @@ export default function Widget(props: Props) {
                                   title={statoLabel}
                                 >
                                   <div className="myStateCellContent">
-                                    {statoLabel === "—" ? (
-                                      <span className="myStateRoleLabel">—</span>
-                                    ) : (
-                                      <span className="chip" style={getChipStyleByLabel(statoLabel)}>{statoLabel}</span>
-                                    )}
+                                    <span
+                                      className="chip"
+                                      style={getChipStyleByLabel(statoLabel)}
+                                    >
+                                      {statoLabel}
+                                    </span>
                                     {showOperationalRole && (
                                       <>
                                         <span className="myStateCellSeparator" aria-hidden />

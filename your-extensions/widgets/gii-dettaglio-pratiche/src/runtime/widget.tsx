@@ -3245,6 +3245,18 @@ const NSD_CATEGORY_LABELS: Record<NsdCategory, string> = {
 }
 
 const NSD_UNLINKED_CASISTICA = '__GII_NSD_NON_COLLEGATA__'
+const NSD_RECUPERABLE_TESSERA_META_CODE = '__GII_TESSERA_RECUPERABILE__'
+
+function nsdIsRecuperableTesseraMetaRow (row: NsdDetailRow | null | undefined): boolean {
+  return String(row?.codice_voce_snapshot || '').trim() === NSD_RECUPERABLE_TESSERA_META_CODE &&
+    nsdNormalizeCasistica(row?.codice_casistica) === 'C104_ATTREZZATURE_DANNEGGIATE' &&
+    !!String(row?.riferimento_attrezzatura_id || '').trim()
+}
+
+function nsdAttrezzaturaInstanceTipoCode (instanceId: string): string {
+  const idx = String(instanceId || '').indexOf('::')
+  return idx >= 0 ? instanceId.slice(0, idx) : String(instanceId || '')
+}
 const NSD_CASISTICA_INFO: Record<string, { label: string; order: number }> = {
   C100_REPERIBILITA: { label: 'Art. 8 - Violazione servizio di reperibilità', order: 8 },
   C101_SPRECO_ACQUA: { label: 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica', order: 27 },
@@ -3532,19 +3544,32 @@ async function nsdLoadAttrezzatureCatalog (rawUrl: any): Promise<Map<string, str
 function nsdResolveRecuperabiliAttrezzatureLabels (rows: NsdDetailRow[], catalog: Map<string, string>): Map<string, string> {
   const out = new Map<string, string>()
   const seen = new Set<string>()
-  const items: { id: string, descrizione: string }[] = []
+  const metaById = new Map<string, NsdDetailRow>()
+  ;(rows || []).forEach(row => {
+    if (!nsdIsRecuperableTesseraMetaRow(row)) return
+    const id = String(row.riferimento_attrezzatura_id || '').trim()
+    if (id) metaById.set(id, row)
+  })
+  const items: { id: string, descrizione: string, matricola: string }[] = []
   ;(rows || []).forEach(row => {
     if (nsdNormalizeCasistica(row.codice_casistica) !== 'C104_ATTREZZATURE_DANNEGGIATE') return
     const id = String(row.riferimento_attrezzatura_id || '').trim()
     if (!id || seen.has(id)) return
     seen.add(id)
-    items.push({ id, descrizione: catalog.get(id) || id })
+    const meta = metaById.get(id)
+    items.push({
+      id,
+      descrizione: catalog.get(nsdAttrezzaturaInstanceTipoCode(id)) || id,
+      matricola: String(meta?.matricola_snapshot || '').trim()
+    })
   })
   const totalsByDescrizione: Record<string, number> = {}
   items.forEach(it => { totalsByDescrizione[it.descrizione] = (totalsByDescrizione[it.descrizione] || 0) + 1 })
   const counters: Record<string, number> = {}
   items.forEach(it => {
-    if (totalsByDescrizione[it.descrizione] > 1) {
+    if (it.matricola) {
+      out.set(it.id, `${it.descrizione} - matricola ${it.matricola}`)
+    } else if (totalsByDescrizione[it.descrizione] > 1) {
       counters[it.descrizione] = (counters[it.descrizione] || 0) + 1
       out.set(it.id, `${it.descrizione} (${counters[it.descrizione]})`)
     } else {
@@ -3835,13 +3860,15 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
     })
   }, [rows, expectedCasistiche, props.data])
 
-  const hasRealRaRows = rows.some(r => r.categoria_costo === 'RA')
+  const hasRealRaRows = rows.some(r => r.categoria_costo === 'RA' && !nsdIsRecuperableTesseraMetaRow(r))
   const overallSummary = React.useMemo(() => nsdComputeSummaryFromRows(rows, percentualeSpeseGenerali), [rows, percentualeSpeseGenerali])
   const overallTotalWithArt30 = nsdRound(overallSummary.totaleComplessivo + (!hasRealRaRows && art30Equipment.hasData ? art30Equipment.netto : 0), 2)
   // Totale "Risarcimento attrezzature" mostrato nel riepilogo: preferisce le righe RA reali
   // (nota spese vera e propria) al vecchio campo piatto, usato solo come fallback per le
   // pratiche non ancora migrate che non hanno righe RA reali.
-  const risarcimentoAttrezzatureTotale = hasRealRaRows ? overallSummary.totaleRA : (art30Equipment.hasData ? art30Equipment.netto : 0)
+  const realRaSummary = React.useMemo(() => nsdComputeSummaryFromRows(rows.filter(r => r.categoria_costo === 'RA' && !nsdIsRecuperableTesseraMetaRow(r)), 0), [rows])
+  const recuperableCauzioneTotal = nsdRound(rows.filter(nsdIsRecuperableTesseraMetaRow).reduce((sum, row) => sum + nsdSafeNum(row.importo_riga, 0), 0), 2)
+  const risarcimentoAttrezzatureTotale = hasRealRaRows ? realRaSummary.totaleRA : (art30Equipment.hasData ? art30Equipment.netto : 0)
   const showRisarcimentoAttrezzatureCard = hasRealRaRows || art30Equipment.hasData
 
   const card = (label: string, value: number, strong = false) => (
@@ -3920,7 +3947,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
   }
 
   const renderRaRows = (sourceRows: NsdDetailRow[]) => {
-    const raRows = (sourceRows || []).filter(row => row.categoria_costo === 'RA')
+    const raRows = (sourceRows || []).filter(row => row.categoria_costo === 'RA' && !nsdIsRecuperableTesseraMetaRow(row))
     if (!raRows.length) return <div style={{ fontSize: 12, color: '#6b7280', padding: '8px 2px' }}>Nessuna voce.</div>
     return (
       <div style={{ overflowX: 'auto', marginTop: 8 }}>
@@ -4033,6 +4060,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
         >
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 0 }}>
             {showRisarcimentoAttrezzatureCard && greenSummaryCard('Totale risarcimento attrezzature', risarcimentoAttrezzatureTotale)}
+            {recuperableCauzioneTotal !== 0 && greenSummaryCard('Decurtazione cauzione tessere recuperabili', recuperableCauzioneTotal)}
             {greenSummaryCard('Totale note spese', nsdRound(overallSummary.totaleAT + overallSummary.totalePR + overallSummary.totaleRU + overallSummary.totaleSL + overallSummary.totalePF, 2))}
             {greenSummaryCard(`Spese generali (${nsdMoney(overallSummary.percentualeSpeseGenerali)}%)`, overallSummary.importoSpeseGenerali)}
             {greenSummaryCard('Totale complessivo', overallTotalWithArt30, true)}
@@ -4078,6 +4106,16 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
             )}
 
             {!hasGroupContent ? null : <div style={{ display: 'grid', gap: 10 }}>
+              {(() => {
+                const meta = group.rows.find(nsdIsRecuperableTesseraMetaRow)
+                if (!meta) return null
+                const cauzione = Math.abs(nsdSafeNum(meta.prezzo_unitario_snapshot, 0))
+                return (
+                  <div style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #b9d1ea', background: '#f5f9ff', color: '#16375a', fontSize: 12, lineHeight: 1.45 }}>
+                    <b>Tessera elettronica</b> · Matricola <b>{meta.matricola_snapshot || '—'}</b> · Cauzione: <b>{meta.cauzione_decurtata ? `decurtata (€ ${nsdMoney(cauzione)})` : 'non decurtata'}</b>
+                  </div>
+                )
+              })()}
               {NSD_CATEGORIES.map(cat => {
                   const catRows = group.rows.filter(row => row.categoria_costo === cat)
                   if (!catRows.length) return null
@@ -4094,7 +4132,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
                 })}
 
               {(() => {
-                const raRows = group.rows.filter(row => row.categoria_costo === 'RA')
+                const raRows = group.rows.filter(row => row.categoria_costo === 'RA' && !nsdIsRecuperableTesseraMetaRow(row))
                 if (!raRows.length) return null
                 const total = raRows.reduce((sum, row) => sum + nsdSafeNum(row.importo_riga, 0), 0)
                 return (

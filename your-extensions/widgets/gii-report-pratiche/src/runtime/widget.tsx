@@ -50,6 +50,15 @@ function transferActionButtonStyle (disabled: boolean): React.CSSProperties {
   }
 }
 
+type GiiAssignment = {
+  ruoloCod: string
+  area: number | null
+  areaCod: 'AMM' | 'AGR' | 'TEC' | ''
+  settore: number | null
+  settoreCod: string
+  ufficio?: number | null
+}
+
 type GiiUserInfo = {
   username: string
   fullName?: string
@@ -65,6 +74,7 @@ type GiiUserInfo = {
   gruppo?: string
   isAdmin: boolean
   isWorkflowAdmin?: boolean
+  assignments: GiiAssignment[]
 }
 
 type ReportRecord = Record<string, any>
@@ -233,18 +243,18 @@ function getEffectiveRole (ruoloLabel: string, area: any, areaCod?: any): string
   return r
 }
 
-function pickRuntimeViewForUser (user: GiiUserInfo | null): RuntimeDsView | null {
-  if (!user) return null
-  const role = normalizeRoleCode(user.ruoloCod)
-  const areaCode = normalizeAreaCode(user.areaCod || user.area)
-  const settoreCode = normalizeSettoreCode(user.settoreCod || user.settore)
-  return pickGiiRuntimeView({
-    roleCode: role,
-    areaCode,
-    settoreCode,
-    isAdmin: user.isAdmin,
-    isWorkflowAdmin: user.isWorkflowAdmin
-  })
+function pickRuntimeViewsForUser (user: GiiUserInfo | null): RuntimeDsView[] {
+  if (!user) return []
+  if (user.isAdmin || user.isWorkflowAdmin) {
+    const view = pickGiiRuntimeView({ roleCode: user.ruoloCod, areaCode: user.areaCod, settoreCode: user.settoreCod, isAdmin: user.isAdmin, isWorkflowAdmin: user.isWorkflowAdmin })
+    return view ? [view] : []
+  }
+  const uniq = new Map<string, RuntimeDsView>()
+  for (const assignment of user.assignments || []) {
+    const view = pickGiiRuntimeView({ roleCode: assignment.ruoloCod, areaCode: assignment.areaCod, settoreCode: assignment.settoreCod })
+    if (view && !uniq.has(view.layerUrl)) uniq.set(view.layerUrl, view)
+  }
+  return Array.from(uniq.values())
 }
 
 function readGiiUser (): GiiUserInfo | null {
@@ -255,6 +265,16 @@ function readGiiUser (): GiiUserInfo | null {
   const settoreCod = normalizeSettoreCode(cached.settoreCod ?? cached.settore_cod ?? cached.settore)
   const isAdmin = !!cached.isAdmin || !!cached.isWorkflowAdmin || ruoloCod === 'ADMIN'
   const ruoloLabel = ruoloCod || (isAdmin ? 'ADMIN' : '')
+  const rawAssignments = Array.isArray(cached.assignments) ? cached.assignments : []
+  const assignments: GiiAssignment[] = rawAssignments.map((a: any) => ({
+    ruoloCod: normalizeRoleCode(a?.ruoloCod ?? a?.ruolo_cod),
+    area: toNumberOrNull(a?.area),
+    areaCod: normalizeAreaCode(a?.areaCod ?? a?.area_cod ?? a?.area),
+    settore: toNumberOrNull(a?.settore),
+    settoreCod: normalizeSettoreCode(a?.settoreCod ?? a?.settore_cod ?? a?.settore),
+    ufficio: toNumberOrNull(a?.ufficio)
+  })).filter((a: GiiAssignment) => !!a.ruoloCod)
+  if (!assignments.length) assignments.push({ ruoloCod: ruoloLabel, area: toNumberOrNull(cached.area), areaCod, settore: toNumberOrNull(cached.settore), settoreCod, ufficio: toNumberOrNull(cached.ufficio) })
   return {
     username: String(cached.username || '').trim(),
     fullName: String(cached.fullName || cached.full_name || cached.nome || cached.displayName || cached.username || '').trim(),
@@ -269,7 +289,8 @@ function readGiiUser (): GiiUserInfo | null {
     settoreCod,
     gruppo: String(cached.gruppo || ''),
     isAdmin,
-    isWorkflowAdmin: !!cached.isWorkflowAdmin
+    isWorkflowAdmin: !!cached.isWorkflowAdmin,
+    assignments
   }
 }
 
@@ -359,98 +380,118 @@ function getTiIstruttoriaInfo (d: any) {
   return { hasAssignedTi: !!tiUser, tiUser, higherTouched, statoTiNum, tiReturned, tiLastTouchMs, csLastTouchMs, awaitingRetakeByCs, isInTiIstruttoria: !!tiUser && !higherTouched && !tiReturned }
 }
 
+function getRecordAreaCodeForAssignment (d: any): 'AMM' | 'AGR' | 'TEC' | '' {
+  return normalizeAreaCode(pickField(d, 'area_cod') ?? pickField(d, 'area'))
+}
+
+function getRecordSettoreCodeForAssignment (d: any): string {
+  return normalizeSettoreCode(pickField(d, 'settore_cod') ?? pickField(d, 'settore') ?? pickField(d, 'id_settore'))
+}
+
+function assignmentAppliesToRecord (assignment: GiiAssignment, d: any): boolean {
+  const role = getEffectiveRole(assignment.ruoloCod || '', assignment.area, assignment.areaCod)
+  if (!role) return false
+  if (role === 'DA' || role === 'RIA' || role === 'IA') return isInFaseSanzionatoria(d)
+  const recArea = getRecordAreaCodeForAssignment(d)
+  if (assignment.areaCod && recArea && assignment.areaCod !== recArea) return false
+  if (role === 'IT' || role === 'CS') {
+    const recSettore = getRecordSettoreCodeForAssignment(d)
+    if (assignment.settoreCod && recSettore && assignment.settoreCod !== recSettore) return false
+  }
+  return true
+}
+
+function isVisibleUnderAssignment (d: any, user: GiiUserInfo, assignment: GiiAssignment): boolean {
+  if (!assignmentAppliesToRecord(assignment, d)) return false
+  const role = getEffectiveRole(assignment.ruoloCod || '', assignment.area, assignment.areaCod)
+  if (role === 'IA') return isPracticeAssignedToCurrentIa(d, { ...user, ...assignment } as any)
+  if (role !== 'IT') return true
+
+  const meUser = String(user.username || '').trim()
+  const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
+  const opRaw = d['origine_pratica']
+  const opNum = opRaw !== null && opRaw !== undefined && opRaw !== '' ? Number(opRaw) : null
+  const tiUser = String(pickField(d, 'it_assegnato_username') ?? '').trim()
+  const tiName = String(d['it_assegnato_nome'] ?? '').trim()
+  const assignedToMe = equalsUser(tiUser, meUser) || equalsUser(tiName, meUser) || (meName ? equalsUser(tiName, meName) : false)
+  const creatorVals = [d['created_user'], d['Creator'], d['creator'], d['username'], d['user_name'], d['utente'], d['utente_ins'], d['created_by'], d['submitter'], d['owner']]
+  const createdByMe = creatorVals.some(v => equalsUser(v, meUser) || (meName ? equalsUser(v, meName) : false))
+  const hasTiWorkflow = hasRuoloData(d, 'IT')
+  if (opNum === 1) {
+    if (!tiUser && !tiName && !hasTiWorkflow) return false
+    return tiUser || tiName ? assignedToMe : false
+  }
+  if (opNum === 2) {
+    if (tiUser || tiName) return assignedToMe
+    if (createdByMe) return true
+    return hasTiWorkflow
+  }
+  return true
+}
+
+function getVisibleAssignmentsForRecord (d: any, user: GiiUserInfo | null): GiiAssignment[] {
+  if (!user || user.isAdmin || user.isWorkflowAdmin) return []
+  return (user.assignments || []).filter(assignment => isVisibleUnderAssignment(d, user, assignment))
+}
+
 function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boolean {
   if (!user) return false
   if (user.isAdmin || user.isWorkflowAdmin) return true
-
-  const role = getEffectiveRole(user.ruoloCod || '', user.area, user.areaCod)
-  if (!role) return true
-
   const archVal = d['GII_arch'] ?? d['gii_arch'] ?? d['GII_ARCH']
   if (archVal !== null && archVal !== undefined && archVal !== '' && Number(archVal) === 1) return false
-
-  const areaCode = normalizeAreaCode(user.areaCod || user.area)
-  const isAmmArea = areaCode === 'AMM'
-  if (role === 'DA' || role === 'RIA' || role === 'IA') {
-    if (!isInFaseSanzionatoria(d)) return false
-    if (role === 'IA') {
-      return isPracticeAssignedToCurrentIa(d, user)
-    }
-    return true
-  }
-
-  if (role === 'IT') {
-    const meUser = String(user.username || '').trim()
-    const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
-    const opRaw = d['origine_pratica']
-    const opNum = opRaw !== null && opRaw !== undefined && opRaw !== '' ? Number(opRaw) : null
-    const tiUser = String(pickField(d, 'it_assegnato_username') ?? '').trim()
-    const tiName = String(d['it_assegnato_nome'] ?? '').trim()
-    const assignedToMe = equalsUser(tiUser, meUser) || equalsUser(tiName, meUser) || (meName ? equalsUser(tiName, meName) : false)
-    const creatorVals = [d['created_user'], d['Creator'], d['creator'], d['username'], d['user_name'], d['utente'], d['utente_ins'], d['created_by'], d['submitter'], d['owner']]
-    const createdByMe = creatorVals.some(v => equalsUser(v, meUser) || (meName ? equalsUser(v, meName) : false))
-    const hasTiWorkflow = hasRuoloData(d, 'IT')
-
-    if (opNum === 1) {
-      if (!tiUser && !tiName && !hasTiWorkflow) return false
-      if (tiUser || tiName) return assignedToMe
-      return false
-    }
-    if (opNum === 2) {
-      if (tiUser || tiName) return assignedToMe
-      if (createdByMe) return true
-      return hasTiWorkflow
-    }
-  }
-
-  return true
+  return getVisibleAssignmentsForRecord(d, user).length > 0
 }
 
 function isWaitingForIaAfterRia (d: any): boolean {
   const riaLast = getRoleLastTouchMs(d, 'RIA')
   const iaLast = getRoleLastTouchMs(d, 'IA')
-  return hasRuoloData(d, 'IA') && (
-    iaLast === null || riaLast === null || iaLast > riaLast
-  )
+  return hasRuoloData(d, 'IA') && (iaLast === null || riaLast === null || iaLast > riaLast)
 }
 
-function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
-  if (!user || user.isAdmin || user.isWorkflowAdmin) return false
-  const role = getEffectiveRole(user.ruoloCod || '', user.area, user.areaCod)
+function isAttesaMiaUnderAssignment (d: any, user: GiiUserInfo, assignment: GiiAssignment): boolean {
+  const role = getEffectiveRole(assignment.ruoloCod || '', assignment.area, assignment.areaCod)
   if (role === 'DA') return false
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
-
-  // DT: dopo la presa in carico (n===2) la pratica è ancora da gestire dal ruolo corrente.
   if (role === 'DT' && n === 2) return true
-
+  if (role === 'CS' && n === 2) return !getTiIstruttoriaInfo(d).isInTiIstruttoria
   if ((role === 'IT' || role === 'IA') && n === 2) {
-    if (role === 'IA') return isPracticeAssignedToCurrentIa(d, user)
+    if (role === 'IA') return isPracticeAssignedToCurrentIa(d, { ...user, ...assignment } as any)
     const meUser = String(user.username || '').trim()
     const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
     const tiUser = String(pickField(d, 'it_assegnato_username') ?? '').trim()
     const tiName = String(d['it_assegnato_nome'] ?? '').trim()
     return equalsUser(tiUser, meUser) || equalsUser(tiName, meUser) || (meName ? equalsUser(tiName, meName) : false)
   }
-
   if (role === 'RIA' && n === 2) return !isWaitingForIaAfterRia(d)
   if (role === 'CS' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return false
   return n === 0 || n === 1 || n === 3
 }
 
-function isAttesaAltri (d: any, user: GiiUserInfo | null): boolean {
-  if (!user || user.isAdmin || user.isWorkflowAdmin) return false
-  const role = getEffectiveRole(user.ruoloCod || '', user.area, user.areaCod)
+function isAttesaAltriUnderAssignment (d: any, user: GiiUserInfo, assignment: GiiAssignment): boolean {
+  const role = getEffectiveRole(assignment.ruoloCod || '', assignment.area, assignment.areaCod)
   if (role === 'DA') return false
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
   if (role === 'CS' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return true
-  if (role === 'DT' && n === 2) return false
-  if ((role === 'IT' || role === 'IA') && n === 2) return !isAttesaMia(d, user)
+  if ((role === 'CS' || role === 'DT') && n === 2) return false
+  if ((role === 'IT' || role === 'IA') && n === 2) return !isAttesaMiaUnderAssignment(d, user, assignment)
   if (role === 'RIA' && n === 2) return isWaitingForIaAfterRia(d)
   return n === 2 || n === 4
+}
+
+function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
+  if (!user || user.isAdmin || user.isWorkflowAdmin) return false
+  return getVisibleAssignmentsForRecord(d, user).some(assignment => isAttesaMiaUnderAssignment(d, user, assignment))
+}
+
+function isAttesaAltri (d: any, user: GiiUserInfo | null): boolean {
+  if (!user || user.isAdmin || user.isWorkflowAdmin) return false
+  const assignments = getVisibleAssignmentsForRecord(d, user)
+  if (assignments.some(assignment => isAttesaMiaUnderAssignment(d, user, assignment))) return false
+  return assignments.some(assignment => isAttesaAltriUnderAssignment(d, user, assignment))
 }
 
 function labelEsito (v: any): string {
@@ -986,29 +1027,34 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }, [])
 
-  const view = React.useMemo(() => pickRuntimeViewForUser(user), [user?.username, user?.ruoloLabel, user?.areaCod, user?.settoreCod, user?.isAdmin, user?.isWorkflowAdmin])
+  const views = React.useMemo(() => pickRuntimeViewsForUser(user), [user])
+  const viewsKey = React.useMemo(() => views.map(v => v.layerUrl).sort().join('|'), [views])
   const effectiveRole = getEffectiveRole(user?.ruoloCod || '', user?.area, user?.areaCod)
 
   // Domini ufficiali AGOL del layer/vista runtime: fonte primaria per label Area/Settore.
   // I record continuano a determinare quali opzioni mostrare; i domini determinano come chiamarle.
   React.useEffect(() => {
     let cancelled = false
-    const layerUrl = String(view?.layerUrl || '').trim()
-    if (!layerUrl) {
+    const layerUrls = views.map(v => String(v.layerUrl || '').trim()).filter(Boolean)
+    if (!layerUrls.length) {
       setDomainLabels(EMPTY_DOMAIN_LABELS)
       return () => { cancelled = true }
     }
     ;(async () => {
       try {
-        const labels = await loadDomainLabelMaps(layerUrl)
-        if (!cancelled) setDomainLabels(labels)
+        const merged = cloneEmptyDomainLabels()
+        for (const layerUrl of layerUrls) {
+          const labels = await loadDomainLabelMaps(layerUrl)
+          for (const group of ['area', 'settore', 'ruolo'] as DomainLabelGroup[]) Object.assign(merged[group], labels[group])
+        }
+        if (!cancelled) setDomainLabels(merged)
       } catch (ex) {
         console.warn('[GII-Report] Domini AGOL non disponibili, uso fallback locale:', ex)
         if (!cancelled) setDomainLabels(EMPTY_DOMAIN_LABELS)
       }
     })()
     return () => { cancelled = true }
-  }, [view?.layerUrl])
+  }, [viewsKey])
 
   React.useEffect(() => {
     let cancelled = false
@@ -1018,16 +1064,24 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         setRecords([])
         return
       }
-      if (!view) {
+      if (!views.length) {
         setRecords([])
         setError('Non è stato possibile individuare le pratiche di competenza.')
         return
       }
       setLoading(true)
       try {
-        const raw = await queryLayer(view, cfg.whereClause || '1=1', Number(cfg.pageSize || 2000))
+        const chunks = await Promise.all(views.map(runtimeView => queryLayer(runtimeView, cfg.whereClause || '1=1', Number(cfg.pageSize || 2000))))
         if (cancelled) return
-        setRecords(raw.filter(r => isRecordVisibleForCurrentUser(r, user)))
+        const uniq = new Map<string, ReportRecord>()
+        let fallbackIndex = 0
+        for (const record of chunks.flat()) {
+          const gid = String(record?.GlobalID ?? record?.globalid ?? record?.GLOBALID ?? '').trim().replace(/[{}]/g, '').toLowerCase()
+          const oid = String(record?.OBJECTID ?? record?.objectid ?? record?.ObjectId ?? '').trim()
+          const key = gid ? `gid:${gid}` : (oid ? `oid:${oid}` : `row:${fallbackIndex++}`)
+          if (!uniq.has(key)) uniq.set(key, record)
+        }
+        setRecords(Array.from(uniq.values()).filter(r => isRecordVisibleForCurrentUser(r, user)))
         setLastLoad(Date.now())
         setPage(1)
       } catch (ex: any) {
@@ -1040,7 +1094,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     run()
     return () => { cancelled = true }
-  }, [view?.layerUrl, user?.username, user?.ruoloLabel, user?.areaCod, user?.settoreCod, user?.isAdmin, cfg.whereClause, cfg.pageSize, nonce])
+  }, [viewsKey, user, cfg.whereClause, cfg.pageSize, nonce])
 
   const staleMs = Math.max(1, Number(cfg.staleDays || 15)) * 24 * 60 * 60 * 1000
   const now = Date.now()
@@ -1358,7 +1412,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               <FieldLabel cfg={cfg}>Situazione</FieldLabel>
               <Select value={situationFilter} onChange={v => setSituationFilter(v as SituationFilter)} cfg={cfg}>
                 <option value='tutte'>Tutte</option>
-                <option value='da_gestire'>Da gestire</option>
+                <option value='da_gestire'>In attesa mia</option>
                 <option value='attesa_altri'>In attesa di altri</option>
                 <option value='ferme'>Ferme</option>
                 <option value='sanzionatoria'>Fase sanzionatoria</option>

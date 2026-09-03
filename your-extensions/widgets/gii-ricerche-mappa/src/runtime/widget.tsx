@@ -336,17 +336,30 @@ function collectMapLayers(view: any): any[] {
   try { view?.map?.layers?.forEach?.((l: any) => push(l)) } catch {}
   return out
 }
-function readGiiUserForMapVisibility (): { username: string; fullName: string; ruoloCod: string; profiloCod: string; areaCod: string; settoreCod: string; isAdmin: boolean } | null {
+type GiiMapVisibilityAssignment = { ruoloCod: string; profiloCod: string; areaCod: string; settoreCod: string }
+type GiiMapVisibilityUser = { username: string; fullName: string; ruoloCod: string; profiloCod: string; areaCod: string; settoreCod: string; isAdmin: boolean; assignments: GiiMapVisibilityAssignment[] }
+
+function readGiiUserForMapVisibility (): GiiMapVisibilityUser | null {
   const raw: any = (window as any).__giiUserRole
   if (!raw?.username) return null
+  const normalizeAssignment = (a: any): GiiMapVisibilityAssignment => ({
+    ruoloCod: String(a?.ruoloCod || a?.ruolo_cod || '').trim().toUpperCase(),
+    profiloCod: String(a?.profiloCod || a?.profilo_cod || '').trim().toUpperCase(),
+    areaCod: String(a?.areaCod || a?.area_cod || '').trim().toUpperCase(),
+    settoreCod: String(a?.settoreCod || a?.settore_cod || '').trim().toUpperCase()
+  })
+  const fallback = normalizeAssignment(raw)
+  const assignments = (Array.isArray(raw.assignments) ? raw.assignments.map(normalizeAssignment) : []).filter((a: GiiMapVisibilityAssignment) => !!(a.profiloCod || a.ruoloCod))
+  if (!assignments.length) assignments.push(fallback)
   return {
     username: String(raw.username || '').trim(),
     fullName: String(raw.fullName || raw.full_name || raw.nome || raw.displayName || '').trim(),
-    ruoloCod: String(raw.ruoloCod || raw.ruolo_cod || '').trim(),
-    profiloCod: String(raw.profiloCod || '').trim(),
-    areaCod: String(raw.areaCod || raw.area_cod || '').trim().toUpperCase(),
-    settoreCod: String(raw.settoreCod || raw.settore_cod || '').trim().toUpperCase(),
-    isAdmin: !!raw.isAdmin
+    ruoloCod: fallback.ruoloCod,
+    profiloCod: fallback.profiloCod,
+    areaCod: fallback.areaCod,
+    settoreCod: fallback.settoreCod,
+    isAdmin: !!raw.isAdmin || !!raw.isWorkflowAdmin || fallback.ruoloCod === 'ADMIN',
+    assignments
   }
 }
 
@@ -360,20 +373,13 @@ function sqlQuoteMapVisibility (v: string): string {
 // altrove — RIT/DT vedono tutta la loro area, CS solo il proprio settore, IT solo le
 // pratiche assegnate a lui nel proprio settore, DA/RIA tutta l'area AMM in fase
 // sanzionatoria, IA solo le proprie pratiche assegnate in fase sanzionatoria.
-function buildRoleVisibilityWhereClause (user: ReturnType<typeof readGiiUserForMapVisibility>): string {
-  if (!user) return '1=0'
-  if (user.isAdmin) return '1=1'
-  const role = String(user.profiloCod || user.ruoloCod || '').toUpperCase().trim()
-  const area = user.areaCod
-  const settore = user.settoreCod
+function buildRoleVisibilityWhereClauseForAssignment (user: GiiMapVisibilityUser, assignment: GiiMapVisibilityAssignment): string {
+  const role = String(assignment.profiloCod || assignment.ruoloCod || '').toUpperCase().trim()
+  const area = assignment.areaCod
+  const settore = assignment.settoreCod
   const me = sqlQuoteMapVisibility(user.username)
   if (!role) return '1=0'
 
-  // I campi stato_*/esito_* sono interi: confrontarli con la stringa vuota
-  // produce query 400 (in particolare nel formato PBF usato dal MapView).
-  // I campi numerici non vanno confrontati con la stringa vuota, ma il solo
-  // IS NOT NULL non basta: il valore 0 indica nodo non attivo. I campi della
-  // determinazione sono testuali e mantengono invece il controllo <> ''.
   const faseSanzionatoriaClause =
     "((stato_RIA IS NOT NULL AND stato_RIA <> 0) OR " +
     "(esito_RIA IS NOT NULL AND esito_RIA <> 0) OR " +
@@ -382,30 +388,12 @@ function buildRoleVisibilityWhereClause (user: ReturnType<typeof readGiiUserForM
     "(determinazione_stato IS NOT NULL AND determinazione_stato <> '') OR " +
     "(determinazione_numero IS NOT NULL AND determinazione_numero <> ''))"
 
-  // area_cod identifica l'area tecnica originaria della pratica e non viene
-  // trasformato in AMM al passaggio alla fase sanzionatoria. Per i ruoli AMM
-  // il gate corretto è quindi la presenza di dati amministrativi significativi.
-  if (role === 'DA' || role === 'RIA') {
-    return faseSanzionatoriaClause
-  }
-
-  if (role === 'IA') {
-    return `${faseSanzionatoriaClause} AND ${buildIaAssignmentWhereClause(user)}`
-  }
-
-  if ((role === 'RIT' || role === 'DT') && (area === 'AGR' || area === 'TEC')) {
-    return `UPPER(area_cod) = '${area}'`
-  }
-
-  if (role === 'CS' && (area === 'AGR' || area === 'TEC') && settore) {
-    return `UPPER(area_cod) = '${area}' AND UPPER(settore_cod) = '${settore}'`
-  }
+  if (role === 'DA' || role === 'RIA') return faseSanzionatoriaClause
+  if (role === 'IA') return `${faseSanzionatoriaClause} AND ${buildIaAssignmentWhereClause({ ...user, ...assignment } as any)}`
+  if ((role === 'RIT' || role === 'DT') && (area === 'AGR' || area === 'TEC')) return `UPPER(area_cod) = '${area}'`
+  if (role === 'CS' && (area === 'AGR' || area === 'TEC') && settore) return `UPPER(area_cod) = '${area}' AND UPPER(settore_cod) = '${settore}'`
 
   if (role === 'IT' && (area === 'AGR' || area === 'TEC') && settore) {
-    // GII_INFRAZIONI_VIEW_ALL espone Creator ma non created_user. Inoltre la
-    // visibilità deve replicare l'elenco: una rilevazione TR è visibile all'IT
-    // soltanto dopo assegnazione nominativa; una rilevazione nata dall'IT resta
-    // al suo autore finché non esiste un'assegnazione esplicita, che prevale.
     const assigned = `UPPER(it_assegnato_username) = UPPER('${me}')`
     const notAssigned = `(it_assegnato_username IS NULL OR it_assegnato_username = '')`
     const createdByMe = `UPPER(Creator) = UPPER('${me}')`
@@ -415,9 +403,22 @@ function buildRoleVisibilityWhereClause (user: ReturnType<typeof readGiiUserForM
     return `UPPER(area_cod) = '${area}' AND UPPER(settore_cod) = '${settore}' AND ${itScope}`
   }
 
-  // Profilo non riconosciuto: fail closed. Finché lo Header non pubblica un profilo
-  // valido, la mappa non deve mostrare pratiche appartenenti ad altri ruoli.
   return '1=0'
+}
+
+// La visibilità complessiva è l'unione delle singole assegnazioni pubblicate
+// dall'Header. In questo modo un utente D1+D2 (o con più ruoli) non resta
+// confinato alla sola assegnazione principale.
+function buildRoleVisibilityWhereClause (user: ReturnType<typeof readGiiUserForMapVisibility>): string {
+  if (!user) return '1=0'
+  if (user.isAdmin) return '1=1'
+  const clauses = Array.from(new Set((user.assignments || [])
+    .map(assignment => buildRoleVisibilityWhereClauseForAssignment(user, assignment))
+    .filter(clause => clause && clause !== '1=0')))
+  if (!clauses.length) return '1=0'
+  if (clauses.includes('1=1')) return '1=1'
+  if (clauses.length === 1) return clauses[0]
+  return clauses.map(clause => `(${clause})`).join(' OR ')
 }
 
 
@@ -432,13 +433,18 @@ function combineGiiMapVisibilityWhere (baseWhere: string, roleWhere: string): st
 function getGiiMapVisibilityUserKey (): string {
   const user = readGiiUserForMapVisibility()
   if (!user) return ''
+  const assignmentKey = (user.assignments || [])
+    .map(a => [a.profiloCod, a.ruoloCod, a.areaCod, a.settoreCod].join(':'))
+    .sort()
+    .join(',')
   return [
     user.username.toLowerCase(),
     user.profiloCod.toUpperCase(),
     user.ruoloCod.toUpperCase(),
     user.areaCod.toUpperCase(),
     user.settoreCod.toUpperCase(),
-    user.isAdmin ? '1' : '0'
+    user.isAdmin ? '1' : '0',
+    assignmentKey
   ].join('|')
 }
 

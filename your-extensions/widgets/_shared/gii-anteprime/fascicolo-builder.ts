@@ -167,12 +167,32 @@ async function ensureUtentiCache (): Promise<Map<string, UtenteCached> | null> {
       const a = f.attributes || {}
       const username = String(a.username || '').trim().toLowerCase()
       if (!username) continue
-      map.set(username, a as UtenteCached)
+
+      // Uno stesso username può avere più assegnazioni/ruoli. La cache del
+      // fascicolo non deve collassarle sulla sola chiave username, altrimenti
+      // le ricerche successive per ruolo/area (es. RIT e DT) possono perdere
+      // l'assegnazione corretta. Manteniamo una chiave canonica per la ricerca
+      // anagrafica per username e una voce distinta per ogni ulteriore
+      // assegnazione, come già avviene nell'anteprima del rapporto.
+      if (!map.has(username)) {
+        map.set(username, a as UtenteCached)
+      } else {
+        let suffix = 2
+        while (map.has(`${username}::${suffix}`)) suffix += 1
+        map.set(`${username}::${suffix}`, a as UtenteCached)
+      }
     }
     return map
   } catch {
     return null
   }
+}
+
+const NS_RECUPERABLE_TESSERA_META_CODE = '__GII_TESSERA_RECUPERABILE__'
+
+function isRecuperableTesseraMetaRowFascicolo (row: any): boolean {
+  return String(row?.codice_voce_snapshot || '').trim() === NS_RECUPERABLE_TESSERA_META_CODE &&
+    !!String(row?.riferimento_attrezzatura_id || '').trim()
 }
 
 async function buildRapportoSection (attrs: Record<string, any>, notaSpeseConfig: NotaSpeseConfig | undefined, selection: FascicoloDocumentSelection): Promise<Array<{ blob: Blob, fileName: string }>> {
@@ -197,11 +217,11 @@ async function buildRapportoSection (attrs: Record<string, any>, notaSpeseConfig
   if (selectedGroups.length) {
     const art30Summary = buildArt30RapportoSummary(attrs)
     const luogoData = 'Cagliari, ' + new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
-    const hasRealRaRows = selectedGroups.some(group => ((group.rows as any)?.RA || []).length > 0)
+    const hasRealRaRows = selectedGroups.some(group => (((group.rows as any)?.RA || []) as any[]).some(row => !isRecuperableTesseraMetaRowFascicolo(row)))
 
     for (let i = 0; i < selectedGroups.length; i++) {
       const group = selectedGroups[i]
-      const groupHasRealRaRows = ((group.rows as any)?.RA || []).length > 0
+      const groupHasRealRaRows = (((group.rows as any)?.RA || []) as any[]).some(row => !isRecuperableTesseraMetaRowFascicolo(row))
       const nsData: NotaSpeseData = {
         cod_pratica: map.cod_pratica || '',
         area_label: map.area_label || '',

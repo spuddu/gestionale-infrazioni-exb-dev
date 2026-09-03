@@ -2022,44 +2022,63 @@ function ActionsPanel (props: {
     const code = `Art${art}`
     const norma = String(pickAttrCI(attrs, ['norma_violata3', 'NORMA_VIOLATA3']) || '')
     const multi = new Set(norma.split(/\s+/).filter(Boolean))
-    if (!multi.has(code) && !isFlagSelectedLocal(pickAttrCI(attrs, [`v_art${String(art).padStart(2, '0')}`, `V_ART${String(art).padStart(2, '0')}`, `v_art${art}`, `V_ART${art}`]))) return false
-    if (art === 30) return art30HasRecuperabileForNotaSpeseCheck(attrs)
-    return true
+    return multi.has(code) || isFlagSelectedLocal(pickAttrCI(attrs, [`v_art${String(art).padStart(2, '0')}`, `V_ART${String(art).padStart(2, '0')}`, `v_art${art}`, `V_ART${art}`]))
   }
 
-  // Art. 30 richiede la Nota spese solo se tra le attrezzature selezionate ce n'è almeno una
-  // con stato "Recuperabile" — se sono tutte "Non recuperabile" (risarcimento forfettario,
-  // già coperto dal pannello "Risarcimento attrezzatura"), non ha senso attendersi anche una
-  // nota spese. Mirror della stessa logica in gii-editing-tec.
-  const art30HasRecuperabileForNotaSpeseCheck = (attrs: any): boolean => {
+  type Art30SelectionCounts = { recuperabili: number; nonRecuperabili: number }
+
+  const getArt30SelectionCountsForNotaSpeseCheck = (attrs: any): Art30SelectionCounts => {
     const raw = String(pickAttrCI(attrs, ['attrezzature_risarcimento_dettaglio']) || '')
+    let recuperabili = 0
+    let nonRecuperabili = 0
     for (const line of raw.split(/\r?\n/)) {
       const text = line.trim()
       if (!text || !/Stato:/i.test(text)) continue
-      if (/Stato:\s*Recuperabile\b/i.test(text)) return true
+      if (/Stato:\s*Non recuperabile\b/i.test(text)) nonRecuperabili += 1
+      else if (/Stato:\s*Recuperabile\b/i.test(text)) recuperabili += 1
     }
-    return false
+    return { recuperabili, nonRecuperabili }
+  }
+
+  const isValidTesseraMatricolaForNotaSpeseCheck = (value: any): boolean => /^\d{5}$/.test(String(value || '').trim())
+  const NS_RECUPERABLE_TESSERA_META_CODE_CHECK = '__GII_TESSERA_RECUPERABILE__'
+  const isRecuperableTesseraMetaForNotaSpeseCheck = (attrs: any): boolean => {
+    return String(attrs?.codice_voce_snapshot || '').trim() === NS_RECUPERABLE_TESSERA_META_CODE_CHECK &&
+      String(attrs?.codice_casistica || '').trim() === 'C104_ATTREZZATURE_DANNEGGIATE' &&
+      !!String(attrs?.riferimento_attrezzatura_id || '').trim()
+  }
+
+  const isTesseraElettronicaForNotaSpeseCheck = (categoria: any, descrizione: any): boolean => {
+    if (String(categoria || '').trim().toUpperCase() !== 'RA') return false
+    const key = String(descrizione ?? '')
+      .trim()
+      .toLocaleUpperCase('it-IT')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^A-Z0-9]+/g, '_')
+    return key.includes('TESSERA')
   }
 
   const getSelectedNotaSpeseCasisticheCheck = (attrs: any): NotaSpeseCasisticaCheck[] => {
     return NOTE_SPESE_CASISTICHE_CHECK.filter(opt => hasArtSelectedForNotaSpeseCheck(attrs, opt.art)).sort((a, b) => a.art - b.art)
   }
 
-  type NotaSpeseCasisticaStatus = { total: number; rows: number; incompleteRows: number }
+  type NotaSpeseCasisticaStatus = { total: number; ordinaryTotal: number; raTotal: number; rows: number; incompleteRows: number }
+  type NotaSpeseCheckQueryResult = { statuses: Record<string, NotaSpeseCasisticaStatus>; duplicateMatricole: string[] }
 
-  const queryNotaSpeseStatusByCasistica = async (parentGlobalId: string): Promise<Record<string, NotaSpeseCasisticaStatus>> => {
+  const queryNotaSpeseStatusByCasistica = async (parentGlobalId: string): Promise<NotaSpeseCheckQueryResult> => {
     const detailUrl = String(props.nsConfig?.detailUrl || '').trim()
     const gid = String(parentGlobalId || '').trim()
-    if (!detailUrl || !gid) return {}
+    if (!detailUrl || !gid) return { statuses: {}, duplicateMatricole: [] }
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
     const fl = new FeatureLayer({ url: detailUrl, outFields: ['*'] })
     if (typeof fl.load === 'function') { try { await fl.load() } catch {} }
     const q = fl.createQuery ? fl.createQuery() : {}
     q.where = `parent_globalid = ${sqlQuote(gid)}`
-    q.outFields = ['codice_casistica', 'importo_riga', 'quantita', 'riferimento_attrezzatura_id']
+    q.outFields = ['*']
     q.returnGeometry = false
     const res = await fl.queryFeatures(q)
     const statuses: Record<string, NotaSpeseCasisticaStatus> = {}
+    const matricolaCounts = new Map<string, number>()
     ;(res?.features || []).forEach((f: any) => {
       const a = f?.attributes || {}
       const code = String(a.codice_casistica || '').trim()
@@ -2067,16 +2086,39 @@ function ActionsPanel (props: {
       const value = Number(a.importo_riga)
       const qty = Number(a.quantita)
       const ref = String(a.riferimento_attrezzatura_id || '').trim()
+      const isMeta = isRecuperableTesseraMetaForNotaSpeseCheck(a)
+      const isTessera = isMeta || isTesseraElettronicaForNotaSpeseCheck(a.categoria_costo, a.descrizione_snapshot)
+      const matricola = String(a.matricola_snapshot || '').trim()
+      const tesseraMatricolaInvalida = isTessera && !isValidTesseraMatricolaForNotaSpeseCheck(matricola)
+      if (isTessera && matricola) matricolaCounts.set(matricola, (matricolaCounts.get(matricola) || 0) + 1)
+
+      // La riga tecnica della tessera recuperabile può avere importo 0 (cauzione non decurtata)
+      // o negativo (cauzione decurtata): in quel caso l'unico requisito strutturale è la
+      // matricola valida. Le righe di costo reali restano invece obbligatoriamente positive.
+      const rowIncomplete = isMeta
+        ? tesseraMatricolaInvalida
+        : (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(value) || value <= 0 || tesseraMatricolaInvalida)
       const keys = ref ? [code, `${code}::${ref}`] : [code]
       keys.forEach(key => {
-        const cur = statuses[key] || { total: 0, rows: 0, incompleteRows: 0 }
-        cur.total += Number.isFinite(value) ? value : 0
+        const cur = statuses[key] || { total: 0, ordinaryTotal: 0, raTotal: 0, rows: 0, incompleteRows: 0 }
+        const safeValue = Number.isFinite(value) ? value : 0
+        cur.total += safeValue
+        if (String(a.categoria_costo || '').trim().toUpperCase() === 'RA') cur.raTotal += safeValue
+        else cur.ordinaryTotal += safeValue
         cur.rows += 1
-        if (!Number.isFinite(qty) || qty <= 0) cur.incompleteRows += 1
+        if (rowIncomplete) cur.incompleteRows += 1
         statuses[key] = cur
       })
     })
-    return statuses
+    const duplicateMatricole = Array.from(matricolaCounts.entries()).filter(([, count]) => count > 1).map(([value]) => value).sort()
+    return { statuses, duplicateMatricole }
+  }
+
+  const notaSpeseStatusNetTotal = (status: NotaSpeseCasisticaStatus | undefined, percentualeSpeseGenerali: number): number => {
+    const st = status || { total: 0, ordinaryTotal: 0, raTotal: 0, rows: 0, incompleteRows: 0 }
+    const ordinary = Number(st.ordinaryTotal || 0)
+    const pct = Number.isFinite(percentualeSpeseGenerali) ? percentualeSpeseGenerali : 0
+    return ordinary + (ordinary * pct / 100) + Number(st.raTotal || 0)
   }
 
   // Attrezzature recuperabili di Art.30 con il relativo riferimento_attrezzatura_id reale
@@ -2092,28 +2134,36 @@ function ActionsPanel (props: {
     if (typeof fl.load === 'function') { try { await fl.load() } catch {} }
     const q = fl.createQuery ? fl.createQuery() : {}
     q.where = `parent_globalid = ${sqlQuote(gid)}`
-    q.outFields = ['codice_casistica', 'riferimento_attrezzatura_id']
+    q.outFields = ['codice_casistica', 'riferimento_attrezzatura_id', 'codice_voce_snapshot', 'matricola_snapshot']
     q.returnGeometry = false
     const res = await fl.queryFeatures(q)
     const seen = new Set<string>()
     const ids: string[] = []
+    const matricolaById = new Map<string, string>()
     ;(res?.features || []).forEach((f: any) => {
       const a = f?.attributes || {}
       if (String(a.codice_casistica || '').trim() !== 'C104_ATTREZZATURE_DANNEGGIATE') return
       const id = String(a.riferimento_attrezzatura_id || '').trim()
-      if (!id || seen.has(id)) return
+      if (!id) return
+      if (String(a.codice_voce_snapshot || '').trim() === NS_RECUPERABLE_TESSERA_META_CODE_CHECK) {
+        const matricola = String(a.matricola_snapshot || '').trim()
+        if (matricola) matricolaById.set(id, matricola)
+      }
+      if (seen.has(id)) return
       seen.add(id)
       ids.push(id)
     })
     if (ids.length === 0) return []
     const catalog = await loadAttrezzatureCatalogPdf(String(props.nsConfig?.attrezzatureParametriUrl || '').trim())
-    const items = ids.map(id => ({ id, descrizione: catalog.get(attrezzaturaInstanceTipoCodePdf(id)) || id }))
+    const items = ids.map(id => ({ id, descrizione: catalog.get(attrezzaturaInstanceTipoCodePdf(id)) || id, matricola: matricolaById.get(id) || '' }))
     const totalsByDescrizione: Record<string, number> = {}
     items.forEach(item => { totalsByDescrizione[item.descrizione] = (totalsByDescrizione[item.descrizione] || 0) + 1 })
     const counters: Record<string, number> = {}
     return items.map(item => {
       let label: string
-      if (totalsByDescrizione[item.descrizione] > 1) {
+      if (item.matricola) {
+        label = `${item.descrizione} - matricola ${item.matricola}`
+      } else if (totalsByDescrizione[item.descrizione] > 1) {
         counters[item.descrizione] = (counters[item.descrizione] || 0) + 1
         label = `${item.descrizione} (${counters[item.descrizione]})`
       } else {
@@ -2124,35 +2174,92 @@ function ActionsPanel (props: {
   }
 
   const findNotaSpeseWarnings = async (): Promise<{ blocking: string[]; confirmable: string[] }> => {
-    // Avvisi persistenti anche negli inoltri successivi del flusso tecnico:
-    // IT → CS, CS → RIT e RIT → DT.
-    if (!(role === 'IT' || role === 'CS' || role === 'RIT')) return { blocking: [], confirmable: [] }
+    // Controllo ad ogni inoltro della fase tecnica: IT → CS, CS → RIT, RIT → DT e DT → RIA.
+    // Artt. 8 e 27: nota spese facoltativa (assenza/zero = avviso confermabile).
+    // Artt. 30 e 39: quantificazione del rimborso/risarcimento obbligatoria (assenza/zero = blocco).
+    if (!(role === 'IT' || role === 'CS' || role === 'RIT' || role === 'DT')) return { blocking: [], confirmable: [] }
     const selected = getSelectedNotaSpeseCasisticheCheck(data)
     if (selected.length === 0) return { blocking: [], confirmable: [] }
     const parentGlobalId = String(pickAttrCI(data, ['GlobalID', 'globalid', 'GLOBALID']) || '').trim()
-    const statuses = await queryNotaSpeseStatusByCasistica(parentGlobalId)
+    const checkData = await queryNotaSpeseStatusByCasistica(parentGlobalId)
+    const statuses = checkData.statuses
     const blocking: string[] = []
     const confirmable: string[] = []
-    for (const opt of selected) {
-      if (opt.codice === 'C104_ATTREZZATURE_DANNEGGIATE') {
-        const refs = await getRecuperabiliAttrezzatureRefs(parentGlobalId)
-        refs.forEach(ref => {
-          const key = `${opt.codice}::${ref.id}`
-          const st = statuses[key] || { total: 0, rows: 0, incompleteRows: 0 }
-          if (st.incompleteRows > 0) {
-            blocking.push(`${opt.label} — ${ref.label}: ${st.incompleteRows} ${st.incompleteRows === 1 ? 'riga senza quantità o con quantità pari a zero' : 'righe senza quantità o con quantità pari a zero'}`)
-          }
-        })
-        continue
-      }
-      const st = statuses[opt.codice] || { total: 0, rows: 0, incompleteRows: 0 }
-      if (st.incompleteRows > 0) {
-        blocking.push(`${opt.label}: ${st.incompleteRows} ${st.incompleteRows === 1 ? 'riga senza quantità o con quantità pari a zero' : 'righe senza quantità o con quantità pari a zero'}`)
-        continue
-      }
-      if (Number(st.total || 0) <= 0) confirmable.push(`${opt.label}: 0,00 €`)
+    const nsPercent = Number(pickAttrCI(data, ['ns_spese_generali_perc']))
+
+    if (checkData.duplicateMatricole.length > 0) {
+      blocking.push(`Matricole tessere duplicate nella stessa pratica: ${checkData.duplicateMatricole.join(', ')}.`)
     }
-    return { blocking, confirmable }
+
+    for (const opt of selected) {
+      const st = statuses[opt.codice] || { total: 0, ordinaryTotal: 0, raTotal: 0, rows: 0, incompleteRows: 0 }
+
+      // Una nota spese iniziata ma strutturalmente incompleta non può essere inoltrata,
+      // anche quando la nota spese sarebbe facoltativa: va completata oppure eliminata.
+      if (st.incompleteRows > 0) {
+        blocking.push(`${opt.label}: ${st.incompleteRows} ${st.incompleteRows === 1 ? 'riga incompleta' : 'righe incomplete'} (quantità/importo non validi o matricola assente)`)
+      }
+
+      if (opt.art === 30) {
+        const counts = getArt30SelectionCountsForNotaSpeseCheck(data)
+        const refs = await getRecuperabiliAttrezzatureRefs(parentGlobalId)
+
+        if (counts.recuperabili > 0) {
+          if (refs.length < counts.recuperabili) {
+            const mancanti = counts.recuperabili - refs.length
+            blocking.push(`${opt.label}: manca la quantificazione della nota spese per ${mancanti} ${mancanti === 1 ? 'attrezzatura recuperabile' : 'attrezzature recuperabili'}.`)
+          }
+          refs.forEach(ref => {
+            const refStatus = statuses[`${opt.codice}::${ref.id}`] || { total: 0, ordinaryTotal: 0, raTotal: 0, rows: 0, incompleteRows: 0 }
+            const netTotal = notaSpeseStatusNetTotal(refStatus, nsPercent)
+
+            // La quantificazione del ripristino resta obbligatoria per la singola attrezzatura
+            // recuperabile: il controllo va fatto sulle voci economiche reali, senza lasciare che
+            // l'eventuale decurtazione della cauzione trasformi una nota non compilata in un caso
+            // ambiguo. Il totale netto, invece, può essere pari a zero ma non può essere negativo.
+            if (Number(refStatus.ordinaryTotal || 0) <= 0) {
+              blocking.push(`${opt.label} — ${ref.label}: rimborso/ripristino non quantificato.`)
+            }
+            if (netTotal < 0) {
+              blocking.push(`${opt.label} — ${ref.label}: totale della nota spese negativo dopo la decurtazione della cauzione.`)
+            }
+          })
+        }
+
+        if (counts.nonRecuperabili > 0) {
+          const rimborso = Number(pickAttrCI(data, ['attrezzature_risarcimento_importo']))
+          if (!Number.isFinite(rimborso) || rimborso <= 0) {
+            blocking.push(`${opt.label}: risarcimento delle attrezzature non recuperabili non quantificato.`)
+          }
+        }
+
+        // Copre anche dati legacy o Art.30 selezionato senza dettaglio attrezzature: deve comunque
+        // esistere una quantificazione positiva del rimborso/risarcimento prima dell'inoltro.
+        if (counts.recuperabili === 0 && counts.nonRecuperabili === 0) {
+          const rimborso = Number(pickAttrCI(data, ['attrezzature_risarcimento_importo']))
+          if (notaSpeseStatusNetTotal(st, nsPercent) <= 0 && (!Number.isFinite(rimborso) || rimborso <= 0)) {
+            blocking.push(`${opt.label}: rimborso/risarcimento non quantificato.`)
+          }
+        }
+        continue
+      }
+
+      if (opt.art === 39) {
+        if (Number(st.total || 0) <= 0) {
+          blocking.push(`${opt.label}: risarcimento danni non quantificato.`)
+        }
+        continue
+      }
+
+      // Art. 8 e Art. 27: la Nota spese è facoltativa SOLO se non è stata predisposta.
+      // Nessuna riga = avviso confermabile. Se invece esiste almeno una riga, la Nota spese
+      // è stata predisposta e deve essere completa: eventuali righe a quantità/importo zero
+      // sono già intercettate sopra come bloccanti.
+      if (st.rows === 0) confirmable.push(`${opt.label}: nota spese non predisposta`)
+      else if (Number(st.total || 0) <= 0) blocking.push(`${opt.label}: nota spese predisposta ma priva di importo.`)
+    }
+
+    return { blocking: Array.from(new Set(blocking)), confirmable: Array.from(new Set(confirmable)) }
   }
 
   type CycleContext = { parentGlobalId: string, area: string, settore: string, username: string }
@@ -6061,7 +6168,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     setLoading(true)
     setMsg(null)
 
-    if (role === 'IT' || role === 'CS' || role === 'RIT') {
+    if (role === 'IT' || role === 'CS' || role === 'RIT' || role === 'DT') {
       try {
         const warnings = await findNotaSpeseWarnings()
         if (warnings.blocking.length > 0) {
@@ -6528,15 +6635,15 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
         onMouseDown={(e) => { e.stopPropagation() }}
       >
         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', borderRadius: 10, padding: '10px 12px' }}>
-          <div style={{ fontWeight: 800, fontSize: 18, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Nota spese incompleta</div>
+          <div style={{ fontWeight: 800, fontSize: 18, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Nota spese da completare</div>
           <div style={{ marginTop: 6, fontSize: 15, lineHeight: 1.45 }}>
-            Non è possibile procedere con l’inoltro perché sono presenti righe di nota spese senza quantità o con quantità pari a zero.
+            Non è possibile procedere con l’inoltro perché una nota spese è incompleta oppure manca una quantificazione obbligatoria del rimborso/risarcimento.
           </div>
         </div>
         <ul style={{ margin: 0, paddingLeft: 22, display: 'grid', gap: 5, fontSize: 15, color: '#374151' }}>
           {incompleteNotaSpeseWarning.map((m, i) => <li key={i}>{m}</li>)}
         </ul>
-        <div style={{ fontSize: 15, color: '#4b5563' }}>Completare le quantità oppure eliminare le righe non necessarie prima dell’inoltro.</div>
+        <div style={{ fontSize: 15, color: '#4b5563' }}>Completare o correggere i dati indicati prima dell’inoltro. Per gli artt. 30 e 39 la quantificazione del rimborso/risarcimento è obbligatoria.</div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
           <button
             type='button'

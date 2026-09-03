@@ -11,7 +11,7 @@ import { ensureCachedFeatureLayer } from '../../esri-layer-cache'
 
 export type NsCat = 'AT' | 'PR' | 'RU' | 'SL' | 'PF' | 'RA'
 export type NsSummary = { totaleAT: number, totalePR: number, totaleRU: number, totaleSL: number, totalePF: number, totaleRA: number, percentualeSpeseGenerali: number, importoSpeseGenerali: number, totaleComplessivo: number }
-export type NsRow = { objectid: number, categoria_costo: NsCat, origine_voce_snapshot: string, codice_voce_snapshot: string, descrizione_snapshot: string, unita_misura_snapshot: string, prezzo_unitario_snapshot: number, quantita: number, importo_riga: number, anno_prezzario_snapshot?: number | null, ordine: number, note: string, codice_casistica?: string | null, riferimento_attrezzatura_id?: string | null }
+export type NsRow = { objectid: number, categoria_costo: NsCat, origine_voce_snapshot: string, codice_voce_snapshot: string, descrizione_snapshot: string, unita_misura_snapshot: string, prezzo_unitario_snapshot: number, quantita: number, importo_riga: number, anno_prezzario_snapshot?: number | null, ordine: number, note: string, codice_casistica?: string | null, riferimento_attrezzatura_id?: string | null, matricola_snapshot?: string | null, cauzione_decurtata?: boolean }
 export type NsGroup = { codiceCasistica: string, label: string, rows: Record<NsCat, NsRow[]>, summary: NsSummary }
 
 export type NotaSpeseConfig = {
@@ -25,6 +25,13 @@ type Art30Row = { codice: string, descrizione: string, quantita: number, valoreU
 type Art30Summary = { hasData: boolean, rows: Art30Row[], rimborso: number, cauzione: number, cauzioneQuantita: number | null, cauzioneValoreUnitario: number | null, cauzioneUnitaMisura: string, netto: number, text: string }
 
 const NS_CATS: NsCat[] = ['AT', 'PR', 'RU', 'SL', 'PF', 'RA']
+const NS_RECUPERABLE_TESSERA_META_CODE = '__GII_TESSERA_RECUPERABILE__'
+
+function isRecuperableTesseraMetaRowPdf (row: NsRow | null | undefined): boolean {
+  return String(row?.codice_voce_snapshot || '').trim() === NS_RECUPERABLE_TESSERA_META_CODE &&
+    normalizeNsCasistica(row?.codice_casistica) === 'C104_ATTREZZATURE_DANNEGGIATE' &&
+    !!String(row?.riferimento_attrezzatura_id || '').trim()
+}
 
 export const NS_CASISTICA_META: Record<string, { order: number, label: string }> = {
   C100_REPERIBILITA: { order: 8, label: 'Art. 8 - Violazione servizio di reperibilità' },
@@ -160,21 +167,34 @@ export function attrezzaturaInstanceTipoCodePdf (instanceId: string): string {
 export function getRecuperabiliAttrezzatureLabelsById (rowsByCategory: Record<NsCat, NsRow[]>, catalog: Map<string, string>): Map<string, string> {
   const out = new Map<string, string>()
   const seen = new Set<string>()
-  const items: { id: string, descrizione: string }[] = []
+  const metaById = new Map<string, NsRow>()
+  for (const row of (rowsByCategory?.RA || [])) {
+    if (!isRecuperableTesseraMetaRowPdf(row)) continue
+    const id = String(row.riferimento_attrezzatura_id || '').trim()
+    if (id) metaById.set(id, row)
+  }
+  const items: { id: string, descrizione: string, matricola: string }[] = []
   for (const cat of NS_CATS) {
     for (const row of (rowsByCategory?.[cat] || [])) {
       if (normalizeNsCasistica(row.codice_casistica) !== 'C104_ATTREZZATURE_DANNEGGIATE') continue
       const id = String(row.riferimento_attrezzatura_id || '').trim()
       if (!id || seen.has(id)) continue
       seen.add(id)
-      items.push({ id, descrizione: catalog.get(attrezzaturaInstanceTipoCodePdf(id)) || id })
+      const meta = metaById.get(id)
+      items.push({
+        id,
+        descrizione: catalog.get(attrezzaturaInstanceTipoCodePdf(id)) || id,
+        matricola: String(meta?.matricola_snapshot || '').trim()
+      })
     }
   }
   const totalsByDescrizione: Record<string, number> = {}
   items.forEach(item => { totalsByDescrizione[item.descrizione] = (totalsByDescrizione[item.descrizione] || 0) + 1 })
   const counters: Record<string, number> = {}
   items.forEach(item => {
-    if (totalsByDescrizione[item.descrizione] > 1) {
+    if (item.matricola) {
+      out.set(item.id, `${item.descrizione} - matricola ${item.matricola}`)
+    } else if (totalsByDescrizione[item.descrizione] > 1) {
       counters[item.descrizione] = (counters[item.descrizione] || 0) + 1
       out.set(item.id, `${item.descrizione} (${counters[item.descrizione]})`)
     } else {
@@ -271,13 +291,12 @@ export function buildNotaSpeseGroups (
       const code = isArt30 && riferimentoId ? `${baseCode}::${riferimentoId}` : baseCode
       if (isArt30 && riferimentoId) {
         const baseLabel = NS_CASISTICA_META[baseCode]?.label || baseCode
-        if (cat === 'RA') {
-          // Risarcimento (non recuperabile): l'etichetta usa la descrizione già salvata
-          // sulla riga stessa, non la mappa delle recuperabili (che non la contiene).
-          labelByCode.set(code, `${baseLabel} \u2014 Attrezzature: ${row.descrizione_snapshot}`)
-        } else if (!labelByCode.has(code)) {
+        if (cat === 'RA' && !isRecuperableTesseraMetaRowPdf(row)) {
+          // Eventuale RA reale con riferimento: mantiene la semantica di risarcimento.
+          labelByCode.set(code, `${baseLabel} — Attrezzature: ${row.descrizione_snapshot}`)
+        } else if (!labelByCode.has(code) || isRecuperableTesseraMetaRowPdf(row)) {
           const attrLabel = attrezzatureLabels.get(riferimentoId)
-          labelByCode.set(code, attrLabel ? `${baseLabel} \u2014 Rimborso spese riparazione ${attrLabel}` : baseLabel)
+          labelByCode.set(code, attrLabel ? `${baseLabel} — Rimborso spese riparazione ${attrLabel}` : baseLabel)
         }
       }
       if (!byCode.has(code)) byCode.set(code, cloneEmptyNsRows())
@@ -305,8 +324,8 @@ export function buildNotaSpeseGroups (
     // Stesso articolo (tipicamente Art.30): la nota condivisa "non recuperabile" va prima
     // di quelle "recuperabile"; tra le recuperabili, ordine alfabetico per nome attrezzatura
     // (già incluso nell'etichetta, col prefisso comune identico per ogni gruppo).
-    const aIsNonRecuperabile = (a.rows.RA || []).length > 0
-    const bIsNonRecuperabile = (b.rows.RA || []).length > 0
+    const aIsNonRecuperabile = (a.rows.RA || []).some(row => !isRecuperableTesseraMetaRowPdf(row))
+    const bIsNonRecuperabile = (b.rows.RA || []).some(row => !isRecuperableTesseraMetaRowPdf(row))
     if (aIsNonRecuperabile !== bIsNonRecuperabile) return aIsNonRecuperabile ? -1 : 1
     return a.label.localeCompare(b.label, 'it')
   })

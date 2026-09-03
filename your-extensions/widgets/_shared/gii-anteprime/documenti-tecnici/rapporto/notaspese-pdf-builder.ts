@@ -31,6 +31,9 @@ type NsDetailRow = {
   anno_prezzario_snapshot?: number | null
   ordine: number
   note: string
+  riferimento_attrezzatura_id?: string | null
+  matricola_snapshot?: string | null
+  cauzione_decurtata?: boolean
 }
 
 type NsSummary = {
@@ -265,6 +268,20 @@ function cleanText(s: string): string {
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
 }
 
+function notaSpeseRowDescription(row: NsDetailRow): string {
+  const descrizione = String(row?.descrizione_snapshot || '').trim()
+  const matricola = String(row?.matricola_snapshot || '').trim()
+  if (!matricola) return descrizione
+  return descrizione ? `${descrizione} - matricola ${matricola}` : `Matricola ${matricola}`
+}
+
+const NS_RECUPERABLE_TESSERA_META_CODE = '__GII_TESSERA_RECUPERABILE__'
+
+function isRecuperableTesseraMetaRow (row: NsDetailRow | null | undefined): boolean {
+  return String(row?.codice_voce_snapshot || '').trim() === NS_RECUPERABLE_TESSERA_META_CODE &&
+    !!String(row?.riferimento_attrezzatura_id || '').trim()
+}
+
 function roundMoney(n: number): number {
   if (!Number.isFinite(n)) return 0
   const sign = n < 0 ? -1 : 1
@@ -439,6 +456,19 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
     top += 14
   }
 
+  const recuperableTesseraMetaRows = (data.rows.RA || []).filter(isRecuperableTesseraMetaRow)
+  const recuperableTesseraMeta = recuperableTesseraMetaRows[0] || null
+  if (recuperableTesseraMeta) {
+    const matricola = String(recuperableTesseraMeta.matricola_snapshot || '').trim()
+    const cauzione = Math.abs(Number(recuperableTesseraMeta.prezzo_unitario_snapshot) || 0)
+    const cauzioneLabel = recuperableTesseraMeta.cauzione_decurtata
+      ? `Cauzione decurtata: ${money(cauzione)}`
+      : 'Cauzione non decurtata'
+    const info = `Tessera elettronica${matricola ? ` - matricola ${matricola}` : ''} · ${cauzioneLabel}`
+    centered(pg, info, fontR, 8, ML, PW - MR, PH - top, CLR_BLACK)
+    top += 13
+  }
+
   function newPage(): void {
     pg = doc.addPage([PW, PH])
     top = 36
@@ -543,12 +573,12 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
   /* ---- Attrezzature non recuperabili (RA): prezzo secco dell'attrezzatura, non un
      intervento manutentivo — titolo dedicato, separato da quello delle voci ordinarie ---- */
 
-  const raRows = (data.rows.RA || []).slice().sort((a, b) => a.ordine - b.ordine)
+  const raRows = (data.rows.RA || []).filter(row => !isRecuperableTesseraMetaRow(row)).slice().sort((a, b) => a.ordine - b.ordine)
 
   if (raRows.length > 0) {
     const firstRaRow = raRows[0]
     const firstRaCodeLines = wrapText(firstRaRow.codice_voce_snapshot, fontR, 7.5, CW_CODICE - 6)
-    const firstRaDescLines = wrapText(firstRaRow.descrizione_snapshot, fontR, 7.5, CW_DESC - 6)
+    const firstRaDescLines = wrapText(notaSpeseRowDescription(firstRaRow), fontR, 7.5, CW_DESC - 6)
     const firstRaRowH = Math.max(ROW_H, firstRaCodeLines.length * 10 + 6, firstRaDescLines.length * 10 + 6)
     ensureSpace(SUPER_HDR_H + HDR_H + COL_HDR_H + firstRaRowH + ROW_H + 24)
     drawSuperTitle('COSTO ATTREZZATURE NON RECUPERABILI')
@@ -562,14 +592,14 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
     const firstCatRows = (data.rows[ordinaryCategories[0]] || []).slice().sort((a, b) => a.ordine - b.ordine)
     const firstRow = firstCatRows[0]
     const firstCodeLines = firstRow ? wrapText(firstRow.codice_voce_snapshot, fontR, 7.5, CW_CODICE - 6) : ['']
-    const firstDescLines = firstRow ? wrapText(firstRow.descrizione_snapshot, fontR, 7.5, CW_DESC - 6) : ['']
+    const firstDescLines = firstRow ? wrapText(notaSpeseRowDescription(firstRow), fontR, 7.5, CW_DESC - 6) : ['']
     const firstRowH = Math.max(ROW_H, firstCodeLines.length * 10 + 6, firstDescLines.length * 10 + 6)
     ensureSpace(SUPER_HDR_H + HDR_H + COL_HDR_H + firstRowH + ROW_H + 24)
     drawSuperTitle("COSTI SOSTENUTI PER L'INTERVENTO")
   }
 
   for (const cat of CATEGORY_ORDER) {
-    const catRows = (data.rows[cat] || []).slice().sort((a, b) => a.ordine - b.ordine)
+    const catRows = (data.rows[cat] || []).filter(row => cat !== 'RA' || !isRecuperableTesseraMetaRow(row)).slice().sort((a, b) => a.ordine - b.ordine)
     if (catRows.length === 0) continue
 
     const catSubtotal = data.summary[CATEGORY_TOTAL_KEY[cat]]
@@ -594,7 +624,7 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
 
       // Word-wrap codice e descrizione per altezza riga dinamica
       const codLines = wrapText(row.codice_voce_snapshot, fontR, 7.5, CW_CODICE - 6)
-      const descLines = wrapText(row.descrizione_snapshot, fontR, 7.5, CW_DESC - 6)
+      const descLines = wrapText(notaSpeseRowDescription(row), fontR, 7.5, CW_DESC - 6)
       const codH = codLines.length * DESC_LH + DESC_PAD * 2
       const descH = descLines.length * DESC_LH + DESC_PAD * 2
       const rowH = Math.max(ROW_H, codH, descH)

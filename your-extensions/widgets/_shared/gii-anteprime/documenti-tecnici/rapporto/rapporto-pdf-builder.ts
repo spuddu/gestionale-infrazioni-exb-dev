@@ -773,6 +773,23 @@ export function buildRapportoIterPlaceholders (opts: {
   const iterRitPresa = findFirstPresaInCaricoFromCicli(cicli, 'RIT') || (!hasIterCicli ? presaDateFromFieldIfTaken('RIT') : '')
   const iterDtPresa = findFirstPresaInCaricoFromCicli(cicli, 'DT') || (!hasIterCicli ? presaDateFromFieldIfTaken('DT') : '')
 
+  // Il nominativo nella riga dell'iter documenta chi ha effettivamente assunto
+  // quella fase, non il titolare teorico del ruolo nell'ambito organizzativo.
+  // Con i cicli disponibili la prova è l'evento PRESA_IN_CARICO; sui record
+  // legacy senza cicli usiamo lo stato di ruolo (> 1), coerentemente con la
+  // logica già usata per recuperare la data di presa in carico.
+  const ruoloHaPresoInCarico = (ruolo: 'IT' | 'CS' | 'RIT' | 'DT', presa: string): boolean => {
+    if (presa) return true
+    if (hasIterCicli) return false
+    const stato = Number(rawFrom(d, `stato_${ruolo}`))
+    return Number.isFinite(stato) && stato > 1
+  }
+
+  const itHaPresoInCarico = ruoloHaPresoInCarico('IT', iterItPresa)
+  const csHaPresoInCarico = ruoloHaPresoInCarico('CS', iterCsPresa)
+  const ritHaPresoInCarico = ruoloHaPresoInCarico('RIT', iterRitPresa)
+  const dtHaPresoInCarico = ruoloHaPresoInCarico('DT', iterDtPresa)
+
   // Le date di chiusura fase arrivano dai cicli effettivi, non da stato_*/dt_stato_*.
   // In particolare, un rimando CS→IT non è una verifica CS e non deve valorizzare la riga Verifica.
   const iterItCompilazione = findLastChiusuraFromCicli(cicli, 'IT', ['ISTRUTTORIA_TRASMESSA', 'INTEGRAZIONE_TRASMESSA'], ['CS'])
@@ -789,37 +806,43 @@ export function buildRapportoIterPlaceholders (opts: {
   const nomeTRDaRuoloSettore = isRoleSectorSyntheticLabel(tecnicoRilevatoreRaw)
     ? findUserFullName(opts.utentiCache, 'TR', areaN ?? undefined, settoreN ?? undefined)
     : ''
-  const nomeTR = firstPersonLikeValue(nomeTRDaUtente, nomeTRDaRuoloSettore, tecnicoRilevatoreRaw)
+  // I valori risolti da GII_utenti sono anagrafici autorevoli: non vanno
+  // scartati solo perché un account di test ha un full_name sintetico (es. "TR D1").
+  // Il filtro sui label sintetici resta invece sul valore grezzo della pratica.
+  const nomeTR = firstMeaningfulValue(nomeTRDaUtente, nomeTRDaRuoloSettore, firstPersonLikeValue(tecnicoRilevatoreRaw)) || ''
   const nomeIT = firstMeaningfulValue(
     pickAttrCI(d, ['it_assegnato_nome']),
-    findFullNameByUsername(opts.utentiCache, pickAttrCI(d, ['it_assegnato_username']) || ''),
-    findFullNameByUsername(opts.utentiCache, pickAttrCI(d, ['tecnico_rilevatore']) || '')
+    findFullNameByUsername(opts.utentiCache, pickAttrCI(d, ['it_assegnato_username']) || '')
   ) || ''
   const nomeCS = findUserFullName(opts.utentiCache, 'CS', areaN ?? undefined, settoreN ?? undefined)
   const nomeRIT = findUserFullName(opts.utentiCache, 'RIT', areaN ?? undefined)
   const nomeDT = findUserFullName(opts.utentiCache, 'DT', areaN ?? undefined)
 
   const dataApprovazioneRapporto = opts.rapportoApprovato ? iterDtApprovazione : ''
+  const nomeITVisibile = itHaPresoInCarico ? nomeIT : ''
+  const nomeCSVisibile = csHaPresoInCarico ? nomeCS : ''
+  const nomeRITVisibile = ritHaPresoInCarico ? nomeRIT : ''
+  const nomeDTVisibile = dtHaPresoInCarico ? nomeDT : ''
 
   return {
     firma_tr: esc(nomeTR),
-    firma_ti: esc(nomeIT),
-    firma_cs: esc(nomeCS),
-    firma_ri: esc(nomeRIT),
-    firma_dt: esc(nomeDT),
+    firma_ti: esc(nomeITVisibile),
+    firma_cs: esc(nomeCSVisibile),
+    firma_ri: esc(nomeRITVisibile),
+    firma_dt: esc(nomeDTVisibile),
     iter_rilevazione_nome: esc(nomeTR),
     iter_rilevazione_presa: '-',
     iter_rilevazione_data: formatDateIt(pickAttrCI(d, ['data_rilevazione', 'DATA_RILEVAZIONE'])),
-    iter_compilazione_nome: esc(nomeIT),
+    iter_compilazione_nome: esc(nomeITVisibile),
     iter_compilazione_presa: iterItPresa,
     iter_compilazione_data: iterItCompilazione,
-    iter_verifica_nome: esc(nomeCS),
+    iter_verifica_nome: esc(nomeCSVisibile),
     iter_verifica_presa: iterCsPresa,
     iter_verifica_data: iterCsVerifica,
-    iter_supervisione_nome: esc(nomeRIT),
+    iter_supervisione_nome: esc(nomeRITVisibile),
     iter_supervisione_presa: iterRitPresa,
     iter_supervisione_data: iterRitSupervisione,
-    iter_approvazione_nome: esc(nomeDT),
+    iter_approvazione_nome: esc(nomeDTVisibile),
     iter_approvazione_presa: iterDtPresa,
     iter_approvazione_data: dataApprovazioneRapporto,
     data_approvazione_rapporto: dataApprovazioneRapporto
@@ -871,12 +894,18 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   rightTxt(p2, 'Pag. 2 di 2', fR, 7, 532.6, bY(818, 7), BLUE)
 
   // ── Il sottoscritto / il giorno / alle ore (cella 252.24–273.24, centrato) ──
-  const sottoscritto = firstPersonLikeValue(
+  // firma_tr / iter_rilevazione_nome sono già stati risolti tramite GII_utenti:
+  // vanno considerati valori anagrafici autorevoli anche quando il full_name di un
+  // account di test ha forma sintetica (es. "TR D1"). Il filtro sui label sintetici
+  // resta solo sui fallback grezzi provenienti dalla pratica.
+  const sottoscritto = String(firstMeaningfulValue(
     pickAttrCI(m, ['firma_tr', 'FIRMA_TR']),
     pickAttrCI(m, ['iter_rilevazione_nome', 'ITER_RILEVAZIONE_NOME']),
-    pickAttrCI(m, ['Creator', 'creator', 'created_user', 'created_by', 'createdBy']),
-    pickAttrCI(m, ['tecnico_rilevatore', 'TECNICO_RILEVATORE'])
-  )
+    firstPersonLikeValue(
+      pickAttrCI(m, ['Creator', 'creator', 'created_user', 'created_by', 'createdBy']),
+      pickAttrCI(m, ['tecnico_rilevatore', 'TECNICO_RILEVATORE'])
+    )
+  ) || '').trim()
   txt(p1, sottoscritto, fR, 9, 113, bY(260.0, 9), BLACK, 200)
   txt(p1, v('data_rilevazione'), fR, 9, 389, bY(260.0, 9), BLACK, 47)
   txt(p1, v('ora_rilevazione'), fR, 9, 486, bY(260.0, 9), BLACK, 71)
@@ -999,8 +1028,9 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   txt(p2, v('presenza_trasgressore'), fR, dsz, 173, bY(646.28, dsz), BLACK, 90)
 
   // ── ITER DELL'ISTRUTTORIA TECNICA ──
-  // Colonne iter (template v6): Fase 42.72–106.08 | Nominativo 106.56–219.48 | Ruolo 219.96–318.72 | Presa 319.20–368.28 | Esito 368.76–502.92 | Data 503.40–552.60
+  // Colonne iter (template v13): Fase 42.72–106.58 | Nominativo 107.06–220.00 | Ruolo 220.49–319.27 | Presa 319.75–368.83 | Esito 369.31–503.52 | Data 504.00–553.20
   const iterSz = 7.2
+
   const iterRows: Array<{ top: number; nome: string; presa: string; data: string }> = [
     { top: 703.36, nome: v('iter_rilevazione_nome') || v('firma_tr'), presa: v('iter_rilevazione_presa'), data: v('iter_rilevazione_data') || v('data_rilevazione') },
     { top: 720.88, nome: v('iter_compilazione_nome') || v('firma_ti'), presa: v('iter_compilazione_presa'), data: v('iter_compilazione_data') },

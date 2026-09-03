@@ -8,6 +8,15 @@ import {
   type GiiRuntimeView as RuntimeDsView
 } from '../../../_shared/gii-runtime/runtime-views'
 
+type GiiAssignment = {
+  ruoloCod: string
+  area: number | null
+  areaCod: 'AMM' | 'AGR' | 'TEC' | ''
+  settore: number | null
+  settoreCod: string
+  ufficio?: number | null
+}
+
 type GiiUserInfo = {
   username: string
   fullName?: string
@@ -29,17 +38,10 @@ type GiiUserInfo = {
   gruppo?: string
   isAdmin: boolean
   isWorkflowAdmin?: boolean
+  assignments: GiiAssignment[]
 }
 
 type DashRecord = Record<string, any>
-
-type Metric = {
-  id: string
-  label: string
-  value: number
-  hint: string
-  tone: 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet' | 'slate'
-}
 
 type PeriodFilter = 'all' | '30' | '90' | '365'
 type DashboardTab = 'operativo' | 'statistiche'
@@ -101,18 +103,18 @@ function getEffectiveRole (ruoloLabel: string, areaCode: 'AMM' | 'AGR' | 'TEC' |
   return r
 }
 
-function pickRuntimeViewForUser (user: GiiUserInfo | null): RuntimeDsView | null {
-  if (!user) return null
-  const role = cleanCode(user.ruoloCod)
-  const areaCode = user.areaCod || normalizeAreaCode('', user.area)
-  const settoreCode = user.settoreCod || normalizeSettoreCode('', user.settore)
-  return pickGiiRuntimeView({
-    roleCode: role,
-    areaCode,
-    settoreCode,
-    isAdmin: user.isAdmin,
-    isWorkflowAdmin: user.isWorkflowAdmin
-  })
+function pickRuntimeViewsForUser (user: GiiUserInfo | null): RuntimeDsView[] {
+  if (!user) return []
+  if (user.isAdmin || user.isWorkflowAdmin) {
+    const view = pickGiiRuntimeView({ roleCode: user.ruoloCod, areaCode: user.areaCod, settoreCode: user.settoreCod, isAdmin: user.isAdmin, isWorkflowAdmin: user.isWorkflowAdmin })
+    return view ? [view] : []
+  }
+  const uniq = new Map<string, RuntimeDsView>()
+  for (const assignment of user.assignments || []) {
+    const view = pickGiiRuntimeView({ roleCode: assignment.ruoloCod, areaCode: assignment.areaCod, settoreCode: assignment.settoreCod })
+    if (view && !uniq.has(view.layerUrl)) uniq.set(view.layerUrl, view)
+  }
+  return Array.from(uniq.values())
 }
 
 function readGiiUser (): GiiUserInfo | null {
@@ -125,6 +127,20 @@ function readGiiUser (): GiiUserInfo | null {
   const settore = cached.settore != null && cached.settore !== '' ? Number(cached.settore) : null
   const areaCod = normalizeAreaCode(cached.areaCod ?? cached.area_cod, area)
   const settoreCod = normalizeSettoreCode(cached.settoreCod ?? cached.settore_cod, settore)
+  const rawAssignments = Array.isArray(cached.assignments) ? cached.assignments : []
+  const assignments: GiiAssignment[] = rawAssignments.map((a: any) => {
+    const aArea = a?.area != null && a.area !== '' ? Number(a.area) : null
+    const aSettore = a?.settore != null && a.settore !== '' ? Number(a.settore) : null
+    return {
+      ruoloCod: normalizeRuoloCode(a?.ruoloCod ?? a?.ruolo_cod, false),
+      area: aArea,
+      areaCod: normalizeAreaCode(a?.areaCod ?? a?.area_cod, aArea),
+      settore: aSettore,
+      settoreCod: normalizeSettoreCode(a?.settoreCod ?? a?.settore_cod, aSettore),
+      ufficio: a?.ufficio != null && a.ufficio !== '' ? Number(a.ufficio) : null
+    }
+  }).filter((a: GiiAssignment) => !!a.ruoloCod)
+  if (!assignments.length) assignments.push({ ruoloCod, area, areaCod, settore, settoreCod, ufficio: cached.ufficio != null ? Number(cached.ufficio) : null })
   return {
     username: String(cached.username || '').trim(),
     fullName: String(cached.fullName || cached.full_name || cached.nome || cached.displayName || cached.username || '').trim(),
@@ -145,7 +161,8 @@ function readGiiUser (): GiiUserInfo | null {
     ufficioLabel: String(cached.ufficioLabel || cached.ufficio_label || '').trim(),
     gruppo: String(cached.gruppo || ''),
     isAdmin,
-    isWorkflowAdmin: !!cached.isWorkflowAdmin
+    isWorkflowAdmin: !!cached.isWorkflowAdmin,
+    assignments
   }
 }
 
@@ -228,97 +245,139 @@ function getTiIstruttoriaInfo (d: any) {
   return { isInTiIstruttoria: !!tiUser && !higherTouched && !tiReturned }
 }
 
+function getRecordAreaCode (d: any): 'AMM' | 'AGR' | 'TEC' | '' {
+  return normalizeAreaCode(d?.area_cod ?? d?.AREA_COD ?? d?.area ?? d?.AREA)
+}
+
+function getRecordSettoreCode (d: any): string {
+  return normalizeSettoreCode(d?.settore_cod ?? d?.SETTORE_COD ?? d?.settore ?? d?.SETTORE)
+}
+
+function assignmentAppliesToRecord (assignment: GiiAssignment, d: any): boolean {
+  const role = getEffectiveRole(assignment.ruoloCod || '', assignment.areaCod)
+  if (!role) return false
+  if (role === 'DA' || role === 'RIA' || role === 'IA') return isInFaseSanzionatoria(d)
+  const recArea = getRecordAreaCode(d)
+  if (assignment.areaCod && recArea && assignment.areaCod !== recArea) return false
+  if (role === 'IT' || role === 'CS') {
+    const recSettore = getRecordSettoreCode(d)
+    if (assignment.settoreCod && recSettore && assignment.settoreCod !== recSettore) return false
+  }
+  return true
+}
+
+function isVisibleUnderAssignment (d: any, user: GiiUserInfo, assignment: GiiAssignment): boolean {
+  if (!assignmentAppliesToRecord(assignment, d)) return false
+  const role = getEffectiveRole(assignment.ruoloCod || '', assignment.areaCod)
+  if (role === 'IA') return isPracticeAssignedToCurrentIa(d, { ...user, ...assignment } as any)
+  if (role !== 'IT') return true
+
+  const meUser = String(user.username || '').trim()
+  const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
+  const opRaw = d['origine_pratica']
+  const opNum = opRaw !== null && opRaw !== undefined && opRaw !== '' ? Number(opRaw) : null
+  const tiUser = String(d['it_assegnato_username'] ?? '').trim()
+  const tiName = String(d['it_assegnato_nome'] ?? '').trim()
+  const assignedToMe = equalsUser(tiUser, meUser) || equalsUser(tiName, meUser) || (meName ? equalsUser(tiName, meName) : false)
+  const creatorVals = [d['created_user'], d['Creator'], d['creator'], d['username'], d['user_name'], d['utente'], d['utente_ins'], d['created_by'], d['submitter'], d['owner']]
+  const createdByMe = creatorVals.some(v => equalsUser(v, meUser) || (meName ? equalsUser(v, meName) : false))
+  const hasTiWorkflow = hasRuoloData(d, 'IT')
+  if (opNum === 1) {
+    if (!tiUser && !tiName && !hasTiWorkflow) return false
+    return tiUser || tiName ? assignedToMe : false
+  }
+  if (opNum === 2) {
+    if (tiUser || tiName) return assignedToMe
+    if (createdByMe) return true
+    return hasTiWorkflow
+  }
+  return true
+}
+
+function getVisibleAssignmentsForRecord (d: any, user: GiiUserInfo | null): GiiAssignment[] {
+  if (!user || user.isAdmin || user.isWorkflowAdmin) return []
+  return (user.assignments || []).filter(assignment => isVisibleUnderAssignment(d, user, assignment))
+}
+
 function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boolean {
   if (!user) return false
   if (user.isAdmin || user.isWorkflowAdmin) return true
-
-  const role = getEffectiveRole(user.ruoloCod || '', user.areaCod)
-  if (!role) return true
-
   const archVal = d['GII_arch'] ?? d['gii_arch'] ?? d['GII_ARCH']
   if (archVal !== null && archVal !== undefined && archVal !== '' && Number(archVal) === 1) return false
-
-  const isAmmArea = user.areaCod === 'AMM'
-  if (role === 'DA' || role === 'RIA' || role === 'IA') {
-    if (!isInFaseSanzionatoria(d)) return false
-    if (role === 'IA') {
-      return isPracticeAssignedToCurrentIa(d, user)
-    }
-    return true
-  }
-
-  if (role === 'IT') {
-    const meUser = String(user.username || '').trim()
-    const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
-    const opRaw = d['origine_pratica']
-    const opNum = opRaw !== null && opRaw !== undefined && opRaw !== '' ? Number(opRaw) : null
-    const tiUser = String(d['it_assegnato_username'] ?? '').trim()
-    const tiName = String(d['it_assegnato_nome'] ?? '').trim()
-    const assignedToMe = equalsUser(tiUser, meUser) || equalsUser(tiName, meUser) || (meName ? equalsUser(tiName, meName) : false)
-    const creatorVals = [d['created_user'], d['Creator'], d['creator'], d['username'], d['user_name'], d['utente'], d['utente_ins'], d['created_by'], d['submitter'], d['owner']]
-    const createdByMe = creatorVals.some(v => equalsUser(v, meUser) || (meName ? equalsUser(v, meName) : false))
-    const hasTiWorkflow = hasRuoloData(d, 'IT')
-
-    if (opNum === 1) {
-      if (!tiUser && !tiName && !hasTiWorkflow) return false
-      if (tiUser || tiName) return assignedToMe
-      return false
-    }
-    if (opNum === 2) {
-      if (tiUser || tiName) return assignedToMe
-      if (createdByMe) return true
-      return hasTiWorkflow
-    }
-  }
-
-  return true
+  return getVisibleAssignmentsForRecord(d, user).length > 0
 }
 
 function isWaitingForIaAfterRia (d: any): boolean {
   const riaLast = getRoleLastTouchMs(d, 'RIA')
   const iaLast = getRoleLastTouchMs(d, 'IA')
-  return hasRuoloData(d, 'IA') && (
-    iaLast === null || riaLast === null || iaLast > riaLast
-  )
+  return hasRuoloData(d, 'IA') && (iaLast === null || riaLast === null || iaLast > riaLast)
 }
 
-function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
-  if (!user || user.isAdmin || user.isWorkflowAdmin) return false
-  const role = getEffectiveRole(user.ruoloCod || '', user.areaCod)
+function isAttesaMiaUnderAssignment (d: any, user: GiiUserInfo, assignment: GiiAssignment): boolean {
+  const role = getEffectiveRole(assignment.ruoloCod || '', assignment.areaCod)
   if (role === 'DA') return false
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
 
-  // DT: dopo la presa in carico (n===2) la pratica è ancora da gestire dal ruolo corrente.
   if (role === 'DT' && n === 2) return true
-
+  if (role === 'CS' && n === 2) return !getTiIstruttoriaInfo(d).isInTiIstruttoria
   if ((role === 'IT' || role === 'IA') && n === 2) {
-    if (role === 'IA') return isPracticeAssignedToCurrentIa(d, user)
+    if (role === 'IA') return isPracticeAssignedToCurrentIa(d, { ...user, ...assignment } as any)
     const meUser = String(user.username || '').trim()
     const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
     const tiUser = String(d['it_assegnato_username'] ?? '').trim()
     const tiName = String(d['it_assegnato_nome'] ?? '').trim()
     return equalsUser(tiUser, meUser) || equalsUser(tiName, meUser) || (meName ? equalsUser(tiName, meName) : false)
   }
-
   if (role === 'RIA' && n === 2) return !isWaitingForIaAfterRia(d)
   if (role === 'CS' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return false
   return n === 0 || n === 1 || n === 3
 }
 
-function isAttesaAltri (d: any, user: GiiUserInfo | null): boolean {
-  if (!user || user.isAdmin || user.isWorkflowAdmin) return false
-  const role = getEffectiveRole(user.ruoloCod || '', user.areaCod)
+function isAttesaAltriUnderAssignment (d: any, user: GiiUserInfo, assignment: GiiAssignment): boolean {
+  const role = getEffectiveRole(assignment.ruoloCod || '', assignment.areaCod)
   if (role === 'DA') return false
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
   if (role === 'CS' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return true
-  if (role === 'DT' && n === 2) return false
-  if ((role === 'IT' || role === 'IA') && n === 2) return !isAttesaMia(d, user)
+  if ((role === 'CS' || role === 'DT') && n === 2) return false
+  if ((role === 'IT' || role === 'IA') && n === 2) return !isAttesaMiaUnderAssignment(d, user, assignment)
   if (role === 'RIA' && n === 2) return isWaitingForIaAfterRia(d)
   return n === 2 || n === 4
+}
+
+function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
+  if (!user || user.isAdmin || user.isWorkflowAdmin) return false
+  return getVisibleAssignmentsForRecord(d, user).some(assignment => isAttesaMiaUnderAssignment(d, user, assignment))
+}
+
+function isAttesaAltri (d: any, user: GiiUserInfo | null): boolean {
+  if (!user || user.isAdmin || user.isWorkflowAdmin) return false
+  const assignments = getVisibleAssignmentsForRecord(d, user)
+  if (assignments.some(assignment => isAttesaMiaUnderAssignment(d, user, assignment))) return false
+  return assignments.some(assignment => isAttesaAltriUnderAssignment(d, user, assignment))
+}
+
+function isDaPrendereInCarico (d: any, user: GiiUserInfo | null): boolean {
+  if (!user || user.isAdmin || user.isWorkflowAdmin) return false
+  return getVisibleAssignmentsForRecord(d, user).some(assignment => {
+    const role = getEffectiveRole(assignment.ruoloCod || '', assignment.areaCod)
+    if (!role || role === 'DA') return false
+    const raw = d[getStatoFieldForRuolo(role)]
+    const n = raw != null && raw !== '' ? Number(raw) : null
+    return n === 0 || n === 1
+  })
+}
+
+function getMyStateValueForRecord (d: any, user: GiiUserInfo | null): any {
+  if (!user || user.isAdmin || user.isWorkflowAdmin) return null
+  const assignments = getVisibleAssignmentsForRecord(d, user)
+  if (!assignments.length) return null
+  const chosen = assignments.find(assignment => isAttesaMiaUnderAssignment(d, user, assignment)) || assignments[0]
+  const role = getEffectiveRole(chosen.ruoloCod || '', chosen.areaCod)
+  return role ? d[getStatoFieldForRuolo(role)] : null
 }
 
 function getActiveRole (d: any): string {
@@ -398,15 +457,6 @@ function toChartItems (map: Map<string, number>, limit = 8): ChartItem[] {
     .map(([label, value]) => ({ label, value }))
     .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label, 'it', { sensitivity: 'base' }))
     .slice(0, limit)
-}
-
-function getToneColor (tone: Metric['tone'], accent: string): string {
-  if (tone === 'emerald') return '#34d399'
-  if (tone === 'amber') return '#fbbf24'
-  if (tone === 'rose') return '#fb7185'
-  if (tone === 'violet') return '#a78bfa'
-  if (tone === 'slate') return '#94a3b8'
-  return accent || '#38bdf8'
 }
 
 function formatShortDateTime (ms: number | null): string {
@@ -772,7 +822,7 @@ function CardShell (props: { cfg: any; title?: string; right?: React.ReactNode; 
     }}>
       {props.title && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14, flexShrink: 0 }}>
-          <h3 style={{ margin: 0, fontSize: 13, fontWeight: 800, color: props.cfg.textColor, letterSpacing: 0.2 }}>{props.title}</h3>
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: props.cfg.textColor, letterSpacing: 0.2 }}>{props.title}</h3>
           {props.right}
         </div>
       )}
@@ -781,17 +831,97 @@ function CardShell (props: { cfg: any; title?: string; right?: React.ReactNode; 
   )
 }
 
-function MetricCard (props: { m: Metric; cfg: any }) {
-  const tone = getToneColor(props.m.tone, props.cfg.accentColor)
+
+function OperationalMetricsSummary (props: {
+  cfg: any
+  totalLabel: string
+  total: number
+  attesaMia: number
+  attesaAltri: number
+  daPrendere: number
+  ferme: number
+  sanz: number
+  showWorkloadSplit: boolean
+}) {
+  const classified = props.attesaMia + props.attesaAltri
+  const myPct = classified > 0 ? Math.max(0, Math.min(100, (props.attesaMia / classified) * 100)) : 0
+  const otherPct = classified > 0 ? Math.max(0, Math.min(100, 100 - myPct)) : 0
+  const giaInCarico = Math.max(0, props.attesaMia - props.daPrendere)
+
+  const indicatorStyle = {
+    minWidth: 0,
+    border: `1px solid ${props.cfg.cardBorder}`,
+    borderRadius: 11,
+    padding: '11px 12px',
+    background: 'rgba(2,6,23,0.20)'
+  }
+
   return (
-    <CardShell cfg={props.cfg} minHeight={118}>
-      <div style={{ height: 3, width: 44, borderRadius: 99, background: tone, boxShadow: `0 0 24px ${tone}`, marginBottom: 13 }} />
-      <div style={{ color: props.cfg.mutedColor, fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.2 }}>{props.m.label}</div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 8 }}>
-        <div style={{ fontSize: 36, fontWeight: 900, color: props.cfg.textColor, lineHeight: 0.95 }}>{props.m.value}</div>
-      </div>
-      <div style={{ color: props.cfg.mutedColor, fontSize: 12, marginTop: 9, lineHeight: 1.35 }}>{props.m.hint}</div>
-    </CardShell>
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: props.showWorkloadSplit
+        ? 'repeat(auto-fit, minmax(300px, 1fr))'
+        : 'repeat(auto-fit, minmax(300px, 1fr))',
+      gap: 12,
+      marginBottom: 12
+    }}>
+      <CardShell cfg={props.cfg} minHeight={142}>
+        <div style={{ height: 3, width: 44, borderRadius: 99, background: props.cfg.accentColor, boxShadow: `0 0 24px ${props.cfg.accentColor}`, marginBottom: 13 }} />
+        <div style={{ color: props.cfg.mutedColor, fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.2 }}>{props.totalLabel}</div>
+        <div style={{ fontSize: 36, fontWeight: 900, color: props.cfg.textColor, lineHeight: 0.95, marginTop: 8 }}>{props.total}</div>
+        <div style={{ color: props.cfg.mutedColor, fontSize: 13, marginTop: 9, lineHeight: 1.4 }}>
+          Totale delle pratiche incluse nel quadro corrente.
+        </div>
+      </CardShell>
+
+      {props.showWorkloadSplit && (
+        <CardShell cfg={props.cfg} title='Ripartizione operativa' minHeight={142}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div style={{ minWidth: 0, paddingRight: 10, borderRight: `1px solid ${props.cfg.cardBorder}` }}>
+              <div style={{ color: '#34d399', fontSize: 12, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1 }}>In attesa mia</div>
+              <div style={{ color: props.cfg.textColor, fontSize: 34, fontWeight: 900, lineHeight: 1, marginTop: 6 }}>{props.attesaMia}</div>
+              <div style={{ color: props.cfg.mutedColor, fontSize: 12.5, lineHeight: 1.35, marginTop: 6 }}>Richiedono un tuo intervento.</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 8 }}>
+                <div style={{ border: `1px solid ${props.cfg.cardBorder}`, borderRadius: 9, padding: '8px 9px', background: 'rgba(2,6,23,0.18)' }}>
+                  <div style={{ color: props.cfg.mutedColor, fontSize: 11, fontWeight: 800, lineHeight: 1.25 }}>Da prendere in carico</div>
+                  <div style={{ color: props.cfg.textColor, fontSize: 18, fontWeight: 900, marginTop: 3 }}>{props.daPrendere}</div>
+                </div>
+                <div style={{ border: `1px solid ${props.cfg.cardBorder}`, borderRadius: 9, padding: '8px 9px', background: 'rgba(2,6,23,0.18)' }}>
+                  <div style={{ color: props.cfg.mutedColor, fontSize: 11, fontWeight: 800, lineHeight: 1.25 }}>Già in carico / da gestire</div>
+                  <div style={{ color: props.cfg.textColor, fontSize: 18, fontWeight: 900, marginTop: 3 }}>{giaInCarico}</div>
+                </div>
+              </div>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: '#a78bfa', fontSize: 12, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1 }}>In attesa di altri</div>
+              <div style={{ color: props.cfg.textColor, fontSize: 34, fontWeight: 900, lineHeight: 1, marginTop: 6 }}>{props.attesaAltri}</div>
+              <div style={{ color: props.cfg.mutedColor, fontSize: 12.5, lineHeight: 1.35, marginTop: 6 }}>Sono attualmente presso altri ruoli.</div>
+            </div>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <div style={{ height: 7, borderRadius: 999, background: 'rgba(148,163,184,0.14)', overflow: 'hidden', display: 'flex' }}>
+              {classified > 0 && <div style={{ width: `${myPct}%`, height: '100%', background: '#34d399' }} />}
+              {classified > 0 && <div style={{ width: `${otherPct}%`, height: '100%', background: '#a78bfa' }} />}
+            </div>
+          </div>
+        </CardShell>
+      )}
+
+      <CardShell cfg={props.cfg} title='Indicatori trasversali' minHeight={142}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+          <div style={indicatorStyle}>
+            <div style={{ color: '#fb7185', fontSize: 11.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.8 }}>Ferme da &gt; {Number(props.cfg.staleDays || 15)} gg</div>
+            <div style={{ color: props.cfg.textColor, fontSize: 28, fontWeight: 900, lineHeight: 1, marginTop: 6 }}>{props.ferme}</div>
+            <div style={{ color: props.cfg.mutedColor, fontSize: 11.5, lineHeight: 1.35, marginTop: 5 }}>Pratiche senza aggiornamenti oltre la soglia.</div>
+          </div>
+          <div style={indicatorStyle}>
+            <div style={{ color: '#fbbf24', fontSize: 11.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.8 }}>Fase sanzionatoria</div>
+            <div style={{ color: props.cfg.textColor, fontSize: 28, fontWeight: 900, lineHeight: 1, marginTop: 6 }}>{props.sanz}</div>
+            <div style={{ color: props.cfg.mutedColor, fontSize: 11.5, lineHeight: 1.35, marginTop: 5 }}>Indicatore trasversale di avanzamento.</div>
+          </div>
+        </div>
+      </CardShell>
+    </div>
   )
 }
 
@@ -966,7 +1096,7 @@ function DonutChart (props: { title: string; items: ChartItem[]; cfg: any }) {
               })}
             </svg>
             <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ color: props.cfg.textColor, fontSize: 24, fontWeight: 900, lineHeight: 1 }}>{total}</div>
+              <div style={{ color: props.cfg.textColor, fontSize: 28, fontWeight: 900, lineHeight: 1 }}>{total}</div>
               <div style={{ color: props.cfg.mutedColor, fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1 }}>totale</div>
             </div>
           </div>
@@ -1101,7 +1231,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }, [])
 
-  const view = React.useMemo(() => pickRuntimeViewForUser(user), [user?.username, user?.ruoloCod, user?.areaCod, user?.settoreCod, user?.ruoloLabel, user?.area, user?.settore, user?.isAdmin, user?.isWorkflowAdmin])
+  const views = React.useMemo(() => pickRuntimeViewsForUser(user), [user])
+  const viewsKey = React.useMemo(() => views.map(v => v.layerUrl).sort().join('|'), [views])
+  const viewsLabel = React.useMemo(() => views.map(v => v.viewName).join(', '), [views])
   const effectiveRole = getEffectiveRole(user?.ruoloCod || '', user?.areaCod || '')
 
   React.useEffect(() => {
@@ -1112,16 +1244,24 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         setRecords([])
         return
       }
-      if (!view) {
+      if (!views.length) {
         setRecords([])
         setError('Non è stato possibile individuare le pratiche di competenza.')
         return
       }
       setLoading(true)
       try {
-        const raw = await queryLayer(view, cfg.whereClause || '1=1', Number(cfg.pageSize || 2000))
+        const chunks = await Promise.all(views.map(view => queryLayer(view, cfg.whereClause || '1=1', Number(cfg.pageSize || 2000))))
         if (cancelled) return
-        const visible = raw.filter(r => isRecordVisibleForCurrentUser(r, user))
+        const uniq = new Map<string, DashRecord>()
+        let fallbackIndex = 0
+        for (const record of chunks.flat()) {
+          const gid = String(record?.GlobalID ?? record?.globalid ?? record?.GLOBALID ?? '').trim().replace(/[{}]/g, '').toLowerCase()
+          const oid = String(record?.OBJECTID ?? record?.objectid ?? record?.ObjectId ?? '').trim()
+          const key = gid ? `gid:${gid}` : (oid ? `oid:${oid}` : `row:${fallbackIndex++}`)
+          if (!uniq.has(key)) uniq.set(key, record)
+        }
+        const visible = Array.from(uniq.values()).filter(r => isRecordVisibleForCurrentUser(r, user))
         setRecords(visible)
         setLastLoad(Date.now())
       } catch (ex: any) {
@@ -1134,7 +1274,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     run()
     return () => { cancelled = true }
-  }, [view?.layerUrl, user?.username, user?.ruoloCod, user?.areaCod, user?.settoreCod, user?.ruoloLabel, user?.area, user?.settore, user?.isAdmin, cfg.whereClause, cfg.pageSize, nonce])
+  }, [viewsKey, user, cfg.whereClause, cfg.pageSize, nonce])
 
   const staleMs = Math.max(1, Number(cfg.staleDays || 15)) * 24 * 60 * 60 * 1000
   const now = Date.now()
@@ -1162,12 +1302,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const last = getLastTouchMs(r)
     return last !== null && (now - last) > staleMs
   }).length
-  const daPrendere = effectiveRole === 'DA' ? 0 : displayRecords.filter(r => {
-    const statoField = user ? getStatoFieldForRuolo(effectiveRole) : ''
-    const v = statoField ? r[statoField] : null
-    const n = v !== null && v !== undefined && v !== '' ? Number(v) : null
-    return n === 0 || n === 1
-  }).length
+  const daPrendere = displayRecords.filter(r => isDaPrendereInCarico(r, user)).length
 
   const byFase = React.useMemo(() => {
     const map = new Map<string, number>()
@@ -1188,15 +1323,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [displayRecords])
 
   const byStatus = React.useMemo(() => {
-    if (!user || user.isAdmin || user.isWorkflowAdmin || effectiveRole === 'DA') return [] as ChartItem[]
-    const statoField = getStatoFieldForRuolo(effectiveRole)
+    if (!user || user.isAdmin || user.isWorkflowAdmin) return [] as ChartItem[]
     const map = new Map<string, number>()
     for (const r of displayRecords) {
-      const k = statoLabel(r[statoField])
+      const k = statoLabel(getMyStateValueForRecord(r, user))
       map.set(k, (map.get(k) || 0) + 1)
     }
     return toChartItems(map, 8)
-  }, [displayRecords, user?.username, user?.ruoloCod, user?.areaCod, user?.ruoloLabel, user?.area])
+  }, [displayRecords, user])
 
   const byUfficio = React.useMemo(() => {
     const map = new Map<string, number>()
@@ -1350,15 +1484,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     )
   }
 
-  const metrics: Metric[] = [
-    { id: 'tot', label: activeTab === 'statistiche' ? 'Pratiche analizzate' : 'Pratiche di competenza', value: displayRecords.length, hint: activeTab === 'statistiche' && periodFilter !== 'all' ? 'Pratiche nel periodo selezionato.' : 'Totale delle pratiche incluse nel quadro operativo.', tone: 'cyan' },
-    { id: 'mia', label: 'Da gestire', value: attesaMia, hint: 'Pratiche che richiedono un intervento diretto.', tone: 'emerald' },
-    { id: 'altri', label: 'In attesa di altri', value: attesaAltri, hint: 'Pratiche già inoltrate e attualmente presso altri ruoli.', tone: 'violet' },
-    { id: 'da_prendere', label: 'Da prendere in carico', value: daPrendere, hint: 'Pratiche ancora da avviare nella fase corrente.', tone: 'slate' },
-    { id: 'ferme', label: `Ferme da > ${Number(cfg.staleDays || 15)} gg`, value: ferme, hint: 'Pratiche senza aggiornamenti oltre la soglia impostata.', tone: 'rose' },
-    { id: 'sanz', label: 'Fase sanzionatoria', value: sanz, hint: 'Pratiche avviate alla fase amministrativa.', tone: 'amber' }
-  ]
-
   return (
     <div style={{ width: '100%', height: '100%', overflow: 'hidden', color: cfg.textColor, boxSizing: 'border-box', padding: 14 }}>
       <div style={{
@@ -1412,7 +1537,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               <div style={{ color: cfg.mutedColor, fontSize: 13, marginTop: 7, maxWidth: 760, lineHeight: 1.42 }}>Quadro dinamico delle pratiche, degli uffici e delle tipologie di infrazione.</div>
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginTop: 11 }}>
                 {lastLoad && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Aggiornato: {new Date(lastLoad).toLocaleString('it-IT')}</div>}
-                {cfg.showTechnicalInfo && view && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Ambito dati: {view.viewName}</div>}
+                {cfg.showTechnicalInfo && views.length > 0 && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>{views.length > 1 ? 'Ambiti dati' : 'Ambito dati'}: {viewsLabel}</div>}
                 <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Record caricati: {records.length}</div>
               </div>
             </div>
@@ -1432,9 +1557,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           {loading && <div style={{ padding: 14, marginBottom: 16, borderRadius: 14, background: 'rgba(255,255,255,0.08)', color: cfg.mutedColor }}>Caricamento dashboard...</div>}
           {error && <div style={{ padding: 14, marginBottom: 16, borderRadius: 14, background: 'rgba(127,29,29,0.40)', border: '1px solid rgba(248,113,113,0.35)', color: '#fecaca' }}>{error}</div>}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 12 }}>
-            {metrics.map(m => <MetricCard key={m.id} m={m} cfg={cfg} />)}
-          </div>
+          <OperationalMetricsSummary
+            cfg={cfg}
+            totalLabel='Pratiche analizzate'
+            total={displayRecords.length}
+            attesaMia={attesaMia}
+            attesaAltri={attesaAltri}
+            daPrendere={daPrendere}
+            ferme={ferme}
+            sanz={sanz}
+            showWorkloadSplit={!(user?.isAdmin || user?.isWorkflowAdmin)}
+          />
 
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
             <span style={{ color: cfg.mutedColor, fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1.1 }}>Filtri attivi</span>
@@ -1540,7 +1673,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                   <div style={{ color: cfg.mutedColor, fontSize: 13, marginTop: 7, maxWidth: 760, lineHeight: 1.42 }}>{cfg.subtitle || 'Sintesi delle attività, delle pratiche ferme e dell’avanzamento delle lavorazioni.'}</div>
                   <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
                     {lastLoad && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Aggiornato: {new Date(lastLoad).toLocaleString('it-IT')}</div>}
-                    {cfg.showTechnicalInfo && view && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Ambito dati: {view.viewName}</div>}
+                    {cfg.showTechnicalInfo && views.length > 0 && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>{views.length > 1 ? 'Ambiti dati' : 'Ambito dati'}: {viewsLabel}</div>}
                     <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Record caricati: {records.length}</div>
                   </div>
                 </div>
@@ -1550,9 +1683,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               {loading && <div style={{ padding: 14, marginBottom: 16, borderRadius: 14, background: 'rgba(255,255,255,0.08)', color: cfg.mutedColor }}>Caricamento dashboard...</div>}
               {error && <div style={{ padding: 14, marginBottom: 16, borderRadius: 14, background: 'rgba(127,29,29,0.40)', border: '1px solid rgba(248,113,113,0.35)', color: '#fecaca' }}>{error}</div>}
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 12 }}>
-                {metrics.map(m => <MetricCard key={m.id} m={m} cfg={cfg} />)}
-              </div>
+              <OperationalMetricsSummary
+                cfg={cfg}
+                totalLabel='Pratiche di competenza'
+                total={displayRecords.length}
+                attesaMia={attesaMia}
+                attesaAltri={attesaAltri}
+                daPrendere={daPrendere}
+                ferme={ferme}
+                sanz={sanz}
+                showWorkloadSplit={!(user?.isAdmin || user?.isWorkflowAdmin)}
+              />
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12, marginBottom: 12 }}>
                 <HorizontalBars title='Pratiche per fase di lavorazione' items={byFase} total={displayRecords.length} cfg={cfg} />

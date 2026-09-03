@@ -136,14 +136,26 @@ async function ensureUtentiCache (): Promise<Map<string, UtenteCached> | null> {
       const uname = String(a.username || '').trim()
       if (!uname) continue
       const areaCod = normalizeAreaCode(firstMeaningfulValue(a.area_cod, a.area))
-      map.set(uname, {
+      const entry: UtenteCached = {
         full_name: a.full_name || uname,
         area: a.area != null ? Number(a.area) : null,
         settore: a.settore != null ? Number(a.settore) : null,
         ruolo_cod: normalizeRoleCode(a.ruolo_cod),
         area_cod: areaCod,
         settore_cod: normalizeSettoreCode(areaCod, firstMeaningfulValue(a.settore_cod, a.settore))
-      })
+      }
+      // Lo stesso username può avere più assegnazioni. Manteniamo una chiave
+      // canonica per le risoluzioni anagrafiche per username e una voce distinta
+      // per ogni assegnazione, così le ricerche per ruolo/area/settore non perdono
+      // righe a causa dell'ultima map.set().
+      const baseKey = uname.toLowerCase()
+      if (!map.has(baseKey)) {
+        map.set(baseKey, entry)
+      } else {
+        let suffix = 2
+        while (map.has(`${baseKey}::${suffix}`)) suffix += 1
+        map.set(`${baseKey}::${suffix}`, entry)
+      }
     }
     _utentiCache = map
     return map

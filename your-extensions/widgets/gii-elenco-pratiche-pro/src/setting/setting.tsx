@@ -137,6 +137,7 @@ const BADGE_OGGETTO_KEYS = [
   'oggettoBadgeWidth',
   'oggettoBadgeContentOffset',
   'oggettoBadgeOpacity',
+  'oggettoBadgeColorBozza',
   'oggettoBadgeColorNuovaRilevazione',
   'oggettoBadgeColorAssegnazione',
   'oggettoBadgeColorTrasmissione',
@@ -440,6 +441,7 @@ export default function Setting(props: Props) {
         <div style={P.hint}>Il rientro testo viene applicato anche all’intestazione della prima colonna, così celle e header restano allineati.</div>
         <div style={P.grp}>Colori per oggetto</div>
         {([
+          { name:'Bozza', field:'oggettoBadgeColorBozza' },
           { name:'Nuova rilevazione', field:'oggettoBadgeColorNuovaRilevazione' },
           { name:'Assegnazione istruttoria', field:'oggettoBadgeColorAssegnazione' },
           { name:'Trasmissione istruttoria', field:'oggettoBadgeColorTrasmissione' },
