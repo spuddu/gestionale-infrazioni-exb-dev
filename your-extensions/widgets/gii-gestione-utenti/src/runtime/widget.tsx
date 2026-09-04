@@ -1265,13 +1265,20 @@ function exportCSV(utenti: UtenteRecord[], domainLabels?: DomainLabelMap): void 
   })
 
   const trUfficioAutoByUsername = new Map<string, string>()
+  const trUfficiListaByUsername = new Map<string, string>()
+  const trUfficiDisplayByUsername = new Map<string, string>()
   trOfficesByUsername.forEach((offices, username) => {
-    if (offices.size !== 1) {
-      trUfficioAutoByUsername.set(username, '')
-      return
-    }
-    const officeId = Array.from(offices)[0]
-    trUfficioAutoByUsername.set(username, labelForUfficio(officeId, domainLabels))
+    const officeIds = Array.from(offices).sort((a, b) => a - b)
+    const officeLabels = officeIds
+      .map(officeId => labelForUfficio(officeId, domainLabels))
+      .filter(Boolean)
+
+    trUfficioAutoByUsername.set(username, officeLabels.length === 1 ? officeLabels[0] : '')
+    trUfficiListaByUsername.set(
+      username,
+      officeLabels.length > 0 ? `|||${officeLabels.join('|||')}|||` : ''
+    )
+    trUfficiDisplayByUsername.set(username, officeLabels.join(' · '))
   })
 
   const rows = utenti.map(u => {
@@ -1282,19 +1289,22 @@ function exportCSV(utenti: UtenteRecord[], domainLabels?: DomainLabelMap): void 
     // id_ufficio: valore numerico (codice ufficio)
     const id_uff  = u.ufficio ?? ''
     const gruppo  = u.gruppo ?? ''
-    const ufficioTrAuto = trUfficioAutoByUsername.get(String(u.username ?? '').trim()) ?? ''
+    const username = String(u.username ?? '').trim()
+    const ufficioTrAuto = trUfficioAutoByUsername.get(username) ?? ''
+    const ufficiTrLista = trUfficiListaByUsername.get(username) ?? ''
+    const ufficiTrDisplay = trUfficiDisplayByUsername.get(username) ?? ''
     // Escaping celle con virgole
     const esc = (v: any) => {
       const s = String(v ?? '')
       return s.includes(',') || s.includes('"') || s.includes('\n')
         ? `"${s.replace(/"/g, '""')}"` : s
     }
-    return [u.username, u.nome, u.cognome, u.titolo, u.email, formatBirthDate(u.data_nascita), u.full_name, area, settore, ufficio, ruolo, id_uff, gruppo, ufficioTrAuto]
+    return [u.username, u.nome, u.cognome, u.titolo, u.email, formatBirthDate(u.data_nascita), u.full_name, area, settore, ufficio, ruolo, id_uff, gruppo, ufficioTrAuto, ufficiTrLista, ufficiTrDisplay]
       .map(esc).join(',')
   })
 
-  const csv = ['username,nome,cognome,titolo,email,data_nascita,full_name,area_cod,settore_cod,ufficio,ruolo_cod,id_ufficio,gruppo,ufficio_tr_auto', ...rows].join('\n')
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const csv = ['username,nome,cognome,titolo,email,data_nascita,full_name,area_cod,settore_cod,ufficio,ruolo_cod,id_ufficio,gruppo,ufficio_tr_auto,uffici_tr_lista,uffici_tr_display', ...rows].join('\n')
+  const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' })
   const url  = URL.createObjectURL(blob)
   const a    = document.createElement('a')
   a.href = url; a.download = 'utenti.csv'; a.click()

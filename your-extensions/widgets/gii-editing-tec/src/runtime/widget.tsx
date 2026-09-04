@@ -5397,12 +5397,16 @@ React.useEffect(() => {
 
 const noteSpeseExpectedCodesKeyForRestore = React.useMemo(() => getNotaSpeseCasistiche(draft).map(c => c.codice).sort().join('|'), [draft])
 
+const noteSpeseLoadUrl = (isReadOnly || isRitAgrTecLimitedEdit)
+  ? noteSpeseCfg.detailUrl
+  : noteSpeseCfg.detailUrlWrite
+
 const loadNotaSpeseDraft = React.useCallback(async () => {
   if (mode !== 'edit' || currentOid == null || !currentGlobalId || noteSpeseMissing.length > 0) return
   setNoteSpeseBusy(true)
   try {
     const [rows, perc] = await Promise.all([
-      queryNotaSpeseRows(noteSpeseCfg.detailUrlWrite, currentGlobalId),
+      queryNotaSpeseRows(noteSpeseLoadUrl, currentGlobalId),
       getNsPercentuale(noteSpeseCfg.parametriUrl, noteSpeseCfg.parametroCode)
     ])
     const grouped = nsRowsFromFlat(rows)
@@ -5503,7 +5507,7 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
   } finally {
     setNoteSpeseBusy(false)
   }
-}, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseCfg, activeNotaSpeseCasistica, art30RecuperoMode, noteSpeseDraftStorageKey, isReadOnly, isRitAgrTecLimitedEdit, noteSpeseExpectedCodesKeyForRestore])
+}, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseCfg, noteSpeseLoadUrl, activeNotaSpeseCasistica, art30RecuperoMode, noteSpeseDraftStorageKey, isReadOnly, isRitAgrTecLimitedEdit, noteSpeseExpectedCodesKeyForRestore])
 
 const refreshNotaSpeseSummary = React.useCallback(async () => {
   const rows = nsRowsByCategoryToFlat(noteSpeseRowsDraft)
