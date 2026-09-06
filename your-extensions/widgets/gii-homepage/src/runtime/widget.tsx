@@ -357,16 +357,34 @@ function gotoPage(pageToken: string): void {
 
 
 // ── Card ──────────────────────────────────────────────────────────────────────
+function colorWithAlpha(color: string, factor: number): string {
+  const s = String(color || '').trim()
+  const f = Math.max(0, Math.min(1, factor))
+  const rgba = s.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([0-9.]+))?\s*\)$/i)
+  if (rgba) {
+    const a = rgba[4] == null ? 1 : Math.max(0, Math.min(1, Number(rgba[4])))
+    return `rgba(${rgba[1]},${rgba[2]},${rgba[3]},${a * f})`
+  }
+  const hex = s.match(/^#([0-9a-f]{6})([0-9a-f]{2})?$/i)
+  if (hex) {
+    const rgb = hex[1]
+    const a = hex[2] ? parseInt(hex[2], 16) / 255 : 1
+    return `rgba(${parseInt(rgb.slice(0,2),16)},${parseInt(rgb.slice(2,4),16)},${parseInt(rgb.slice(4,6),16)},${a * f})`
+  }
+  return s
+}
+
 function Card(p: { card: CardConfig; cfg: any; idx: number }) {
   const { card, cfg } = p
   const [hov, setHov] = React.useState(false)
   const icon = CARD_ICONS[inferCardIcon(card)] || DEFAULT_ICON
   const baseBg = (card.colorBg && String(card.colorBg).trim()) ? String(card.colorBg).trim() : '#1d4ed8'
-  const hoverBg = (card.colorBgHover && String(card.colorBgHover).trim())
-    ? card.colorBgHover
-    : `linear-gradient(135deg,${baseBg}ee 0%,${baseBg}cc 100%)`
-  const restBg = (card.colorBgRest && String(card.colorBgRest).trim())
-    ? card.colorBgRest
+  // Mantiene il distacco temporale originale: lo sfondo a gradiente cambia subito,
+  // mentre accento, bordo e CTA terminano la propria transizione in uscita.
+  // Lo stesso colore ai due estremi conserva esattamente l'alfa scelto nel Setting.
+  const hoverBg = `linear-gradient(135deg,${baseBg} 0%,${baseBg} 100%)`
+  const restBg = (cfg.cardRestBg && String(cfg.cardRestBg).trim())
+    ? String(cfg.cardRestBg).trim()
     : 'rgba(255,255,255,0.05)'
   return (
     <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
@@ -382,11 +400,11 @@ function Card(p: { card: CardConfig; cfg: any; idx: number }) {
         backdropFilter:'blur(12px)', padding:cfg.cardPadding,
         transition:'all 0.25s cubic-bezier(0.4,0,0.2,1)',
         transform: hov ? 'translateY(-4px)' : 'translateY(0)',
-        boxShadow: hov ? `0 20px 40px rgba(0,0,0,0.3),0 0 0 1px ${card.colorAccent}44` : '0 4px 16px rgba(0,0,0,0.15)',
+        boxShadow: hov ? `0 20px 40px rgba(0,0,0,0.3),0 0 0 1px ${colorWithAlpha(card.colorAccent, 0.27)}` : '0 4px 16px rgba(0,0,0,0.15)',
         animationDelay:`${p.idx*80}ms`, animationName:'fadeInUp',
         animationDuration:'0.5s', animationFillMode:'both', animationTimingFunction:'cubic-bezier(0.4,0,0.2,1)' }}>
       <div style={{ display:'flex',alignItems:'center',gap:14,marginBottom:16 }}>
-        <div style={{ width:48,height:48,flex:'0 0 48px',borderRadius:12, background:hov?`${card.colorAccent}33`:'rgba(255,255,255,0.08)', display:'flex',alignItems:'center',justifyContent:'center', transition:'background 0.25s', color:hov?card.colorAccent:'rgba(255,255,255,0.7)' }}>
+        <div style={{ width:48,height:48,flex:'0 0 48px',borderRadius:12, background:hov?colorWithAlpha(card.colorAccent, 0.20):'rgba(255,255,255,0.08)', display:'flex',alignItems:'center',justifyContent:'center', transition:'background 0.25s', color:hov?card.colorAccent:'rgba(255,255,255,0.7)' }}>
           <div style={{ width:24,height:24 }} dangerouslySetInnerHTML={{ __html: icon }} />
         </div>
         <div style={{

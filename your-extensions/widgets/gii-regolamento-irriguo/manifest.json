@@ -1,0 +1,16 @@
+{
+  "name": "gii-regolamento-irriguo",
+  "label": "GII - Regolamento Irriguo",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Consultazione ad indice del Regolamento irriguo con artt. 1-45 e regolamento condotte private letti da GII_REGOLAMENTO_ARTICOLI, ricerca globale e rimandi interni.",
+  "translatedLocales": [
+    "it"
+  ],
+  "defaultSize": {
+    "width": 1200,
+    "height": 800
+  }
+}

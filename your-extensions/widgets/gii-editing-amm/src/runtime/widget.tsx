@@ -3694,9 +3694,11 @@ function splitArticleCodes (raw: any): string[] {
 }
 
 function formatArticleCode (raw: any): string {
-  const s = String(raw || '').trim()
+  const s = String(raw || '').trim().toUpperCase()
+  const rcp = s.match(/^RCP0*(\d{1,2})$/i)
+  if (rcp) return `Punto ${Number(rcp[1])}`
   const article = normalizeArticleNumber(s)
-  return article ? `Art. ${article}` : s.toUpperCase()
+  return article ? `Art. ${article}` : s
 }
 
 function formatArticleFallback (raw: any): string {
@@ -6512,7 +6514,8 @@ function buildSanzioneGroups (
   const artByCode = new Map<string, RegolamentoArticolo>()
   articoli.forEach(article => {
     const rawCode = String(article.codice_articolo || '').trim().toUpperCase()
-    const articleNumber = normalizeArticleNumber(rawCode || article.numero_articolo)
+    const isRcp = /^RCP0*\d{1,2}$/i.test(rawCode)
+    const articleNumber = isRcp ? '' : normalizeArticleNumber(rawCode || article.numero_articolo)
     if (rawCode) artByCode.set(rawCode, article)
     if (articleNumber) {
       artByCode.set(articleNumber, article)
@@ -6720,9 +6723,6 @@ function buildSanzioneGroups (
 function articleTitleLine (article?: RegolamentoArticolo | null, fallback?: string): string {
   if (article) {
     const code = formatArticleCode(article.codice_articolo)
-    if (normalizeArticleNumber(article.codice_articolo || article.numero_articolo) === '41') {
-      return 'Art. 41 — Sanzioni per prelievi abusivi e per inosservanza termini'
-    }
     return article.titolo_articolo ? `${code} — ${article.titolo_articolo}` : code
   }
   return formatArticleFallback(fallback)

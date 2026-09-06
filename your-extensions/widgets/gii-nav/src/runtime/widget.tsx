@@ -3,6 +3,7 @@
 import { React, jsx, ReactRedux, type IMState, type AllWidgetProps, SessionManager, UrlManager, getAppStore } from 'jimu-core'
 import type { IMConfig, NavItem } from '../config'
 import { defaultConfig } from '../config'
+import { applyHomeCardColors } from '../home-card-colors'
 
 
 const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
@@ -178,6 +179,23 @@ const NAV_ICONS: Record<string, string> = {
 const NAV_DEFAULT_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg>`
 
 // ── NavButton ─────────────────────────────────────────────────────────────────
+function colorWithAlpha(color: string, factor: number): string {
+  const s = String(color || '').trim()
+  const f = Math.max(0, Math.min(1, factor))
+  const rgba = s.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([0-9.]+))?\s*\)$/i)
+  if (rgba) {
+    const a = rgba[4] == null ? 1 : Math.max(0, Math.min(1, Number(rgba[4])))
+    return `rgba(${rgba[1]},${rgba[2]},${rgba[3]},${a * f})`
+  }
+  const hex = s.match(/^#([0-9a-f]{6})([0-9a-f]{2})?$/i)
+  if (hex) {
+    const rgb = hex[1]
+    const a = hex[2] ? parseInt(hex[2], 16) / 255 : 1
+    return `rgba(${parseInt(rgb.slice(0,2),16)},${parseInt(rgb.slice(2,4),16)},${parseInt(rgb.slice(4,6),16)},${a * f})`
+  }
+  return s
+}
+
 function NavButton(p: { item: NavItem; cfg: any; idx: number; currentPageId: string | null; animate: boolean }) {
   const { item, cfg, currentPageId, animate } = p
   const [hov, setHov] = React.useState(false)
@@ -195,12 +213,12 @@ function NavButton(p: { item: NavItem; cfg: any; idx: number; currentPageId: str
         cursor: 'pointer',
         borderRadius: cfg.itemBorderRadius,
         border: `1.5px solid ${hot ? item.colorAccent : 'rgba(255,255,255,0.10)'}`,
-        background: hot ? (item.colorBgHover || `linear-gradient(135deg,${item.colorBg}ee 0%,${item.colorBg}cc 100%)`) : (item.colorBgRest || 'rgba(255,255,255,0.05)'),
+        background: hot ? (item.colorBgHover || item.colorBg) : (item.colorBgRest || 'rgba(255,255,255,0.05)'),
         backdropFilter: 'blur(12px)',
         padding: cfg.itemPadding,
         display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10,
         transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)',
-        boxShadow: hov ? `0 20px 40px rgba(0,0,0,0.3),0 0 0 1px ${item.colorAccent}44` : '0 4px 16px rgba(0,0,0,0.15)',
+        boxShadow: hov ? `0 20px 40px rgba(0,0,0,0.3),0 0 0 1px ${colorWithAlpha(item.colorAccent, 0.27)}` : '0 4px 16px rgba(0,0,0,0.15)',
         ...(animate ? {
           animationName: 'fadeInUp', animationDuration: '0.5s',
           animationDelay: `${p.idx * 80}ms`, animationFillMode: 'both',
@@ -209,7 +227,7 @@ function NavButton(p: { item: NavItem; cfg: any; idx: number; currentPageId: str
       }}>
       <div style={{
         width: 28, height: 28, borderRadius: 7, flexShrink: 0,
-        background: hov ? `${item.colorAccent}33` : 'rgba(255,255,255,0.08)',
+        background: hov ? colorWithAlpha(item.colorAccent, 0.20) : 'rgba(255,255,255,0.08)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: hov ? item.colorAccent : 'rgba(255,255,255,0.7)',
         transition: 'background 0.25s', padding: 4, boxSizing: 'border-box' as const
@@ -234,6 +252,17 @@ type Props = AllWidgetProps<IMConfig>
 export default function Widget(props: Props) {
   const cfg: any = { ...defaultConfig, ...(props.config as any) }
   const items: NavItem[] = Array.isArray(cfg.items) ? cfg.items : defaultConfig.items
+
+  // AppConfig corrente. In Builder usiamo la copia in editing, così un cambio colore
+  // nella Home si riflette immediatamente su tutte le istanze del nav senza salvarlo qui.
+  const appConfig = ReactRedux.useSelector((state: IMState) => {
+    const s: any = state as any
+    return s?.appStateInBuilder?.appConfig ?? s?.appConfig
+  })
+
+  // I colori delle voci sono ereditati dalla card Home che punta alla stessa pagina.
+  // I valori presenti nel config del nav restano solo come fallback di compatibilità.
+  const effectiveItems: NavItem[] = items.map(item => applyHomeCardColors(item, appConfig))
 
   // Pagina corrente dallo store Redux di ExB (reagisce a UrlManager.changePage)
   const currentPageId = ReactRedux.useSelector((state: IMState) => {
@@ -307,7 +336,7 @@ export default function Widget(props: Props) {
     return item.roles.some(role => effectiveRoles.includes(role))
   }
 
-  const visibleItems = [...items].sort((a, b) => a.order - b.order).filter(isVisible)
+  const visibleItems = [...effectiveItems].sort((a, b) => a.order - b.order).filter(isVisible)
   const isHorizontal = cfg.direction === 'horizontal'
   const initialPadding = Number.isFinite(Number(cfg.initialPadding)) ? Number(cfg.initialPadding) : 8
 

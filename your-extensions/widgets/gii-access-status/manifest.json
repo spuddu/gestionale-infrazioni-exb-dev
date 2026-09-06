@@ -1,0 +1,11 @@
+{
+  "name": "gii-access-status",
+  "label": "GII Stato Accesso",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Visualizza lo stato del gate applicativo del Gestionale Infrazioni Irrigue.",
+  "translatedLocales": ["it"],
+  "defaultSize": { "width": 420, "height": 110 }
+}

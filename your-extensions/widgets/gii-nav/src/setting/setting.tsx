@@ -1,8 +1,9 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, getAppStore } from 'jimu-core'
+import { React, jsx, ReactRedux, type IMState, getAppStore } from 'jimu-core'
 import { type AllWidgetSettingProps } from 'jimu-for-builder'
 import { defaultConfig, type IMConfig, type NavItem } from '../config'
+import { applyHomeCardColors, findHomeCardForNavItem } from '../home-card-colors'
 
 const P = {
   wrap:    { padding:'0 12px 32px', fontSize:13, background:'#1a1f2e', minHeight:'100%', color:'#e5e7eb' } as React.CSSProperties,
@@ -163,6 +164,14 @@ function makeNewItem(order: number): NavItem {
 export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const cfg: any = { ...defaultConfig, ...(props.config as any) }
   const items: NavItem[] = Array.isArray(cfg.items) ? cfg.items.map((i:any)=>({...i})) : defaultConfig.items
+
+  // Config dell'Experience in editing: serve solo per mostrare nel Setting del nav
+  // gli stessi colori della card Home corrispondente. I colori si modificano dalla Home.
+  const appConfig = ReactRedux.useSelector((state: IMState) => {
+    const s: any = state as any
+    return s?.appStateInBuilder?.appConfig ?? s?.appConfig
+  })
+
   const [openItem, setOpenItem] = React.useState<string|null>(null)
 
   const set = (key:string, value:any) =>
@@ -232,13 +241,15 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         const ri = items.findIndex(it=>it.id===item.id)
         const isCustom = item.id.startsWith('nav_custom_')
         const isO = openItem===item.id
+        const homeCard = findHomeCardForNavItem(item, appConfig)
+        const visualItem = applyHomeCardColors(item, appConfig)
         return (
           <div key={item.id} style={{ border:'1px solid rgba(255,255,255,0.10)', borderRadius:10, padding:'10px 12px', marginBottom:8, background:'rgba(255,255,255,0.04)', opacity:item.visible?1:0.55 }}>
             {/* Header voce */}
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',cursor:'pointer',userSelect:'none' as const}}
               onClick={()=>setOpenItem(isO?null:item.id)}>
               <div style={{display:'flex',alignItems:'center',gap:8,minWidth:0}}>
-                <div style={{width:12,height:12,borderRadius:3,background:item.colorBg,flexShrink:0,border:`1px solid ${item.colorAccent}`}}/>
+                <div style={{width:12,height:12,borderRadius:3,background:visualItem.colorBg,flexShrink:0,border:`1px solid ${visualItem.colorAccent}`}}/>
                 <span style={{fontWeight:600,fontSize:12,color:'#e5e7eb',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{item.label}</span>
                 {!item.visible && <span style={{fontSize:10,color:'#a0aec0',fontStyle:'italic',flexShrink:0}}>(nascosta)</span>}
                 {isCustom && <span style={{fontSize:9,color:'#6b7280',fontStyle:'italic',flexShrink:0}}>custom</span>}
@@ -263,25 +274,29 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
               <label style={P.lbl}>Pagina di destinazione</label>
               <PageSel value={item.hashPage} onChange={v=>setItem(ri,{hashPage:v})}/>
 
-              <div style={P.row2}>
-                <div><label style={P.lbl}>Colore sfondo</label><ColInp value={item.colorBg} onChange={v=>{
-                  // Aggiorna colorBg e di conseguenza anche i colori derivati
-                  const hex = /^#[0-9a-fA-F]{6}$/.test(v) ? v : item.colorBg
-                  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16)
-                  setItem(ri,{
-                    colorBg: v,
-                    colorBgHover: `${hex}ee`,
-                    colorBgRest: `rgba(${r},${g},${b},0.25)`
-                  })
-                }}/></div>
-                <div><label style={P.lbl}>Colore accento</label><ColInp value={item.colorAccent} onChange={v=>setItem(ri,{colorAccent:v})}/></div>
-              </div>
-              <div style={P.row2}>
-                <div><label style={P.lbl}>Sfondo a riposo</label><ColInp value={item.colorBgRest||'rgba(255,255,255,0.05)'} onChange={v=>setItem(ri,{colorBgRest:v})}/></div>
-                <div><label style={P.lbl}>Sfondo hover/attivo</label><ColInp value={item.colorBgHover||`${item.colorBg}ee`} onChange={v=>setItem(ri,{colorBgHover:v})}/></div>
-              </div>
-              <div style={{ fontSize:10, color:'#6b7280', marginTop:3, lineHeight:1.4 }}>
-                Cambiando <strong style={{color:'#a0aec0'}}>Colore sfondo</strong> i campi sottostanti si aggiornano automaticamente. Puoi poi affinarli manualmente.
+              <div style={{
+                marginTop:10,
+                padding:'9px 10px',
+                borderRadius:7,
+                border:'1px solid rgba(147,197,253,0.18)',
+                background:'rgba(59,130,246,0.07)',
+                display:'flex',
+                alignItems:'center',
+                gap:8
+              }}>
+                <div style={{
+                  width:14,
+                  height:14,
+                  borderRadius:4,
+                  background:visualItem.colorBg,
+                  border:`1px solid ${visualItem.colorAccent}`,
+                  flexShrink:0
+                }}/>
+                <div style={{ fontSize:10.5, lineHeight:1.4, color:homeCard ? '#bfdbfe' : '#fbbf24' }}>
+                  {homeCard
+                    ? <>Colori ereditati dalla card <strong>{homeCard.label || item.label}</strong> della Home. Per modificarli usa il Setting di GII Homepage.</>
+                    : <>Nessuna card Home corrispondente trovata: questa voce usa i colori di fallback già salvati nel nav.</>}
+                </div>
               </div>
 
               <label style={P.lbl}>Ruoli visibili</label>

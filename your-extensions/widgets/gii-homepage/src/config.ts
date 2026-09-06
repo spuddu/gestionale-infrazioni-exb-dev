@@ -45,6 +45,7 @@ export interface Config {
   // ── Layout cards ──
   cardsGap: number; cardMinWidth: number
   cardBorderRadius: number; cardPadding: number
+  cardRestBg: string
 
   // ── Testi cards ──
   cardLabelFont: string; cardLabelSize: number; cardLabelWeight: number
@@ -110,6 +111,7 @@ export const defaultConfig: Config = {
   sectionLabelUppercase: true,
 
   cardsGap: 16, cardMinWidth: 200, cardBorderRadius: 16, cardPadding: 28,
+  cardRestBg: 'rgba(255,255,255,0.05)',
 
   cardLabelFont: "'Crimson Pro', Georgia, serif",
   cardLabelSize: 18, cardLabelWeight: 600,

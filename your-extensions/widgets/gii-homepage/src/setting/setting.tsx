@@ -30,7 +30,7 @@ function NumInp(p: { value:number; onChange:(v:number)=>void; min?:number; max?:
     </div>
   )
 }
-function ColInp(p: { value:string; onChange:(v:string)=>void }) {
+function ColInp(p: { value:string; onChange:(v:string)=>void; transparencyLabel?:string }) {
   const toHex = (n: number) => {
     const v = Math.max(0, Math.min(255, Math.round(n)))
     return v.toString(16).padStart(2, '0')
@@ -97,6 +97,7 @@ function ColInp(p: { value:string; onChange:(v:string)=>void }) {
   const hexVal = normalizeToHexPreview(p.value) ?? '#1d4ed8'
   const alpha = parseAlpha(p.value)
   const aPct = Math.round(alpha * 100)
+  const sliderPct = p.transparencyLabel ? 100 - aPct : aPct
   const isHex8 = /^#[0-9a-fA-F]{8}$/.test(raw)
   const alphaHex = isHex8 ? raw.slice(7, 9) : ''
 
@@ -166,18 +167,37 @@ function ColInp(p: { value:string; onChange:(v:string)=>void }) {
       </div>
 
       {/* Slider trasparenza */}
+      {p.transparencyLabel && <div style={{ fontSize:10, color:'#a0aec0', lineHeight:1.2 }}>{p.transparencyLabel}</div>}
       <div style={{ display:'flex', alignItems:'center', gap:7, minWidth:0 }}>
-        <span style={{ fontSize:10, color:'#a0aec0', width:16, textAlign:'center' as const }}>α</span>
+        {!p.transparencyLabel && <span style={{ fontSize:10, color:'#a0aec0', width:16, flexShrink:0, textAlign:'center' as const }}>α</span>}
+        {p.transparencyLabel && <button
+          type='button'
+          title='Diminuisci trasparenza dell’1%'
+          aria-label='Diminuisci trasparenza dell’1%'
+          onClick={()=>onAlpha(100 - Math.max(0, sliderPct - 1))}
+          disabled={sliderPct <= 0}
+          style={{ width:22, height:22, padding:0, borderRadius:5, border:'1px solid rgba(255,255,255,0.18)', background:'rgba(255,255,255,0.07)', color:'#d1d5db', fontSize:15, lineHeight:'20px', cursor:sliderPct<=0?'default':'pointer', opacity:sliderPct<=0?0.45:1, flexShrink:0 }}>
+          −
+        </button>}
         <input
           type='range'
           min={0}
           max={100}
           step={1}
-          value={aPct}
-          onChange={e=>onAlpha(Number(e.target.value))}
+          value={sliderPct}
+          onChange={e=>onAlpha(p.transparencyLabel ? 100 - Number(e.target.value) : Number(e.target.value))}
           style={{ flex:'1 1 auto', minWidth:0 }}
         />
-        <span style={{ fontSize:10, color:'#a0aec0', width:34, textAlign:'right' as const }}>{aPct}%</span>
+        {p.transparencyLabel && <button
+          type='button'
+          title='Aumenta trasparenza dell’1%'
+          aria-label='Aumenta trasparenza dell’1%'
+          onClick={()=>onAlpha(100 - Math.min(100, sliderPct + 1))}
+          disabled={sliderPct >= 100}
+          style={{ width:22, height:22, padding:0, borderRadius:5, border:'1px solid rgba(255,255,255,0.18)', background:'rgba(255,255,255,0.07)', color:'#d1d5db', fontSize:15, lineHeight:'20px', cursor:sliderPct>=100?'default':'pointer', opacity:sliderPct>=100?0.45:1, flexShrink:0 }}>
+          +
+        </button>}
+        <span style={{ fontSize:10, color:'#a0aec0', width:34, textAlign:'right' as const }}>{sliderPct}%</span>
       </div>
     </div>
   )
@@ -669,29 +689,12 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   }
 
   
-  // ── Migrazione (una tantum): se lo "Sfondo hover" era solo il default derivato dal colore sezione,
-  // lo rendiamo "automatico" (valore vuoto), così cambiando "Colore sezione" cambia anche l'hover.
+  // ── Migrazione (una tantum): assegna una chiave alle vecchie card prive di icona.
   React.useEffect(() => {
     let changed = false
     const nextCards = cards.map((c: any) => {
-      const bg   = String(c.colorBg || '').trim().toLowerCase()
-      const hov  = String(c.colorBgHover || '').trim().toLowerCase()
-      const rest = String(c.colorBgRest || '').trim()
-
       let out: any = c
       let localChanged = false
-
-      // Hover: se era solo il default derivato dal colore sezione, rendilo "automatico" (vuoto)
-      if (bg && /^#[0-9a-f]{6}$/.test(bg) && hov === `${bg}ee`) {
-        out = { ...out, colorBgHover: '' }
-        localChanged = true
-      }
-
-      // Riposo: se mancante, allinea al valore effettivo usato nelle card di default
-      if (!rest) {
-        out = { ...out, colorBgRest: '#192e4d' }
-        localChanged = true
-      }
 
       // Icona: per le vecchie configurazioni prive di campo, assegna una chiave configurabile
       if (!String(c.icon || '').trim()) {
@@ -875,6 +878,9 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
           <div><label style={P.lbl}>Bordi arrot.</label><NumInp value={cfg.cardBorderRadius} onChange={v=>set('cardBorderRadius',v)} min={0} max={40} unit='px'/></div>
           <div><label style={P.lbl}>Padding</label><NumInp value={cfg.cardPadding} onChange={v=>set('cardPadding',v)} min={8} max={60} unit='px'/></div>
         </div>
+        <label style={P.lbl}>Sfondo a riposo</label>
+        <ColInp value={cfg.cardRestBg || 'rgba(255,255,255,0.05)'} onChange={v=>set('cardRestBg',v)}/>
+        <div style={P.hint}>Unico per tutte le card.</div>
       </div>}
 
       {/* ═══ TESTI CARDS ═══ */}
@@ -995,19 +1001,12 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
                   return null
                 })()}
 
-                <label style={P.lbl}>Colore sezione</label>
-                <ColInp value={card.colorBg} onChange={v=>setCard(card.id,{colorBg:v})}/>
-                <div style={P.hint}>Usato per l’hover automatico se “Sfondo hover” è vuoto.</div>
+                <label style={P.lbl}>Colore card / trasparenza</label>
+                <ColInp value={card.colorBg} onChange={v=>setCard(card.id,{colorBg:v})} transparencyLabel='Trasparenza hover'/>
+                <div style={P.hint}>Usato per lo sfondo della card al passaggio del mouse.</div>
 
-                <label style={P.lbl}>Colore accento</label>
-                <ColInp value={card.colorAccent} onChange={v=>setCard(card.id,{colorAccent:v})}/>
-
-                <label style={P.lbl}>Sfondo a riposo</label>
-                <ColInp value={card.colorBgRest||'rgba(255,255,255,0.05)'} onChange={v=>setCard(card.id,{colorBgRest:v})}/>
-
-                <label style={P.lbl}>Sfondo hover</label>
-                <ColInp value={String(card.colorBgHover||'')} onChange={v=>setCard(card.id,{colorBgHover:v})}/>
-                <div style={P.hint}>Vuoto = automatico, derivato dal “Colore sezione”.</div>
+                <label style={P.lbl}>Colore accento / trasparenza</label>
+                <ColInp value={card.colorAccent} onChange={v=>setCard(card.id,{colorAccent:v})} transparencyLabel='Trasparenza accento'/>
 
                 <label style={P.lbl}>Ruoli visibili</label>
                 <div style={{ display:'flex',flexWrap:'wrap' as const,gap:5,marginTop:4 }}>

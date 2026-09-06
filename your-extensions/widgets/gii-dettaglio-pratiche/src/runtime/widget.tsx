@@ -958,8 +958,11 @@ async function regArtQueryAttributes (rawUrl: any): Promise<any[]> {
 function normalizeRegolamentoArticleKey (raw: any): string {
   const s = String(raw ?? '').trim().toUpperCase()
   if (!s) return ''
-  const m = s.match(/(?:ART(?:ICOLO)?\.?\s*)?0*(\d{1,2})(?:\.\d+)?/i)
-  return m ? `ART${Number(m[1])}` : s.replace(/[\s._-]+/g, '')
+  const compact = s.replace(/\s+/g, '')
+  const rcp = compact.match(/^RCP0*(\d{1,2})$/i)
+  if (rcp) return `RCP${Number(rcp[1])}`
+  const art = compact.match(/^(?:ART(?:ICOLO)?\.?)?0*(\d{1,2})(?:\.\d+)?$/i)
+  return art ? `ART${Number(art[1])}` : compact.replace(/[._-]+/g, '')
 }
 
 function normalizeRegolamentoArticleNumber (raw: any): string {
@@ -1008,9 +1011,12 @@ function isRegolamentoArticleUsable (article: RegolamentoArticolo, refMs = Date.
 function buildRegolamentoArticleMap (articles: RegolamentoArticolo[]): Map<string, RegolamentoArticolo> {
   const map = new Map<string, RegolamentoArticolo>()
   ;(articles || []).forEach(article => {
-    const keys = [article.codice_articolo, article.numero_articolo, normalizeRegolamentoArticleNumber(article.numero_articolo)]
-      .map(normalizeRegolamentoArticleKey)
-      .filter(Boolean)
+    const rawCode = String(article.codice_articolo || '').trim().toUpperCase()
+    const isRcp = /^RCP0*\d{1,2}$/i.test(rawCode)
+    const sources = isRcp
+      ? [rawCode]
+      : [rawCode, article.numero_articolo, normalizeRegolamentoArticleNumber(article.numero_articolo)]
+    const keys = sources.map(normalizeRegolamentoArticleKey).filter(Boolean)
     keys.forEach(key => { if (!map.has(key)) map.set(key, article) })
   })
   return map
@@ -1063,10 +1069,16 @@ function RegolamentoArticleDetails (props: { articleState: RegolamentoArticoliSt
   if (!article) {
     return <div style={{ color: '#6b7280', fontSize: 12 }}>Testo regolamentare non disponibile nelle tabelle configurate.</div>
   }
+  const code = (() => {
+    const key = normalizeRegolamentoArticleKey(article.codice_articolo || article.numero_articolo)
+    const m = key.match(/^ART(\d+)$/)
+    return m ? `Art. ${Number(m[1])}` : String(article.codice_articolo || '').trim().toUpperCase()
+  })()
+  const titleLine = article.titolo_articolo ? `${code} - ${article.titolo_articolo}` : code
   return (
-    <div style={{ display: 'grid', gap: 4 }}>
+    <div style={{ display: 'grid', gap: 6 }}>
+      <div style={{ color: '#111827', fontSize: 12.5, fontWeight: 800, lineHeight: 1.35 }}>{titleLine}</div>
       {article.testo_articolo && <div style={{ color: '#374151', fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{article.testo_articolo}</div>}
-      {(article.atto_regolamento || article.anno_riferimento) && <div style={{ color: '#6b7280', fontSize: 11 }}>{[article.atto_regolamento, article.anno_riferimento ? `Anno ${article.anno_riferimento}` : ''].filter(Boolean).join(' · ')}</div>}
     </div>
   )
 }
@@ -1076,10 +1088,17 @@ function RegolamentoArticleDetails (props: { articleState: RegolamentoArticoliSt
 // il testo dell'articolo — stesso comportamento della scheda Violazione di
 // gii-editing-tec. Deve essere un componente React vero (non una semplice
 // funzione di rendering) perché tiene uno stato "aperto/chiuso" proprio.
-function ViolationArticleLine (props: { artLabel: string; description: string; grado?: string; articleCode?: string; articleState: RegolamentoArticoliState }) {
+function stripViolationArticlePrefix (raw: any): string {
+  return String(raw ?? '')
+    .trim()
+    .replace(/^Art\.?\s*\d+(?:\.\d+)?\s*[-–—]\s*/i, '')
+}
+
+function ViolationArticleLine (props: { description: string; grado?: string; articleCode?: string; articleState: RegolamentoArticoliState }) {
   const [open, setOpen] = React.useState(false)
   const hasGrado = props.grado != null && String(props.grado).trim() !== ''
-  const canExpand = !!props.articleCode
+  const canExpand = !!props.articleCode && props.articleState.urlsReady
+  const description = stripViolationArticlePrefix(props.description) || '—'
   const toggle = () => { if (canExpand) setOpen(v => !v) }
   return (
     <div style={{ borderBottom: '1px solid rgba(0,0,0,0.07)' }}>
@@ -1091,8 +1110,8 @@ function ViolationArticleLine (props: { artLabel: string; description: string; g
         style={{
           display: 'grid',
           gridTemplateColumns: hasGrado
-            ? 'max-content max-content minmax(0, 1fr) max-content'
-            : 'max-content max-content minmax(0, 1fr)',
+            ? 'max-content minmax(0, 1fr) max-content'
+            : 'max-content minmax(0, 1fr)',
           columnGap: 8,
           alignItems: 'center',
           padding: '7px 0',
@@ -1105,15 +1124,6 @@ function ViolationArticleLine (props: { artLabel: string; description: string; g
           {canExpand ? (open ? '▼' : '▶') : ''}
         </span>
         <div style={{
-          fontSize: 12,
-          color: '#6b7280',
-          fontWeight: 700,
-          lineHeight: 1.25,
-          whiteSpace: 'nowrap'
-        }}>
-          {props.artLabel}
-        </div>
-        <div style={{
           fontSize: 13,
           color: '#1f2937',
           fontWeight: 600,
@@ -1121,7 +1131,7 @@ function ViolationArticleLine (props: { artLabel: string; description: string; g
           minWidth: 0,
           overflowWrap: 'anywhere'
         }}>
-          {props.description || '—'}
+          {description}
         </div>
         {hasGrado
           ? (
@@ -2793,23 +2803,23 @@ function parseModifiedFieldNames (raw: any): string[] {
 }
 
 const VIOLATION_LABEL_BY_ARTICLE: Record<string, string> = {
-  '8': 'Art. 8 - Violazione servizio di reperibilità',
-  '12': 'Art. 12 - Negato accesso ai fondi (al personale consortile)',
-  '15': 'Art. 15 - Prelievo abusivo d’acqua',
-  '16': 'Art. 16 - Presentazione tardiva comunicazione di irrigazione',
-  '17': 'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia',
-  '27': 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica',
-  '28': 'Art. 28 - Violazione prescrizioni del consorzio',
-  '29': 'Art. 29 - Violazione termini restituzione attrezzature',
-  '30': 'Art. 30 - Danneggiamento e/o perdita attrezzature',
-  '31': 'Art. 31 - Mancata segnalazione guasti',
-  '32': 'Art. 32 - Negato accesso ai fondi (al consorziato)',
-  '33': 'Art. 33 - Inosservanza limiti temporali di prelievo',
-  '34': 'Art. 34 - Interferenze',
-  '35': 'Art. 35 - Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante',
-  '36': 'Art. 36 - Uso attrezzature non autorizzate',
-  '37': 'Art. 37 - Uso sistemi di irrigazione incompatibili',
-  '39': 'Art. 39 - Danni alle strutture irrigue'
+  '8': 'Violazione servizio di reperibilità',
+  '12': 'Negato accesso ai fondi (al personale consortile)',
+  '15': 'Prelievo abusivo d’acqua',
+  '16': 'Presentazione tardiva comunicazione di irrigazione',
+  '17': 'Presentazione tardiva comunicazione di variazione o di rinuncia',
+  '27': 'Spreco d’acqua/uso negligente della risorsa idrica',
+  '28': 'Violazione prescrizioni del consorzio',
+  '29': 'Violazione termini restituzione attrezzature',
+  '30': 'Danneggiamento e/o perdita attrezzature',
+  '31': 'Mancata segnalazione guasti',
+  '32': 'Negato accesso ai fondi (al consorziato)',
+  '33': 'Inosservanza limiti temporali di prelievo',
+  '34': 'Interferenze',
+  '35': 'Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante',
+  '36': 'Uso attrezzature non autorizzate',
+  '37': 'Uso sistemi di irrigazione incompatibili',
+  '39': 'Danni alle strutture irrigue'
 }
 
 function getFieldAliasForIter (fieldName: string, aliasMap?: Record<string, string>): string {
@@ -2820,7 +2830,7 @@ function getFieldAliasForIter (fieldName: string, aliasMap?: Record<string, stri
   // Alcuni alias del layer derivano ancora dalla struttura storica del Survey
   // e, nell'iter, risultano troppo tecnici o ambigui. Qui li traduciamo
   // in etichette funzionali, comprensibili per l'operatore.
-  if (rawKey === normKey('norma_violata1') || rawKey === normKey('Norma violata 1')) return 'Art. 15 - Prelievo abusivo d’acqua'
+  if (rawKey === normKey('norma_violata1') || rawKey === normKey('Norma violata 1')) return 'Prelievo abusivo d’acqua'
   if (rawKey === normKey('norma_violata2') || rawKey === normKey('Norma violata 2')) return 'Inosservanza termini presentazione comunicazioni'
   if (rawKey === normKey('norma_violata3') || rawKey === normKey('Norma violata 3')) return 'Altre violazioni (artt. 8, 12, 27-37 e 39)'
 
@@ -3258,10 +3268,10 @@ function nsdAttrezzaturaInstanceTipoCode (instanceId: string): string {
   return idx >= 0 ? instanceId.slice(0, idx) : String(instanceId || '')
 }
 const NSD_CASISTICA_INFO: Record<string, { label: string; order: number }> = {
-  C100_REPERIBILITA: { label: 'Art. 8 - Violazione servizio di reperibilità', order: 8 },
-  C101_SPRECO_ACQUA: { label: 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica', order: 27 },
-  C104_ATTREZZATURE_DANNEGGIATE: { label: 'Art. 30 - Danneggiamento e/o perdita attrezzature', order: 30 },
-  C113_DANNI_STRUTTURE_IRRIGUE: { label: 'Art. 39 - Danni alle strutture irrigue', order: 39 }
+  C100_REPERIBILITA: { label: 'Violazione servizio di reperibilità', order: 8 },
+  C101_SPRECO_ACQUA: { label: 'Spreco d’acqua/uso negligente della risorsa idrica', order: 27 },
+  C104_ATTREZZATURE_DANNEGGIATE: { label: 'Danneggiamento e/o perdita attrezzature', order: 30 },
+  C113_DANNI_STRUTTURE_IRRIGUE: { label: 'Danni alle strutture irrigue', order: 39 }
 }
 
 function nsdNormalizeCasistica (v: any): string {
@@ -4645,10 +4655,10 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
 
   const SURVEY_CHOICE_LABELS: Record<string, Record<string, string>> = {
     norma1: {
-      'Art15.1': 'Art. 15 - Prelievo abusivo d’acqua',
-      'Art15.2': 'Art. 15 - Prelievo abusivo d’acqua',
-      'Art15.3': 'Art. 15 - Prelievo abusivo d’acqua',
-      'Art15.4': 'Art. 15 - Prelievo abusivo d’acqua'
+      'Art15.1': 'Prelievo abusivo d’acqua',
+      'Art15.2': 'Prelievo abusivo d’acqua',
+      'Art15.3': 'Prelievo abusivo d’acqua',
+      'Art15.4': 'Prelievo abusivo d’acqua'
     },
     art15_parziale: {
       'Art15.1': 'Prima contestazione',
@@ -4659,28 +4669,28 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
       'Art15.4': 'Recidiva'
     },
     art16_17: {
-      'Art16': 'Art. 16 - Presentazione tardiva comunicazione di irrigazione',
-      'Art17': 'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia'
+      'Art16': 'Presentazione tardiva comunicazione di irrigazione',
+      'Art17': 'Presentazione tardiva comunicazione di variazione o di rinuncia'
     },
     art17_tipo: {
       'Art17.1': 'Variazione tardiva',
       'Art17.2': 'Rinuncia tardiva'
     },
     norma3: {
-      'Art8': 'Art. 8 - Violazione servizio di reperibilità',
-      'Art12': 'Art. 12 - Negato accesso ai fondi (al personale consortile)',
-      'Art27': 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica',
-      'Art28': 'Art. 28 - Violazione prescrizioni del consorzio',
-      'Art29': 'Art. 29 - Violazione termini restituzione attrezzature',
-      'Art30': 'Art. 30 - Danneggiamento e/o perdita attrezzature',
-      'Art31': 'Art. 31 - Mancata segnalazione guasti',
-      'Art32': 'Art. 32 - Negato accesso ai fondi (al consorziato)',
-      'Art33': 'Art. 33 - Inosservanza limiti temporali di prelievo',
-      'Art34': 'Art. 34 - Interferenze',
-      'Art35': 'Art. 35 - Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante',
-      'Art36': 'Art. 36 - Uso attrezzature non autorizzate',
-      'Art37': 'Art. 37 - Uso sistemi di irrigazione incompatibili',
-      'Art39': 'Art. 39 - Danni alle strutture irrigue'
+      'Art8': 'Violazione servizio di reperibilità',
+      'Art12': 'Negato accesso ai fondi (al personale consortile)',
+      'Art27': 'Spreco d’acqua/uso negligente della risorsa idrica',
+      'Art28': 'Violazione prescrizioni del consorzio',
+      'Art29': 'Violazione termini restituzione attrezzature',
+      'Art30': 'Danneggiamento e/o perdita attrezzature',
+      'Art31': 'Mancata segnalazione guasti',
+      'Art32': 'Negato accesso ai fondi (al consorziato)',
+      'Art33': 'Inosservanza limiti temporali di prelievo',
+      'Art34': 'Interferenze',
+      'Art35': 'Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante',
+      'Art36': 'Uso attrezzature non autorizzate',
+      'Art37': 'Uso sistemi di irrigazione incompatibili',
+      'Art39': 'Danni alle strutture irrigue'
     }
   }
 
@@ -4715,31 +4725,21 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     return m ? String(Number(m[1])) : ''
   }, [])
 
-  const splitViolationLabel = React.useCallback((code: any, fullLabel: string): { artLabel: string; description: string } => {
-    const txt = String(fullLabel || '').trim()
-    const m = txt.match(/^(Art\.?\s*\d+(?:\.\d+)?)\s*[-–—]\s*(.*)$/i)
-    if (m) return { artLabel: m[1].replace(/^Art\.?/i, 'Art.'), description: m[2] || '—' }
-    const artNum = getArticleNumber(code)
-    return { artLabel: artNum ? `Art. ${artNum}` : 'Art.', description: txt || '—' }
-  }, [getArticleNumber])
-
   const renderAltraViolazioneLine = React.useCallback((code: any, idx: number) => {
-    const descrFull = getSurveyChoiceLabel('norma3', code)
+    const descrFull = stripViolationArticlePrefix(getSurveyChoiceLabel('norma3', code))
     const artNum = getArticleNumber(code)
-    const parsed = splitViolationLabel(code, descrFull)
     const hasGrado = !!artNum && articoliConGrado.has(artNum)
     const grado = hasGrado ? (gradiViolazioniByArt[artNum] || '—') : undefined
     return (
       <ViolationArticleLine
         key={`${String(code)}-${idx}`}
-        artLabel={parsed.artLabel}
-        description={parsed.description}
+        description={descrFull}
         grado={grado}
         articleCode={artNum ? `Art${artNum}` : undefined}
         articleState={regolamentoArticoliState}
       />
     )
-  }, [articoliConGrado, getArticleNumber, getSurveyChoiceLabel, gradiViolazioniByArt, splitViolationLabel, regolamentoArticoliState])
+  }, [articoliConGrado, getArticleNumber, getSurveyChoiceLabel, gradiViolazioniByArt, regolamentoArticoliState])
 
   const renderSurveyGroup = React.useCallback((title: string, rows: Array<{ label: string; value: any; multiline?: boolean }>, emptyText = '—') => {
     return (
@@ -4802,7 +4802,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
           const supIrr = formatFieldValue(getRawField('sup_irrigata_art15'), 'sup_irrigata_art15', fieldTypeMap?.sup_irrigata_art15, 'Superficie irrigata (ha.a.ca)')
           return (
             <div style={{ display: 'grid', gap: 0 }}>
-              <ViolationArticleLine artLabel='Art. 15' description='Prelievo abusivo d’acqua' articleCode='Art15' articleState={regolamentoArticoliState} />
+              <ViolationArticleLine description='Prelievo abusivo d’acqua' articleCode='Art15' articleState={regolamentoArticoliState} />
               {renderViolationSurfacesLine('Tipo di abuso', tipoAbuso, 'Occorrenza', occorrenza)}
               {renderViolationSurfacesLine('Superficie dichiarata (ha.a.ca)', supDich, 'Superficie irrigata (ha.a.ca)', supIrr)}
             </div>
@@ -4821,7 +4821,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
           if (String(art16_17Raw || '') === 'Art16') {
             return (
               <div style={{ display: 'grid', gap: 0 }}>
-                <ViolationArticleLine artLabel='Art. 16' description='Presentazione tardiva comunicazione di irrigazione' articleCode='Art16' articleState={regolamentoArticoliState} />
+                <ViolationArticleLine description='Presentazione tardiva comunicazione di irrigazione' articleCode='Art16' articleState={regolamentoArticoliState} />
                 {renderViolationSurfacesLine(
                   'Superficie dichiarata (ha.a.ca)',
                   formatFieldValue(getRawField('sup_dichiarata_art16'), 'sup_dichiarata_art16', fieldTypeMap?.sup_dichiarata_art16, 'Superficie dichiarata (ha.a.ca)'),
@@ -4837,7 +4837,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
             const isVar = String(art17TipoRaw || '') === 'Art17.1'
             return (
               <div style={{ display: 'grid', gap: 0 }}>
-                <ViolationArticleLine artLabel='Art. 17' description='Presentazione tardiva comunicazione di variazione o di rinuncia' articleCode='Art17' articleState={regolamentoArticoliState} />
+                <ViolationArticleLine description='Presentazione tardiva comunicazione di variazione o di rinuncia' articleCode='Art17' articleState={regolamentoArticoliState} />
                 {renderViolationTextLine('Tipo comunicazione', tipoViolazione)}
                 {isVar
                   ? renderViolationSurfacesLine(

@@ -1299,11 +1299,12 @@ function exportCSV(utenti: UtenteRecord[], domainLabels?: DomainLabelMap): void 
       return s.includes(',') || s.includes('"') || s.includes('\n')
         ? `"${s.replace(/"/g, '""')}"` : s
     }
-    return [u.username, u.nome, u.cognome, u.titolo, u.email, formatBirthDate(u.data_nascita), u.full_name, area, settore, ufficio, ruolo, id_uff, gruppo, ufficioTrAuto, ufficiTrLista, ufficiTrDisplay]
+    const trLookupKey = ruolo === 'TR' && username && ufficio ? `${username}|||${ufficio}` : ''
+    return [u.username, u.nome, u.cognome, u.titolo, u.email, formatBirthDate(u.data_nascita), u.full_name, area, settore, ufficio, ruolo, id_uff, gruppo, ufficioTrAuto, ufficiTrLista, ufficiTrDisplay, trLookupKey]
       .map(esc).join(',')
   })
 
-  const csv = ['username,nome,cognome,titolo,email,data_nascita,full_name,area_cod,settore_cod,ufficio,ruolo_cod,id_ufficio,gruppo,ufficio_tr_auto,uffici_tr_lista,uffici_tr_display', ...rows].join('\n')
+  const csv = ['username,nome,cognome,titolo,email,data_nascita,full_name,area_cod,settore_cod,ufficio,ruolo_cod,id_ufficio,gruppo,ufficio_tr_auto,uffici_tr_lista,uffici_tr_display,tr_lookup_key', ...rows].join('\n')
   const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' })
   const url  = URL.createObjectURL(blob)
   const a    = document.createElement('a')

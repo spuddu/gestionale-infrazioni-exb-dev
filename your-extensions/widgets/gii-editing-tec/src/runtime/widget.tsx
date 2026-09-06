@@ -94,8 +94,11 @@ function normalizeLookupTableUrl (raw: any): string {
 function normalizeRegolamentoArticleKey (raw: any): string {
   const s = String(raw ?? '').trim().toUpperCase()
   if (!s) return ''
-  const m = s.match(/(?:ART(?:ICOLO)?\.?\s*)?0*(\d{1,2})(?:\.\d+)?/i)
-  return m ? `ART${Number(m[1])}` : s.replace(/[\s._-]+/g, '')
+  const compact = s.replace(/\s+/g, '')
+  const rcp = compact.match(/^RCP0*(\d{1,2})$/i)
+  if (rcp) return `RCP${Number(rcp[1])}`
+  const art = compact.match(/^(?:ART(?:ICOLO)?\.?)?0*(\d{1,2})(?:\.\d+)?$/i)
+  return art ? `ART${Number(art[1])}` : compact.replace(/[._-]+/g, '')
 }
 
 function normalizeRegolamentoArticleNumber (raw: any): string {
@@ -150,9 +153,12 @@ function isRegolamentoArticleUsable (article: RegolamentoArticolo, refMs = Date.
 function buildRegolamentoArticleMap (articles: RegolamentoArticolo[]): Map<string, RegolamentoArticolo> {
   const map = new Map<string, RegolamentoArticolo>()
   ;(articles || []).forEach(article => {
-    const keys = [article.codice_articolo, article.numero_articolo, normalizeRegolamentoArticleNumber(article.numero_articolo)]
-      .map(normalizeRegolamentoArticleKey)
-      .filter(Boolean)
+    const rawCode = String(article.codice_articolo || '').trim().toUpperCase()
+    const isRcp = /^RCP0*\d{1,2}$/i.test(rawCode)
+    const sources = isRcp
+      ? [rawCode]
+      : [rawCode, article.numero_articolo, normalizeRegolamentoArticleNumber(article.numero_articolo)]
+    const keys = sources.map(normalizeRegolamentoArticleKey).filter(Boolean)
     keys.forEach(key => { if (!map.has(key)) map.set(key, article) })
   })
   return map
@@ -2147,27 +2153,27 @@ const CHOICES = {
   art15_totale:   [{ v: 'Art15.3', l: 'Prima contestazione' }, { v: 'Art15.4', l: 'Recidiva' }],
   occorrenza: [{ v: '1', l: 'Prima contestazione' }, { v: '2', l: 'Recidiva' }],
   art16_17: [
-    { v: 'Art16', l: 'Art. 16 - Presentazione tardiva comunicazione di irrigazione' },
-    { v: 'Art17', l: 'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia' },
+    { v: 'Art16', l: 'Presentazione tardiva comunicazione di irrigazione' },
+    { v: 'Art17', l: 'Presentazione tardiva comunicazione di variazione o di rinuncia' },
   ],
   art17_tipo: [{ v: 'Art17.1', l: 'Variazione tardiva' }, { v: 'Art17.2', l: 'Rinuncia tardiva' }],
   presenza: [{ v: 'sì', l: 'Sì' }, { v: 'no', l: 'No' }],
   grado: [{ v: '1', l: '1' }, { v: '2', l: '2' }, { v: '3', l: '3' }, { v: '4', l: '4' }],
   norma3: [
-    { v: 'Art8',  l: 'Art. 8 - Violazione servizio di reperibilità' },
-    { v: 'Art12', l: 'Art. 12 - Negato accesso ai fondi (al personale consortile)' },
-    { v: 'Art27', l: 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica' },
-    { v: 'Art28', l: 'Art. 28 - Violazione prescrizioni del consorzio' },
-    { v: 'Art29', l: 'Art. 29 - Violazione termini restituzione attrezzature' },
-    { v: 'Art30', l: 'Art. 30 - Danneggiamento e/o perdita attrezzature' },
-    { v: 'Art31', l: 'Art. 31 - Mancata segnalazione guasti' },
-    { v: 'Art32', l: 'Art. 32 - Negato accesso ai fondi (al consorziato)' },
-    { v: 'Art33', l: 'Art. 33 - Inosservanza limiti temporali di prelievo' },
-    { v: 'Art34', l: 'Art. 34 - Interferenze' },
-    { v: 'Art35', l: 'Art. 35 - Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante' },
-    { v: 'Art36', l: 'Art. 36 - Uso attrezzature non autorizzate' },
-    { v: 'Art37', l: 'Art. 37 - Uso sistemi di irrigazione incompatibili' },
-    { v: 'Art39', l: 'Art. 39 - Danni alle strutture irrigue' },
+    { v: 'Art8',  l: 'Violazione servizio di reperibilità' },
+    { v: 'Art12', l: 'Negato accesso ai fondi (al personale consortile)' },
+    { v: 'Art27', l: 'Spreco d’acqua/uso negligente della risorsa idrica' },
+    { v: 'Art28', l: 'Violazione prescrizioni del consorzio' },
+    { v: 'Art29', l: 'Violazione termini restituzione attrezzature' },
+    { v: 'Art30', l: 'Danneggiamento e/o perdita attrezzature' },
+    { v: 'Art31', l: 'Mancata segnalazione guasti' },
+    { v: 'Art32', l: 'Negato accesso ai fondi (al consorziato)' },
+    { v: 'Art33', l: 'Inosservanza limiti temporali di prelievo' },
+    { v: 'Art34', l: 'Interferenze' },
+    { v: 'Art35', l: 'Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante' },
+    { v: 'Art36', l: 'Uso attrezzature non autorizzate' },
+    { v: 'Art37', l: 'Uso sistemi di irrigazione incompatibili' },
+    { v: 'Art39', l: 'Danni alle strutture irrigue' },
   ],
   qualifica_fondo: [
     { v: '1', l: 'Proprietario' },
@@ -2298,10 +2304,12 @@ function RegolamentoArticleDetailsTi (props: { articleState: RegolamentoArticoli
     return <div style={{ color: st.articleMetaColor, fontSize: 12 }}>Testo regolamentare non disponibile nelle tabelle configurate.</div>
   }
 
+  const code = formatRegolamentoArticleCode(article.codice_articolo || article.numero_articolo)
+  const titleLine = article.titolo_articolo ? `${code} - ${article.titolo_articolo}` : code
   return (
-    <div style={{ display: 'grid', gap: 4 }}>
+    <div style={{ display: 'grid', gap: 6 }}>
+      <div style={{ color: st.articleTitleColor, fontSize: 12.5, fontWeight: 800, lineHeight: 1.35 }}>{titleLine}</div>
       {article.testo_articolo && <div style={{ color: st.articleTextColor, fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{article.testo_articolo}</div>}
-      {(article.atto_regolamento || article.anno_riferimento) && <div style={{ color: st.articleMetaColor, fontSize: 11 }}>{[article.atto_regolamento, article.anno_riferimento ? `Anno ${article.anno_riferimento}` : ''].filter(Boolean).join(' · ')}</div>}
     </div>
   )
 }
@@ -2314,21 +2322,60 @@ function RegolamentoChoiceToggleTi (props: {
   textStyle?: React.CSSProperties
   disabled?: boolean
   fill?: boolean
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  inlineDetails?: boolean
 }) {
   const fs = React.useContext(FormStyleCtx)
-  const [open, setOpen] = React.useState(false)
+  const [internalOpen, setInternalOpen] = React.useState(false)
+  const open = props.open ?? internalOpen
+  const articleToggleRef = React.useRef<HTMLDivElement | null>(null)
+  const [expandedWidth, setExpandedWidth] = React.useState<number | null>(null)
   const st = REGOLAMENTO_VIOLATA_STYLE
   const title = String(props.title || '').trim() || '—'
   const targetHeight = Math.max(24, Number(fs.fieldHeight) || 32)
   const headerHeight = Math.max(22, targetHeight - (Number(st.borderWidth || 1) * 2))
+  const externalOpen = open && props.inlineDetails === false
   const toggleOpen = (evt?: any) => {
     try { evt?.preventDefault?.() } catch {}
     try { evt?.stopPropagation?.() } catch {}
-    setOpen(v => !v)
+    const nextOpen = !open
+    if (props.onOpenChange) props.onOpenChange(nextOpen)
+    else setInternalOpen(nextOpen)
   }
 
+  React.useLayoutEffect(() => {
+    if (!open || props.inlineDetails === false || !articleToggleRef.current) {
+      setExpandedWidth(null)
+      return
+    }
+
+    const root = articleToggleRef.current
+    const host = root.closest('[data-regolamento-expand-host="true"]') as HTMLElement | null
+    if (!host) return
+
+    const updateWidth = () => {
+      const rootRect = root.getBoundingClientRect()
+      const hostRect = host.getBoundingClientRect()
+      const availableWidth = Math.max(rootRect.width, hostRect.right - rootRect.left)
+      setExpandedWidth(Math.max(0, Math.floor(availableWidth)))
+    }
+
+    updateWidth()
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(updateWidth)
+      : null
+    resizeObserver?.observe(host)
+    resizeObserver?.observe(root)
+    window.addEventListener('resize', updateWidth)
+    return () => {
+      resizeObserver?.disconnect()
+      window.removeEventListener('resize', updateWidth)
+    }
+  }, [open, props.inlineDetails])
+
   return (
-    <div style={{ border: `${Number(st.borderWidth || 1)}px solid ${st.borderColor}`, background: st.cardBg, borderRadius: 7, overflow: 'hidden', minWidth: 0, width: props.fill === false ? undefined : '100%', boxSizing: 'border-box' }}>
+    <div ref={articleToggleRef} style={{ border: `${Number(st.borderWidth || 1)}px solid ${st.borderColor}`, background: st.cardBg, borderRadius: externalOpen ? '7px 7px 0 0' : 7, overflow: open && expandedWidth ? 'visible' : 'hidden', minWidth: 0, width: props.fill === false ? undefined : '100%', boxSizing: 'border-box', position: 'relative', zIndex: open ? 2 : undefined }}>
       <div style={{ minHeight: headerHeight, background: st.headerBg, color: st.headerTextColor, display: 'flex', alignItems: 'center', gap: 8, padding: '0 8px', boxSizing: 'border-box' }}>
         <button
           type='button'
@@ -2345,8 +2392,8 @@ function RegolamentoChoiceToggleTi (props: {
           style={{ border: 0, background: 'transparent', color: st.headerTextColor, display: 'flex', alignItems: 'center', minHeight: headerHeight, padding: 0, textAlign: 'left', cursor: 'pointer', minWidth: 0, flex: '1 1 auto', fontSize: fs.norma3FontSize, fontWeight: 900, lineHeight: 1.25, ...props.textStyle }}
         ><span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span></button>
       </div>
-      {open && (
-        <div style={{ padding: '8px 10px', borderTop: `1px solid ${st.borderColor}`, background: st.bodyBg }}>
+      {open && props.inlineDetails !== false && (
+        <div style={{ padding: '8px 10px', border: `1px solid ${st.borderColor}`, borderTop: `1px solid ${st.borderColor}`, borderRadius: '0 0 7px 7px', background: st.bodyBg, boxSizing: 'border-box', width: expandedWidth ? `${expandedWidth}px` : '100%', marginLeft: -Number(st.borderWidth || 1), marginBottom: -Number(st.borderWidth || 1) }}>
           <RegolamentoArticleDetailsTi articleState={props.articleState} articleCode={props.articleCode} />
         </div>
       )}
@@ -3162,10 +3209,10 @@ function nsComputeSummaryFromRows (rows: NsDetailRow[], perc: number): NsSummary
 type NsCasisticaOption = { codice: string; art: number; label: string }
 
 const NS_CASISTICHE_BY_ART: NsCasisticaOption[] = [
-  { codice: 'C100_REPERIBILITA', art: 8, label: 'Art. 8 - Violazione servizio di reperibilità' },
-  { codice: 'C101_SPRECO_ACQUA', art: 27, label: 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica' },
-  { codice: 'C104_ATTREZZATURE_DANNEGGIATE', art: 30, label: 'Art. 30 - Danneggiamento e/o perdita attrezzature' },
-  { codice: 'C113_DANNI_STRUTTURE_IRRIGUE', art: 39, label: 'Art. 39 - Danni alle strutture irrigue' }
+  { codice: 'C100_REPERIBILITA', art: 8, label: 'Violazione servizio di reperibilità' },
+  { codice: 'C101_SPRECO_ACQUA', art: 27, label: 'Spreco d’acqua/uso negligente della risorsa idrica' },
+  { codice: 'C104_ATTREZZATURE_DANNEGGIATE', art: 30, label: 'Danneggiamento e/o perdita attrezzature' },
+  { codice: 'C113_DANNI_STRUTTURE_IRRIGUE', art: 39, label: 'Danni alle strutture irrigue' }
 ]
 
 function hasArtSelected (attrs: Record<string, any>, art: number): boolean {
@@ -4714,6 +4761,7 @@ function NuovaPraticaForm (p: {
   }, [validationPopup, validationPopupOkId])
 
   const [npTab, setNpTab] = React.useState<'dati_generali' | 'trasgressore' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima'>(() => getRequestedEditSection({ skipUrl: true }) || 'trasgressore')
+  const [openNorma3Article, setOpenNorma3Article] = React.useState('')
   const [isExternalNavMode, setIsExternalNavMode] = React.useState<boolean>(true)
   const skipNpTabSyncRef = React.useRef(false)
   const tabResetFirstRef = React.useRef(true)
@@ -6549,14 +6597,14 @@ React.useEffect(() => {
         if (dich <= 0) {
           setValidationPopup({
             title: 'Superficie dichiarata non valida',
-            text: 'Per l\'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia (variazione tardiva), la superficie dichiarata deve essere compilata e maggiore di 0.'
+            text: 'Per la violazione Presentazione tardiva comunicazione di variazione o di rinuncia (art. 17, variazione tardiva), la superficie dichiarata deve essere compilata e maggiore di 0.'
           })
           return
         }
         if (variata <= 0) {
           setValidationPopup({
             title: 'Superficie variata non valida',
-            text: 'Per l\'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia (variazione tardiva), la superficie variata deve essere compilata e maggiore di 0. Se la superficie variata è pari a 0, selezionare il tipo di comunicazione Rinuncia tardiva.'
+            text: 'Per la violazione Presentazione tardiva comunicazione di variazione o di rinuncia (art. 17, variazione tardiva), la superficie variata deve essere compilata e maggiore di 0. Se la superficie variata è pari a 0, selezionare il tipo di comunicazione Rinuncia tardiva.'
           })
           return
         }
@@ -6567,7 +6615,7 @@ React.useEffect(() => {
         if (dich <= 0) {
           setValidationPopup({
             title: 'Superficie dichiarata non valida',
-            text: 'Per l\'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia (rinuncia tardiva), la superficie dichiarata deve essere compilata e maggiore di 0.'
+            text: 'Per la violazione Presentazione tardiva comunicazione di variazione o di rinuncia (art. 17, rinuncia tardiva), la superficie dichiarata deve essere compilata e maggiore di 0.'
           })
           return
         }
@@ -8191,38 +8239,49 @@ ${e?.message || String(e)}`
                       ? reqCheckCell(true, 'Richiede valorizzazione del grado')
                       : emptyGradeCell)
                 const rowBg = idx % 2 === 0 ? '#ffffff' : '#f7fbff'
+                const articleOpen = openNorma3Article === o.v
                 return (
-                  <div key={o.v} style={{
-                    display: 'grid',
-                    gridTemplateColumns: gridColumns,
-                    minHeight: formStyle.fieldHeight,
-                    borderBottom: '1px solid #edf2f7',
-                    background: rowBg,
-                    alignItems: 'stretch'
-                  }}>
-                    <div style={{ padding: 0, minWidth: 0, display: 'flex', alignItems: 'stretch' }}>
-                      <RegolamentoChoiceToggleTi
-                        articleState={regolamentoArticoliState}
-                        articleCode={o.v}
-                        title={o.l}
-                        checkbox={renderNorma3Checkbox(selected, () => !(saving || isRitAgrTecLimitedEdit) && toggleNorma3(o.v))}
-                        disabled={saving || isReadOnly || isRitAgrTecLimitedEdit}
-                        textStyle={norma3ReadonlyTextStyle(selected)}
-                      />
+                  <React.Fragment key={o.v}>
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: gridColumns,
+                      minHeight: formStyle.fieldHeight,
+                      borderBottom: articleOpen ? 0 : '1px solid #edf2f7',
+                      background: rowBg,
+                      alignItems: 'stretch'
+                    }}>
+                      <div style={{ padding: 0, minWidth: 0, display: 'flex', alignItems: 'stretch' }}>
+                        <RegolamentoChoiceToggleTi
+                          articleState={regolamentoArticoliState}
+                          articleCode={o.v}
+                          title={o.l}
+                          checkbox={renderNorma3Checkbox(selected, () => !(saving || isRitAgrTecLimitedEdit) && toggleNorma3(o.v))}
+                          disabled={saving || isReadOnly || isRitAgrTecLimitedEdit}
+                          textStyle={norma3ReadonlyTextStyle(selected)}
+                          open={articleOpen}
+                          onOpenChange={nextOpen => setOpenNorma3Article(nextOpen ? o.v : '')}
+                          inlineDetails={false}
+                        />
+                      </div>
+                      <div style={reqCellStyle}>
+                        {reqCheckCell(requiresPoint, 'Richiede punto in mappa')}
+                      </div>
+                      <div style={reqCellStyle}>
+                        {reqCheckCell(hasNotaSpese, 'Richiede nota spese / rimborso / risarcimento')}
+                      </div>
+                      <div style={reqCellStyle}>
+                        {reqCheckCell(hasGrade, 'Richiede grado di gravità')}
+                      </div>
+                      <div style={{ borderLeft: '1px solid #e5e7eb', padding: '0 6px', minHeight: formStyle.fieldHeight, display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}>
+                        {gradeNode}
+                      </div>
                     </div>
-                    <div style={reqCellStyle}>
-                      {reqCheckCell(requiresPoint, 'Richiede punto in mappa')}
-                    </div>
-                    <div style={reqCellStyle}>
-                      {reqCheckCell(hasNotaSpese, 'Richiede nota spese / rimborso / risarcimento')}
-                    </div>
-                    <div style={reqCellStyle}>
-                      {reqCheckCell(hasGrade, 'Richiede grado di gravità')}
-                    </div>
-                    <div style={{ borderLeft: '1px solid #e5e7eb', padding: '0 6px', minHeight: formStyle.fieldHeight, display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}>
-                      {gradeNode}
-                    </div>
-                  </div>
+                    {articleOpen && (
+                      <div style={{ padding: '8px 10px', marginTop: -1, border: `1px solid ${REGOLAMENTO_VIOLATA_STYLE.borderColor}`, borderRadius: '0 7px 7px 7px', background: REGOLAMENTO_VIOLATA_STYLE.bodyBg, boxSizing: 'border-box', position: 'relative', zIndex: 1 }}>
+                        <RegolamentoArticleDetailsTi articleState={regolamentoArticoliState} articleCode={o.v} />
+                      </div>
+                    )}
+                  </React.Fragment>
                 )
               })}
             </div>
@@ -8277,7 +8336,7 @@ ${e?.message || String(e)}`
             <RegolamentoChoiceToggleTi
               articleState={regolamentoArticoliState}
               articleCode='Art15'
-              title='Art. 15 - Prelievo abusivo d’acqua'
+              title='Prelievo abusivo d’acqua'
               checkbox={checkbox}
               disabled={disabled}
               textStyle={disabled ? { color: String(formStyle.fieldDisabledColor || '#1f2937'), fontWeight: 400, opacity: 1 } : {
@@ -8298,7 +8357,7 @@ ${e?.message || String(e)}`
         const leftColumn = (
           <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0, minHeight: '100%', gridTemplateRows: 'auto auto minmax(0, 1fr)' }}>
             {renderEditCard('Prelievo abusivo d’acqua',
-              <div style={{ display: 'grid', gridTemplateColumns: art15GridColumns, gap: 10, alignItems: 'start', minWidth: 0 }}>
+              <div data-regolamento-expand-host='true' style={{ display: 'grid', gridTemplateColumns: art15GridColumns, gap: 10, alignItems: 'start', minWidth: 0 }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
                   {art15ChoiceBox()}
@@ -8312,18 +8371,18 @@ ${e?.message || String(e)}`
 
             {renderEditCard('Inosservanza termini presentazione comunicazioni',
               <div style={{ display: 'grid', gap: 8 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
+                <div data-regolamento-expand-host='true' style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
                   <div style={{ gridColumn: '1 / span 2' }}>
                     <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
-                    {choiceBox('Art16', 'Art. 16 - Presentazione tardiva comunicazione di irrigazione')}
+                    {choiceBox('Art16', 'Presentazione tardiva comunicazione di irrigazione')}
                   </div>
                   {surfaceTextField('sup_dichiarata_art16', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art16'), v => set('sup_dichiarata_art16', v), art16Selected, undefined, 'Superficie dichiarata da valorizzare')}
                   {surfaceTextField('sup_irrigata_art16', 'Sup. irrigata (ha.a.ca)', '0', () => {}, art16Selected, '0')}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
+                <div data-regolamento-expand-host='true' style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
                   <div>
                     <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
-                    {choiceBox('Art17', 'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia')}
+                    {choiceBox('Art17', 'Presentazione tardiva comunicazione di variazione o di rinuncia')}
                   </div>
                   {selectField('art17_tipo', 'Tipo comunicazione', art17tipo, v => set('art17_tipo', v), CHOICES.art17_tipo, art17Selected, 'Tipo di comunicazione da selezionare')}
                   {surfaceTextField(art17DichField, 'Sup. dichiarata (ha.a.ca)', art17DichValue, v => set(art17DichField, v), art17SurfaceEnabled, undefined, 'Superficie dichiarata da valorizzare')}

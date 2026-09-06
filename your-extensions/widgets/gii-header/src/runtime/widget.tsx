@@ -10,6 +10,38 @@ import { stampGiiPracticePayload, syncGiiPracticeContextUsername, writeGiiPracti
 
 const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
+const GII_ENABLED_ROLES = new Set(['IT', 'CS', 'RIT', 'DT', 'IA', 'RIA', 'DA', 'ADMIN'])
+const GII_ACCESS_GATE_EVENT = 'gii:accessGate'
+
+type GiiAccessGateStatus = 'checking' | 'allowed' | 'denied'
+interface GiiAccessGateState {
+  status: GiiAccessGateStatus
+  message: string
+}
+
+function publishGiiAccessGate(status: GiiAccessGateStatus, message = ''): void {
+  const state: GiiAccessGateState = { status, message }
+  try { (window as any).__giiAccessGate = state } catch { }
+  try { window.dispatchEvent(new CustomEvent(GII_ACCESS_GATE_EVENT, { detail: state })) } catch { }
+}
+
+function getGiiAccessGateState(): GiiAccessGateState {
+  try {
+    const state = (window as any).__giiAccessGate
+    if (state?.status === 'allowed' || state?.status === 'denied' || state?.status === 'checking') {
+      return { status: state.status, message: String(state.message || '') }
+    }
+  } catch { }
+  return { status: 'checking', message: '' }
+}
+
+function hasGestionaleAssignment(assignments: GiiUserAssignment[]): boolean {
+  return assignments.some((assignment) => GII_ENABLED_ROLES.has(normCode(assignment?.ruoloCod ?? assignment?.ruolo_cod)))
+}
+
+function isGiiBuilderContext(): boolean {
+  try { return !!(window as any)?.jimuConfig?.isInBuilder } catch { return false }
+}
 const RUOLO_FULL:  Record<string, string> = {
   TR:'Tecnico rilevatore', IT:'Istruttore tecnico', IA:'Istruttore amministrativo', CS:'Capo Settore',
   RIT:'Responsabile istruttoria tecnica', RIA:'Responsabile istruttoria amministrativa', DT:'Direttore d\'area', DA:'Direttore Area AA. GG. e P.F.', ADMIN:'Amministratore'
@@ -409,6 +441,35 @@ function normalizeAssignmentFromValues(values: any, domainLabels?: DomainLabelMa
   }
 }
 
+function buildBuilderAdminUser(username: string, fullName: string, domainLabels?: DomainLabelMap): GiiUserRole {
+  const ruoloFull = getDomainLabel(domainLabels || {}, 'ruolo_cod', 'ADMIN') || RUOLO_FULL.ADMIN || 'Amministratore'
+  return {
+    username,
+    fullName,
+    ruoloCod: 'ADMIN',
+    ruolo_cod: 'ADMIN',
+    ruoloLabel: 'ADMIN',
+    ruoloFull,
+    profiloCod: 'ADMIN',
+    profiloLabel: getProfiloLabel('ADMIN', ruoloFull, 'ADMIN', ''),
+    area: null,
+    areaCod: '',
+    area_cod: '',
+    areaFull: '',
+    settore: null,
+    settoreCod: '',
+    settore_cod: '',
+    settoreFull: '',
+    ufficio: null,
+    ufficioLabel: '',
+    gruppo: '',
+    isAdmin: true,
+    isOrgAdmin: true,
+    isWorkflowAdmin: true,
+    assignments: [normalizeAssignmentFromValues({ ruolo_cod: 'ADMIN' }, domainLabels)]
+  }
+}
+
 async function loadUser(): Promise<GiiUserRole | null> {
   const cached = (window as any).__giiUserRole
   if (cached?.username) {
@@ -428,12 +489,28 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const ufficio = isWorkflowAdmin ? null : toNum(cached.ufficio)
 
     const fullName = String(cached.fullName || cached.full_name || cached.username)
+
+    // Recovery gate del Builder: l'org_admin/owner deve poter sempre riaprire
+    // l'app come ADMIN anche se il record ADMIN in GII_utenti è stato eliminato.
+    if (isGiiBuilderContext() && isOrgAdmin) {
+      const builderAdmin = buildBuilderAdminUser(String(cached.username), fullName)
+      try { (window as any).__giiUserRole = builderAdmin } catch { }
+      publishGiiAccessGate('allowed')
+      return builderAdmin
+    }
+
     const profiloCod = getProfiloCod(ruoloCod, areaCod)
     const ruoloFull = String(cached.ruoloFull || RUOLO_FULL[ruoloCod] || ruoloCod || '')
     const cachedAssignmentsRaw = Array.isArray(cached.assignments) ? cached.assignments : []
     const assignments = cachedAssignmentsRaw.length
       ? cachedAssignmentsRaw.map((assignment: any) => normalizeAssignmentFromValues(assignment))
       : [normalizeAssignmentFromValues(cached)]
+    if (!hasGestionaleAssignment(assignments)) {
+      clearGiiUserRoleCache()
+      publishGiiAccessGate('denied', "Account non abilitato per l'accesso al gestionale.")
+      return null
+    }
+
     const u: GiiUserRole = {
       username: String(cached.username),
       fullName,
@@ -461,6 +538,7 @@ async function loadUser(): Promise<GiiUserRole | null> {
       assignments
     }
     try { (window as any).__giiUserRole = u } catch { }
+    publishGiiAccessGate('allowed')
     return u
   }
   try {
@@ -474,6 +552,16 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const roleStr = String(json?.role || '')
     const privs: any[] = Array.isArray(json?.privileges) ? (json.privileges as any[]) : []
     const isOrgAdmin = roleStr === 'org_admin' || roleStr === 'org_owner' || privs.some(p => String(p).startsWith('portal:admin'))
+
+    // Nel Builder l'amministratore dell'organizzazione è il profilo di recupero:
+    // non dipende da GII_utenti, così può ripristinare anche il proprio record ADMIN.
+    if (isGiiBuilderContext() && isOrgAdmin) {
+      const builderAdmin = buildBuilderAdminUser(username, fullName)
+      try { (window as any).__giiUserRole = builderAdmin } catch { }
+      publishGiiAccessGate('allowed')
+      return builderAdmin
+    }
+
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
     const fl = new FeatureLayer({ url: GII_UTENTI_URL })
     await fl.load().catch(() => {})
@@ -484,47 +572,23 @@ async function loadUser(): Promise<GiiUserRole | null> {
       returnGeometry: false
     })
     const features: any[] = Array.isArray(qr?.features) ? qr.features : []
-    const f = features[0]
+    const assignments = features.map((feature: any) => normalizeAssignmentFromValues(feature?.attributes || {}, domainLabels))
+    const enabledAssignmentIndex = assignments.findIndex((assignment) => GII_ENABLED_ROLES.has(normCode(assignment?.ruoloCod ?? assignment?.ruolo_cod)))
 
-    // Fallback robusto: se sei org_admin/owner ma non hai record (o campi incompleti) in GII_utenti
-    // → contesto coerente "ADMIN trasversale" (mai DA)
-    if (!f) {
-      if (isOrgAdmin) {
-        const ruoloFull = getDomainLabel(domainLabels, 'ruolo_cod', 'ADMIN') || RUOLO_FULL.ADMIN || 'Amministratore'
-        const u: GiiUserRole = {
-          username, fullName,
-          ruoloCod: 'ADMIN', ruolo_cod: 'ADMIN', ruoloLabel: 'ADMIN', ruoloFull,
-          profiloCod: 'ADMIN', profiloLabel: getProfiloLabel('ADMIN', ruoloFull, 'ADMIN', ''),
-          area: null, areaCod: '', area_cod: '', areaFull: '', settore: null, settoreCod: '', settore_cod: '', settoreFull: '', ufficio: null, ufficioLabel: '', gruppo: '',
-          isAdmin: true,
-          isOrgAdmin: true,
-          isWorkflowAdmin: true,
-          assignments: [normalizeAssignmentFromValues({ ruolo_cod: 'ADMIN' }, domainLabels)]
-        }
-        try { (window as any).__giiUserRole = u } catch { }
-        return u
-      }
-
-      const u: GiiUserRole = {
-        username, fullName,
-        ruoloCod: '', ruolo_cod: '', ruoloLabel: '', ruoloFull: '',
-        profiloCod: '', profiloLabel: '',
-        area: null, areaCod: '', area_cod: '', areaFull: '', settore: null, settoreCod: '', settore_cod: '', settoreFull: '', ufficio: null, ufficioLabel: '', gruppo: '',
-        isAdmin: false,
-        isOrgAdmin: false,
-        isWorkflowAdmin: false,
-        assignments: []
-      }
-      try { (window as any).__giiUserRole = u } catch { }
-      return u
+    // Gate applicativo centrale: la sola autenticazione AGOL e l'eventuale ruolo TR
+    // non abilitano il gestionale. Nell'app pubblicata anche l'ADMIN deve risultare censito
+    // in GII_utenti con ruolo ADMIN; il solo privilegio org_admin AGOL non basta.
+    if (enabledAssignmentIndex < 0) {
+      clearGiiUserRoleCache()
+      publishGiiAccessGate('denied', "Account non abilitato per l'accesso al gestionale.")
+      return null
     }
 
+    // Per profili multi-ruolo TR + ruolo gestionale, il profilo primario non deve
+    // essere il TR: usa la prima assegnazione effettivamente abilitata al gestionale.
+    const f = features[enabledAssignmentIndex] || features[0]
     const a = f.attributes
-    let ruoloCod = normCode(a.ruolo_cod)
-
-    // Se l'utente è org_admin/owner ma il ruolo workflow non è valorizzato/riconosciuto
-    // → usa workflow ADMIN senza trasformarlo in DA.
-    if (!ruoloCod && isOrgAdmin) ruoloCod = 'ADMIN'
+    const ruoloCod = normCode(a.ruolo_cod)
 
     const isWorkflowAdmin = ruoloCod === 'ADMIN'
     const areaResolved = resolveCodeAndNum(a.area_cod, a.area, AREA_LABEL, AREA_NUM)
@@ -541,7 +605,6 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const ufficioLabel = isWorkflowAdmin ? '' : (getDomainLabel(domainLabels, 'ufficio', ufficio) || getDomainLabel(domainLabels, 'id_ufficio', ufficio) || (ufficio != null ? UFFICIO_LABEL[ufficio] || String(ufficio) : ''))
     const profiloCod = getProfiloCod(ruoloCod, areaCod)
     const profiloLabel = getProfiloLabel(profiloCod, ruoloFull, ruoloCod, areaCod)
-    const assignments = features.map((feature: any) => normalizeAssignmentFromValues(feature?.attributes || {}, domainLabels))
 
     const u: GiiUserRole = {
       username,
@@ -571,6 +634,7 @@ async function loadUser(): Promise<GiiUserRole | null> {
       assignments
     }
     try { (window as any).__giiUserRole = u } catch { }
+    publishGiiAccessGate('allowed')
     return u
   } catch { return null }
 }
@@ -2999,9 +3063,28 @@ export default function Widget(props: Props) {
       const sequence = ++refreshSequence
       const isFallbackRetry = reason === 'profile-sync-fallback'
       if (!isFallbackRetry) setULoad(true)
+      publishGiiAccessGate('checking')
 
       const u = await loadUser()
       if (cancelled || sequence !== refreshSequence) return
+
+      const gateState = getGiiAccessGateState()
+      if (gateState.status === 'denied') {
+        clearProfileSyncRetryTimer()
+        setProfileSyncError('')
+        setUser(null)
+        setULoad(false)
+        alertsAuthTransitionRef.current = true
+        try { alertsAbortControllerRef.current?.abort() } catch { }
+        alertsAbortControllerRef.current = null
+        alertsBackgroundRefreshRef.current = null
+        setAlerts([])
+        setAlertsError('')
+        setAlertsOpen(false)
+        setAlertsLoading(false)
+        dispatchGiiUserLoaded({ source: 'header-boot', reason, username: '', access: 'denied' })
+        return
+      }
 
       const activeUsername = getActiveSessionUsername()
       const loadedUsername = normalizeAuthUsername(u?.username)
@@ -3082,11 +3165,6 @@ export default function Widget(props: Props) {
 
             clearGiiUserRoleCache()
             refresh('credential-create')
-
-            try {
-              const tok = String(afterInRef.current || '').trim()
-              if (tok) gotoPage(tok)
-            } catch { }
           })
 
         } catch { }
@@ -3964,7 +4042,7 @@ export default function Widget(props: Props) {
     setMenuOpen(false)
     if (accountSwitchInProgressRef.current) return
 
-    const previousUsername = normalizeAuthUsername(userRef.current?.username)
+    const previousUsername = normalizeAuthUsername(userRef.current?.username) || getActiveSessionUsername()
 
     // Memorizziamo la pagina di partenza, ma NON navighiamo ancora.
     // La Home deve essere aperta soltanto se l'OAuth restituisce davvero un
@@ -3977,8 +4055,6 @@ export default function Widget(props: Props) {
     // Home viene montata soltanto dopo l'installazione/convergenza del nuovo account.
     const neutralPageToken = String(afterOutRef.current || '').trim()
     const neutralPageId = neutralPageToken ? resolvePageId(neutralPageToken) : null
-    const homePageToken = String(afterInRef.current || cfg.alertsHomePage || '').trim()
-    const homePageId = homePageToken ? resolvePageId(homePageToken) : null
     let movedToNeutralPage = false
 
     const moveToNeutralPageBeforeCredentialInstall = async () => {
@@ -4061,33 +4137,11 @@ export default function Widget(props: Props) {
       }
 
       clearGiiUserRoleCache()
+      publishGiiAccessGate('checking')
 
-      // La nuova identità è ora stabile: montiamo Home per la PRIMA volta con il
-      // nuovo account. Solo dopo la conferma runtime togliamo il bypass e ricarichiamo.
-      if (!homePageToken || !homePageId) {
-        setAccountSwitchNeutralAccess(false)
-        throw new Error('Pagina Home non configurata dopo il cambio account.')
-      }
-
-      gotoPage(homePageToken)
-      let homeConfirmations = 0
-      for (let i = 0; i < 60; i++) {
-        await new Promise(resolve => window.setTimeout(resolve, 25))
-        const runtimePageId = getRuntimeCurrentPageId()
-        if (runtimePageId === homePageId) {
-          homeConfirmations += 1
-          if (homeConfirmations >= 2) break
-        } else {
-          homeConfirmations = 0
-        }
-      }
-
-      if (homeConfirmations < 2) {
-        setAccountSwitchNeutralAccess(false)
-        throw new Error('Pagina Home non confermata dopo il cambio account.')
-      }
-
-      setAccountSwitchNeutralAccess(false)
+      // La nuova identità è stabile ma resta sulla pagina Accesso. Dopo il reload
+      // sarà il gate centrale a verificare GII_utenti/assignments[] e, solo se
+      // abilitato, l'auth-guard potrà montare Home.
       await new Promise(resolve => window.setTimeout(resolve, 100))
       window.location.reload()
     }
@@ -4242,6 +4296,7 @@ export default function Widget(props: Props) {
     return parts.filter(Boolean).join(' · ')
   }
   const orderedAssignments = assignments.slice().sort((a, b) => roleRank(b) - roleRank(a))
+  const accessDenied = getGiiAccessGateState().status === 'denied'
 
   return (
     <div style={{
@@ -4352,8 +4407,8 @@ export default function Widget(props: Props) {
               backdropFilter:'blur(8px)',border:`1px solid ${cfg.userBannerBorderColor}`,borderRadius:14,padding:'10px 14px 10px 18px',width:'max-content',maxWidth:'none' }}>
               <div style={{ width:38,height:38,borderRadius:'50%',
                 background:`linear-gradient(135deg,${cfg.userAvatarBg1},${cfg.userAvatarBg2})`,
-                display:'flex',alignItems:'center',justifyContent:'center',fontSize:13.5,lineHeight:1,fontWeight:700,letterSpacing:0.3,color:'#fff',flexShrink:0,textAlign:'center' }}>
-                {userInitials}
+                display:'flex',alignItems:'center',justifyContent:'center',fontSize:13.5,fontWeight:700,letterSpacing:0.3,color:'#fff',flexShrink:0,textAlign:'center' }}>
+                <span style={{ display:'inline-block', transform:'translateY(1px)' }}>{userInitials}</span>
               </div>
               <div style={{ minWidth:0, flex:'0 0 auto', width:'max-content', display:'flex', flexDirection:'column', alignItems:'stretch' }}>
                 <button type='button'
@@ -4434,7 +4489,7 @@ export default function Widget(props: Props) {
           ) : (
             <div style={{ display:'inline-flex',alignItems:'center',gap:10,background:'rgba(251,191,36,0.08)',border:'1px solid rgba(251,191,36,0.25)',borderRadius:10,padding:'9px 16px' }}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-              <span style={{ fontSize:12.5,color:'rgba(251,191,36,0.9)' }}>Accesso non autenticato</span>
+              <span style={{ fontSize:12.5,color:'rgba(251,191,36,0.9)' }}>{accessDenied ? 'Accesso non abilitato' : 'Accesso non autenticato'}</span>
             </div>
           )}
           </div>
@@ -4498,7 +4553,7 @@ export default function Widget(props: Props) {
                             <div style={{ width:36,height:36,borderRadius:'50%',
                               background:`linear-gradient(135deg,${cfg.userAvatarBg1},${cfg.userAvatarBg2})`,
                               display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,fontWeight:700,color:'#fff',flexShrink:0 }}>
-                              {userInitials}
+                              <span style={{ display:'inline-block', transform:'translateY(1px)' }}>{userInitials}</span>
                             </div>
                           )}
                           {showAccountName && (
@@ -4586,6 +4641,31 @@ export default function Widget(props: Props) {
               {signingIn ? 'Uscita…' : 'Esci'}
             </button>
             )
+          ) : accessDenied ? (
+            <div style={{ display:'flex',alignItems:'center',gap:8 }}>
+              <button type='button' disabled={signingIn}
+                onClick={async () => {
+                  setSigning(true)
+                  try { await performSwitchAccount() } finally { setSigning(false) }
+                }}
+                style={{ ...btnStyle, padding:'7px 12px', fontWeight:600 }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+                </svg>
+                {signingIn ? 'Cambio…' : 'Cambia account'}
+              </button>
+              <button type='button' disabled={signingIn}
+                onClick={async () => {
+                  setSigning(true)
+                  try { await performSignOut() } finally { setSigning(false) }
+                }}
+                style={{ ...btnStyle, padding:'7px 12px', fontWeight:600 }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+                {signingIn ? 'Uscita…' : 'Esci'}
+              </button>
+            </div>
           ) : (
             <button type='button' disabled={signingIn}
               onClick={async () => {

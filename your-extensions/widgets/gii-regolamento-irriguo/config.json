@@ -1,0 +1,13 @@
+{
+  "title": "Regolamento irriguo",
+  "titleColor": "#1F4E79",
+  "titleFontSize": 15,
+  "sectionTitleColor": "#1F4E79",
+  "sectionTitleFontSize": 13,
+  "accentColor": "#1F4E79",
+  "leftColumnWidthPct": 28,
+  "rightColumnWidthPct": 72,
+  "leftPanelBackgroundColor": "#ffffff",
+  "contentBackgroundColor": "#ffffff",
+  "regolamentoArticoliUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_REGOLAMENTO_ARTICOLI/FeatureServer/0"
+}
