@@ -3621,7 +3621,20 @@ export default function Widget(props: Props) {
   };
 
   const isIaAwaitingRetakeFromRia = (d: any): boolean => {
-    if (!d || isDeterminazioneAdottata(d)) return false;
+    if (!d) return false;
+
+    // Dopo l'adozione della determinazione può aprirsi il successivo ciclo
+    // dell'Atto di contestazione. In quel ciclo determinazione_numero/data restano
+    // valorizzati, ma il rientro RIA -> IA richiede comunque una nuova presa in
+    // carico. Non trattare quindi la determinazione adottata come chiusura finale
+    // finché determinazione_stato identifica il workflow operativo dell'Atto.
+    const determinazioneStato = String(pickField(d, "determinazione_stato") ?? "")
+      .trim()
+      .toUpperCase();
+    const attoContestazioneWorkflowAttivo =
+      isDeterminazioneAdottata(d) &&
+      ["BOZZA", "TRASMESSA_RIA", "VALIDATA_RIA", "EMAIL_DIRETTORE_PREPARATA"].includes(determinazioneStato);
+    if (isDeterminazioneAdottata(d) && !attoContestazioneWorkflowAttivo) return false;
 
     // esito/stato_RIA = Integrazione è ambiguo: RIA ha due percorsi
     // distinti di richiesta integrazione che scrivono lo stesso valore

@@ -2134,8 +2134,11 @@ async function deleteAmmAttachment (layer: any, oid: number, attachmentId: numbe
   if (token) fd.append('token', token)
   const resp = await fetch(`${layerUrl}/${Number(oid)}/deleteAttachments`, { method: 'POST', body: fd })
   const json: any = await resp.json().catch(() => ({}))
-  const err = json?.error
-  if (!resp.ok || err) throw new Error(String(err?.message || `HTTP ${resp.status}`))
+  const result = Array.isArray(json?.deleteAttachmentResults) ? json.deleteAttachmentResults[0] : null
+  const err = json?.error || result?.error || null
+  if (!resp.ok || err || result?.success === false) {
+    throw new Error(String(err?.description || err?.message || `HTTP ${resp.status}`))
+  }
 }
 
 
@@ -2177,8 +2180,19 @@ async function replaceBozzaDeterminazionePdfAttachment (layer: any, oid: number,
   }
 
   const finalList = await queryAmmAttachments(layer, oid, layerUrl)
-  return finalList
-    .filter(isGiiBozzaDeterminazionePdfAttachment)
+  const finalBozzaPdfs = finalList.filter(isGiiBozzaDeterminazionePdfAttachment)
+  if (finalBozzaPdfs.length !== 1) {
+    throw new Error(
+      finalBozzaPdfs.length > 1
+        ? 'Sostituzione del PDF non completata: nello slot Bozza determinazione risultano ancora più PDF. Nessun documento viene considerato definitivo finché il duplicato non viene rimosso.'
+        : 'Sostituzione del PDF non completata: nello slot Bozza determinazione non risulta alcun PDF.'
+    )
+  }
+  const finalPdfId = Number(finalBozzaPdfs[0]?.id)
+  if (keepIds.size > 0 && (!Number.isFinite(finalPdfId) || !keepIds.has(finalPdfId))) {
+    throw new Error('Sostituzione del PDF non completata: il documento rimasto nello slot non corrisponde al nuovo PDF caricato.')
+  }
+  return finalBozzaPdfs
     .map(att => keepIds.has(Number(att.id)) && !parseBozzaAttachmentFileCreatedAt(att) ? { ...att, uploadedAt: fileCreatedAt } : att)
 }
 
@@ -4450,6 +4464,7 @@ function IaVerificationSummary (props: {
   onPrepareEmailDirettore: () => void
   onPrepareEmailProtocollo: () => void
   onGenerateAttoContestazioneWord: () => void
+  attoCleanWordGeneratedAfterApproval?: boolean
   onTransmitAttoContestazioneRia: () => void
   onPrepareEmailAttoDirettore: () => void
   onPrepareEmailAttoProtocollo: () => void
@@ -4660,6 +4675,7 @@ function IaVerificationSummary (props: {
         onPrepareEmailDirettore={props.onPrepareEmailDirettore}
         onPrepareEmailProtocollo={props.onPrepareEmailProtocollo}
         onGenerateAttoContestazioneWord={props.onGenerateAttoContestazioneWord}
+        attoCleanWordGeneratedAfterApproval={props.attoCleanWordGeneratedAfterApproval}
         onTransmitAttoContestazioneRia={props.onTransmitAttoContestazioneRia}
         onPrepareEmailAttoDirettore={props.onPrepareEmailAttoDirettore}
         onPrepareEmailAttoProtocollo={props.onPrepareEmailAttoProtocollo}
@@ -4729,6 +4745,7 @@ function PostAttestazioneIaWorkSection (props: {
   onPrepareEmailDirettore: () => void
   onPrepareEmailProtocollo: () => void
   onGenerateAttoContestazioneWord: () => void
+  attoCleanWordGeneratedAfterApproval?: boolean
   onTransmitAttoContestazioneRia: () => void
   onPrepareEmailAttoDirettore: () => void
   onPrepareEmailAttoProtocollo: () => void
@@ -5105,6 +5122,7 @@ function PostAttestazioneIaWorkSection (props: {
   const legacyAttoDirectPdf = attoWorkflow && attoState === 'ADOTTATA' && hasAttoPdfCaricato && hasAdminValue(pickAttrCI(saved, ['accertamento_data'])) && !attoWorkflowLocked
   const attoInLavorazioneIa = attoWorkflow && (attoState === 'ADOTTATA' || attoState === 'BOZZA')
   const attoRichiedeVersionePulita = attoApprovedRia && !attoEmailDirettorePreparata && !hasAttoDaFirmare
+  const attoCleanWordGeneratedAfterApproval = !!props.attoCleanWordGeneratedAfterApproval
   const canGenerateAttoContestazioneWord =
     props.canEdit &&
     attoWorkflow &&
@@ -5389,8 +5407,10 @@ function PostAttestazioneIaWorkSection (props: {
       else if (!hasAttoPdfCaricato) nextIaAction = 'UPLOAD_PDF'
       else if (canTransmitAttoContestazione) nextIaAction = 'TRANSMIT_RIA'
     } else if (attoApprovedRia && !attoEmailDirettorePreparata) {
-      if (!hasAttoDaFirmare) nextIaAction = canGenerateAttoContestazioneWord ? 'GENERATE_WORD' : (canUploadAttoContestazione ? 'UPLOAD_PDF' : null)
-      else if (canPrepareEmailAttoDirettore) nextIaAction = 'EMAIL_DIRETTORE'
+      if (!hasAttoDaFirmare) {
+        if (!attoCleanWordGeneratedAfterApproval && canGenerateAttoContestazioneWord) nextIaAction = 'GENERATE_WORD'
+        else if (canUploadAttoContestazione) nextIaAction = 'UPLOAD_PDF'
+      } else if (canPrepareEmailAttoDirettore) nextIaAction = 'EMAIL_DIRETTORE'
     } else if (attoEmailDirettorePreparata) {
       if (!hasAttoFirmato && canUploadSignedAtto) nextIaAction = 'UPLOAD_PDF'
       else if (hasAttoFirmato && canPrepareEmailAttoProtocollo) nextIaAction = 'SEND_PROTOCOLLO'
@@ -5450,7 +5470,7 @@ function PostAttestazioneIaWorkSection (props: {
     ? (attoWorkflowLocked
         ? 'Atto non modificabile in questa fase'
         : (attoRichiedeVersionePulita
-            ? 'Genera Atto senza filigrana'
+            ? (attoCleanWordGeneratedAfterApproval ? 'Rigenera Atto senza filigrana' : 'Genera Atto senza filigrana')
             : (hasAttoPdfCaricato && !legacyAttoDirectPdf ? 'Bozza PDF dell’Atto già caricata' : (attoWordGenerated && !legacyAttoDirectPdf ? 'Rigenera bozza Word dell’Atto' : 'Genera bozza Word dell’Atto'))))
     : generateBozzaActionTitle
   const uploadActionDisabled = !attachmentsResolved || (attoWorkflow ? !canUploadAttoContestazione : !canUploadBozza)
@@ -5801,7 +5821,7 @@ function PostAttestazioneIaWorkSection (props: {
             )}
 
             <span style={{ position: 'relative', display: 'inline-flex' }}>
-              {nextIaAction === 'GENERATE_WORD' && <NextActionPulse floating title={attoWorkflow ? 'Azione successiva: genera la bozza Word dell’Atto' : `Azione successiva: ${generateBozzaButtonLabel}`} />}
+              {nextIaAction === 'GENERATE_WORD' && <NextActionPulse floating title={attoWorkflow ? (attoApprovedRia ? 'Azione successiva: genera l’Atto senza filigrana' : 'Azione successiva: genera la bozza Word dell’Atto') : `Azione successiva: ${generateBozzaButtonLabel}`} />}
               <button
                 type='button'
                 title={generateActionTitle}
@@ -8812,6 +8832,20 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [layerFields, setLayerFields] = React.useState<LayerFieldInfo[]>([])
   const [draft, setDraft] = React.useState<Record<string, any>>({})
   const [liveRefreshVersion, setLiveRefreshVersion] = React.useState(0)
+  const [attoCleanWordGeneratedMarker, setAttoCleanWordGeneratedMarker] = React.useState<{ oid: number, generatedAt: number } | null>(() => {
+    try {
+      const raw = window.sessionStorage.getItem('GII_ATTO_CLEAN_WORD_GENERATED')
+      if (!raw) return null
+      const parsed = JSON.parse(raw)
+      const markerOid = Number(parsed?.oid)
+      const generatedAt = Number(parsed?.generatedAt || parsed?.ts || 0)
+      return Number.isFinite(markerOid) && markerOid > 0
+        ? { oid: markerOid, generatedAt: Number.isFinite(generatedAt) && generatedAt > 0 ? generatedAt : Date.now() }
+        : null
+    } catch {
+      return null
+    }
+  })
   const [initialDraft, setInitialDraft] = React.useState<Record<string, any>>({})
   const [automaticValues, setAutomaticValues] = React.useState<Record<string, any>>({})
   const [saving, setSaving] = React.useState(false)
@@ -9409,6 +9443,93 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }, [data, findOpenAmmCycle, getLogLayer, getNextAmmCycleNumber, oid, profile.username])
 
+
+
+  const closeIaAttoContestazioneCycle = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>, changedFieldNames: string[]) => {
+    const parentGlobalId = String(
+      pickAttrCI(nextAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
+      pickAttrCI(prevAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
+      pickAttrCI(data, ['GlobalID', 'globalid', 'GLOBALID']) ||
+      ''
+    ).trim()
+    if (!parentGlobalId || oid == null) {
+      console.warn('[GII_LOG_EVENTI_CICLI] Chiusura ciclo IA Atto di contestazione saltata: parent_globalid non disponibile.', { oid })
+      return 0
+    }
+
+    const logLayer = await getLogLayer()
+    if (!logLayer?.applyEdits) return 0
+
+    const now = Date.now()
+    const roleForLog = 'IA'
+    const username = String(profile.username || '').trim()
+    const destUsername = await loadUniqueAmmRoleUsername('RIA', 'AMM')
+    const logFields = (logLayer.fields || []).map((f: any) => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
+    const delta = buildAuditDeltaMaps(prevAttrs, nextAttrs, changedFieldNames)
+    const num = Object.keys(delta.oldMap).length
+    const baseAttrs: Record<string, any> = {
+      parent_globalid: parentGlobalId,
+      parent_objectid: oid,
+      ruolo_competente: roleForLog,
+      utente_operatore: username,
+      stato_record: 'CHIUSO',
+      evento_apertura: 'PRESA_IN_CARICO',
+      evento_chiusura: 'ISTRUTTORIA_TRASMESSA',
+      dt_chiusura: now,
+      area: 'AMM',
+      settore: 'CR',
+      fase: roleForLog,
+      ruolo_destinatario: 'RIA',
+      utente_destinatario: destUsername,
+      note_chiusura: 'Atto di contestazione trasmesso al Responsabile dell’istruttoria amministrativa per l’approvazione.',
+      num_campi_modificati: num,
+      campi_modificati: num > 0 ? Object.keys(delta.oldMap).join(', ') : '',
+      valori_prima_json: num > 0 ? JSON.stringify(delta.oldMap) : '',
+      valori_dopo_json: num > 0 ? JSON.stringify(delta.newMap) : '',
+      riepilogo_ciclo: 'Atto di contestazione trasmesso al Responsabile dell’istruttoria amministrativa.'
+    }
+
+    try {
+      const openFeature = await findOpenAmmCycle(parentGlobalId, roleForLog)
+      if (openFeature?.attributes) {
+        const existingOld = parseJsonObject(openFeature.attributes.valori_prima_json)
+        const existingNew = parseJsonObject(openFeature.attributes.valori_dopo_json)
+        const merged = mergeAuditCycleMaps(existingOld, existingNew, delta.oldMap, delta.newMap)
+        const mergedNum = merged.fields.length
+        const updateAttrs = filterAttrsForLayer({
+          ...baseAttrs,
+          [String(logLayer.objectIdField || 'OBJECTID')]: getLogObjectIdValue(openFeature.attributes, logLayer),
+          utente_operatore: username || openFeature.attributes.utente_operatore || '',
+          dt_apertura: openFeature.attributes.dt_apertura || null,
+          numero_ciclo_ruolo: openFeature.attributes.numero_ciclo_ruolo || null,
+          session_id: openFeature.attributes.session_id || `ia-atto-${now}`,
+          num_campi_modificati: mergedNum,
+          campi_modificati: mergedNum > 0 ? merged.fields.join(', ') : '',
+          valori_prima_json: mergedNum > 0 ? JSON.stringify(merged.oldMap) : '',
+          valori_dopo_json: mergedNum > 0 ? JSON.stringify(merged.newMap) : ''
+        }, logFields)
+        const res = await logLayer.applyEdits({ updateFeatures: [{ attributes: updateAttrs }] })
+        const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
+        if (upd?.error) throw new Error(upd.error.message || JSON.stringify(upd.error))
+      } else {
+        const nextNum = await getNextAmmCycleNumber(parentGlobalId, roleForLog)
+        const addAttrs = filterAttrsForLayer({
+          ...baseAttrs,
+          numero_ciclo_ruolo: nextNum,
+          dt_apertura: Number(pickAttrCI(prevAttrs, ['dt_presa_in_carico_IA', 'dt_stato_IA'])) || now,
+          session_id: `ia-atto-${now}-${Math.random().toString(36).slice(2, 8)}`
+        }, logFields)
+        const res = await logLayer.applyEdits({ addFeatures: [{ attributes: addAttrs }] })
+        const add = res?.addFeatureResults?.[0] || res?.addResults?.[0] || null
+        if (add?.error) throw new Error(add.error.message || JSON.stringify(add.error))
+      }
+      try { window.dispatchEvent(new CustomEvent('gii-log-eventi-cicli-changed', { detail: { source: 'gii-editing-amm-atto-contestazione-trasmesso', oid, role: roleForLog, ts: now } })) } catch {}
+      return 1
+    } catch (e) {
+      console.warn('[GII_LOG_EVENTI_CICLI] Errore chiusura ciclo IA Atto di contestazione:', e)
+      return 0
+    }
+  }, [data, findOpenAmmCycle, getLogLayer, getNextAmmCycleNumber, oid, profile.username])
 
 
   const deleteCurrentAmmActivitiesForRole = React.useCallback(async (roleRaw: string, sourceAttrs?: Record<string, any>, excludeKey?: string) => {
@@ -10573,6 +10694,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const next = { ...liveAttrs, ...cleanAttrs }
       const changedFields = Object.keys(cleanAttrs).filter(k => k !== idName)
       if (changedFields.length) await upsertAmmCycleAudit(liveAttrs, next, changedFields)
+      if (postRiApproved) {
+        // La generazione riuscita della versione pulita è l'evento che fa avanzare
+        // la guida a "Carica PDF". Non dipendiamo da dt_esito_RIA, che può non
+        // essere presente o ancora sincronizzato nel viewData corrente.
+        const marker = { oid: Number(oid), generatedAt: Date.now() }
+        setAttoCleanWordGeneratedMarker(marker)
+        try { window.sessionStorage.setItem('GII_ATTO_CLEAN_WORD_GENERATED', JSON.stringify(marker)) } catch {}
+      }
       if (operationContextIsCurrent()) await refreshDs(active.ds, props.id)
       if (!operationContextIsCurrent()) return
       setInitialDraft(next)
@@ -10666,7 +10795,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const next = { ...liveAttrs, ...cleanAttrs }
       const changed = Object.keys(cleanAttrs).filter(k => k !== idName)
       await upsertAmmCycleAudit(liveAttrs, next, changed)
+      await closeIaAttoContestazioneCycle(liveAttrs, next, changed)
       await createRiaAttoContestazioneActivity(next)
+      // Un nuovo invio al RIA apre un nuovo ciclo: l'eventuale marker della
+      // precedente versione pulita non deve sopravvivere alla nuova approvazione.
+      setAttoCleanWordGeneratedMarker(null)
+      try { window.sessionStorage.removeItem('GII_ATTO_CLEAN_WORD_GENERATED') } catch {}
       if (!operationContextIsCurrent()) return
       try {
         sessionStorage.setItem('GII_AFTER_WORKFLOW_NAV', JSON.stringify(stampGiiPracticePayload({
@@ -10689,7 +10823,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     } finally {
       if (operationContextIsCurrent()) setSaving(false)
     }
-  }, [active, canEdit, configuredDs, configuredDsState, createRiaAttoContestazioneActivity, currentRole, hasSelection, initialDraft, isDirty, layerFields, oid, profile.username, props.id, refreshDs, upsertAmmCycleAudit])
+  }, [active, canEdit, closeIaAttoContestazioneCycle, configuredDs, configuredDsState, createRiaAttoContestazioneActivity, currentRole, hasSelection, initialDraft, isDirty, layerFields, oid, profile.username, props.id, refreshDs, upsertAmmCycleAudit])
 
   const handlePrepareEmailAttoDirettore = React.useCallback(async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
@@ -11421,6 +11555,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     onPrepareEmailDirettore={handlePrepareEmailDirettore}
                     onPrepareEmailProtocollo={handlePrepareEmailProtocollo}
                     onGenerateAttoContestazioneWord={handleGenerateAttoContestazioneWord}
+                    attoCleanWordGeneratedAfterApproval={
+                      !!attoCleanWordGeneratedMarker &&
+                      Number(oid) === attoCleanWordGeneratedMarker.oid &&
+                      String(pickAttrCI(viewData || {}, ['determinazione_stato']) || '').trim().toUpperCase() === 'VALIDATA_RIA'
+                    }
                     onTransmitAttoContestazioneRia={handleTransmitAttoContestazioneRia}
                     onPrepareEmailAttoDirettore={handlePrepareEmailAttoDirettore}
                     onPrepareEmailAttoProtocollo={handlePrepareEmailAttoProtocollo}
