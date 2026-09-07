@@ -7,6 +7,7 @@
 // =================================================================
 import { buildPropostaContestazionePdf as buildVerbalePdf, getPropostaContestazionePdfFilePrefix as getVerbalePdfFilePrefix } from '../proposta-contestazione/proposta-contestazione-pdf-builder'
 import { buildAttoFinalePdf, getAttoFinalePdfFilePrefix } from '../verbale-contestazione/verbale-pdf-builder'
+import { ensureCachedFeatureLayer } from '../../esri-layer-cache'
 
 export type LayerFieldInfo = {
   name: string
@@ -22,6 +23,87 @@ type ViolationRow = {
   details: Array<{ label: string, value: string }>
 }
 
+const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
+
+type AmmIterLogRow = {
+  ruolo: string
+  eventoApertura: string
+  dtApertura: any
+  eventoChiusura: string
+  dtChiusura: any
+  utenteOperatore: string
+}
+
+function normalizeIterToken (value: any): string {
+  return String(value ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
+}
+
+function normalizeGlobalIdForIter (value: any): string {
+  return String(value ?? '').trim().replace(/[{}]/g, '').toLowerCase()
+}
+
+function iterTimeValue (value: any): number {
+  const d = toDateObj(value)
+  return d ? d.getTime() : 0
+}
+
+function iterDateValue (value: any): string {
+  const d = toDateObj(value)
+  return d ? d.toLocaleDateString('it-IT') : ''
+}
+
+async function enrichAdministrativeIterFromLog (data: any, map: Record<string, string>): Promise<Record<string, string>> {
+  const gid = normalizeGlobalIdForIter(pickAttrCI(data || {}, ['GlobalID', 'globalid', 'GLOBALID', 'global_id']))
+  if (!gid) return map
+
+  try {
+    const fl = await ensureCachedFeatureLayer(GII_LOG_EVENTI_CICLI_URL)
+    if (!fl?.queryFeatures) return map
+    const result = await fl.queryFeatures({
+      where: `LOWER(parent_globalid) = '${gid}' OR LOWER(parent_globalid) = '{${gid}}'`,
+      outFields: ['ruolo_competente', 'evento_apertura', 'dt_apertura', 'evento_chiusura', 'dt_chiusura', 'utente_operatore'],
+      orderByFields: ['dt_apertura ASC'],
+      returnGeometry: false
+    })
+    const rows: AmmIterLogRow[] = (result?.features || []).map((feature: any) => {
+      const a = feature?.attributes || feature || {}
+      return {
+        ruolo: normalizeIterToken(pickAttrCI(a, ['ruolo_competente', 'ruolo'])),
+        eventoApertura: normalizeIterToken(pickAttrCI(a, ['evento_apertura'])),
+        dtApertura: pickAttrCI(a, ['dt_apertura']),
+        eventoChiusura: normalizeIterToken(pickAttrCI(a, ['evento_chiusura'])),
+        dtChiusura: pickAttrCI(a, ['dt_chiusura']),
+        utenteOperatore: String(pickAttrCI(a, ['utente_operatore']) || '').trim()
+      }
+    }).sort((a, b) => (iterTimeValue(a.dtApertura) || iterTimeValue(a.dtChiusura)) - (iterTimeValue(b.dtApertura) || iterTimeValue(b.dtChiusura)))
+
+    const lastForRole = (role: 'IA' | 'RIA', preferredClosures: string[]): AmmIterLogRow | null => {
+      const matches = rows.filter(row => row.ruolo === role && row.eventoApertura === 'PRESA_IN_CARICO' && iterTimeValue(row.dtApertura) > 0)
+      if (!matches.length) return null
+      const preferred = new Set(preferredClosures.map(normalizeIterToken))
+      const closedMatches = matches.filter(row => preferred.has(row.eventoChiusura))
+      return closedMatches.length ? closedMatches[closedMatches.length - 1] : matches[matches.length - 1]
+    }
+    const ia = lastForRole('IA', ['BOZZA_DETERMINAZIONE_TRASMESSA'])
+    const ria = lastForRole('RIA', ['PROPOSTA_CONTESTAZIONE_APPROVATA'])
+    const out = { ...map }
+
+    if (!out.amm_iter_compilazione_presa && ia) out.amm_iter_compilazione_presa = iterDateValue(ia.dtApertura)
+    if (!out.amm_iter_supervisione_presa && ria) out.amm_iter_supervisione_presa = iterDateValue(ria.dtApertura)
+    if (!out.amm_iter_supervisione_nome && ria?.utenteOperatore) out.amm_iter_supervisione_nome = ria.utenteOperatore
+
+    // Quando il record corrente non espone più la data di chiusura della fase,
+    // il log conserva comunque il momento effettivo della trasmissione/decisione.
+    if (!out.amm_iter_compilazione_data && ia?.dtChiusura) out.amm_iter_compilazione_data = iterDateValue(ia.dtChiusura)
+    if (!out.amm_iter_supervisione_data && ria?.dtChiusura) out.amm_iter_supervisione_data = iterDateValue(ria.dtChiusura)
+
+    return out
+  } catch (e) {
+    console.warn('[PropostaContestazioneDataMap] Impossibile integrare l’iter da GII_LOG_EVENTI_CICLI:', e)
+    return map
+  }
+}
+
 const VIOLATION_ARTICLE_TITLES: Record<string, string> = {
   '8': 'Violazione servizio di reperibilità',
   '12': 'Negato accesso ai fondi (al personale consortile)',
@@ -35,7 +117,7 @@ const VIOLATION_ARTICLE_TITLES: Record<string, string> = {
   '31': 'Mancata segnalazione guasti',
   '32': 'Negato accesso ai fondi (al consorziato)',
   '33': 'Inosservanza limiti temporali di prelievo',
-  '34': 'Interferenze',
+  '34': 'Mancato rispetto delle distanze dalle opere consortili',
   '35': 'Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante',
   '36': 'Uso attrezzature non autorizzate',
   '37': 'Uso sistemi di irrigazione incompatibili',
@@ -778,6 +860,25 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
   // azzerato, quindi un valore 2 identifica necessariamente l'approvazione
   // dell'ultimo ciclo e non deve dipendere da una copia locale di esito_IA.
   const propostaApprovata = esitoRiaNum === 2
+  const determinazioneStato = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
+  const iaTrasmessaAlRia = ['TRASMESSA_RIA', 'VALIDATA_RIA', 'FASCICOLO_TRASMESSO_PROTOCOLLO', 'ADOTTATA'].includes(determinazioneStato) || Number(parseNumberInput(pickAttrCI(d, ['stato_IA'])) || 0) === 4
+  const iaIterEsito = esitoIaNum === 2
+    ? 'Attestazione di conformità'
+    : esitoIaNum === 1
+      ? 'Richiesta di integrazione/rettifica'
+      : esitoIaNum === 3
+        ? 'Istruttoria non conforme'
+        : ''
+  const riaIterEsito = esitoRiaNum === 2
+    ? 'Approvazione della proposta'
+    : esitoRiaNum === 1
+      ? 'Richiesta di integrazione'
+      : esitoRiaNum === 3
+        ? 'Proposta respinta'
+        : ''
+  const iaIterData = iaTrasmessaAlRia
+    ? (pdfFieldValue(d, fields, 'dt_stato_IA') || pdfFieldValue(d, fields, 'dt_esito_IA') || pdfFieldValue(d, fields, 'sanzione_calcolata_il'))
+    : (pdfFieldValue(d, fields, 'dt_esito_IA') || pdfFieldValue(d, fields, 'sanzione_calcolata_il'))
   return {
     objectid: oid != null ? String(oid) : '',
     pratica: '',
@@ -854,10 +955,12 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
     istruttoria_amm_chiusa_da: String(pickAttrCI(d, ['istruttoria_amm_chiusa_da']) || ''),
     amm_iter_compilazione_nome: iaNome,
     amm_iter_compilazione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_IA'),
-    amm_iter_compilazione_data: pdfFieldValue(d, fields, 'dt_esito_IA') || pdfFieldValue(d, fields, 'sanzione_calcolata_il'),
-    amm_iter_supervisione_nome: riaNome,
+    amm_iter_compilazione_data: iaIterData,
+    amm_iter_compilazione_esito: iaIterEsito,
+    amm_iter_supervisione_nome: riaNome || (esitoRiaNum === 2 ? (profile.fullName || profile.username || '') : ''),
     amm_iter_supervisione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_RIA'),
     amm_iter_supervisione_data: pdfFieldValue(d, fields, 'dt_esito_RIA') || pdfFieldValue(d, fields, 'istruttoria_amm_chiusa_il'),
+    amm_iter_supervisione_esito: riaIterEsito,
     amm_iter_approvazione_nome: daNome,
     amm_direttore_nome: direttoreNomeUfficiale,
     amm_iter_approvazione_presa: pdfFieldValue(d, fields, 'determinazione_trasmessa_firma_il'),
@@ -874,7 +977,8 @@ export function verbalePdfFileName (map: Record<string, string>): string {
 }
 
 export async function buildVerbalePdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
-  const map = buildVerbalePdfMap(data, fields, profile)
+  const baseMap = buildVerbalePdfMap(data, fields, profile)
+  const map = await enrichAdministrativeIterFromLog(data, baseMap)
   const bytes = await buildVerbalePdf(map)
   const fileName = verbalePdfFileName(map)
   return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName }

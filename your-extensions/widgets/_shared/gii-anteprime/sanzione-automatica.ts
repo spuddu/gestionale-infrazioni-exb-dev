@@ -385,7 +385,7 @@ const VIOLATION_ARTICLE_TITLES: Record<string, string> = {
   '31': 'Mancata segnalazione guasti',
   '32': 'Negato accesso ai fondi (al consorziato)',
   '33': 'Inosservanza limiti temporali di prelievo',
-  '34': 'Interferenze',
+  '34': 'Mancato rispetto delle distanze dalle opere consortili',
   '35': 'Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante',
   '36': 'Uso attrezzature non autorizzate',
   '37': 'Uso sistemi di irrigazione incompatibili',
@@ -1240,6 +1240,10 @@ function buildAutomaticSanzioneCalculation (
 
   validGroups.forEach(group => {
     dettaglio.push(`${formatArticleFallback(group.articoloViolato)} — ${displayViolationTitle(group)}`)
+    const normaViolata = articleListTitle(group.articoliViolati || [], group.articoloViolato)
+    if (normaViolata && normaViolata !== '—') {
+      dettaglio.push(`- Norma violata: ${normaViolata}`)
+    }
     const normaSanzionatoria = articleListTitle(group.articoliSanzione || [], group.articoloSanzione)
     if (normaSanzionatoria && normaSanzionatoria !== '—') {
       dettaglio.push(`- Norma sanzionatoria: ${normaSanzionatoria}`)
@@ -1619,9 +1623,6 @@ function buildSanzioneGroups (
 function articleTitleLine (article?: RegolamentoArticolo | null, fallback?: string): string {
   if (article) {
     const code = formatArticleCode(article.codice_articolo)
-    if (normalizeArticleNumber(article.codice_articolo || article.numero_articolo) === '41') {
-      return 'Art. 41 — Sanzioni per prelievi abusivi e per inosservanza termini'
-    }
     return article.titolo_articolo ? `${code} — ${article.titolo_articolo}` : code
   }
   return formatArticleFallback(fallback)

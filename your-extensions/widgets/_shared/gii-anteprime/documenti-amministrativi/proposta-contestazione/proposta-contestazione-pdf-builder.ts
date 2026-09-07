@@ -465,12 +465,10 @@ function normalizeCalculationAmount (label: string, amount: string): string {
   return normalizedAmount.replace(/^−/, '-')
 }
 
-function normalizeNormaSanzionatoriaLine (line: string): string {
-  const raw = cleanText(line).replace(/^Norma\s+sanzionatoria\s*:\s*/i, '')
-  if (/Art\.?\s*44\b/i.test(raw)) {
-    return 'Art. 44 - Sanzione per rimborso attrezzature smarrite o danneggiate'
-  }
-  return raw || line
+function normalizeNormaReferenceLine (line: string, kind: 'violata' | 'sanzionatoria'): string {
+  const label = kind === 'violata' ? 'Norma violata' : 'Norma sanzionatoria'
+  const raw = cleanText(line).replace(new RegExp(`^${label.replace(/ /g, '\\s+')}\\s*:\\s*`, 'i'), '')
+  return raw ? `${label}: ${raw}` : label
 }
 
 function drawAlignedTextAmountLine (
@@ -544,7 +542,7 @@ function dashIfEmpty (value: string): string {
 }
 
 const ADMIN_ITER_TABLE_ROW_H = 18
-const ADMIN_ITER_TABLE_HEADER_H = 12
+const ADMIN_ITER_TABLE_HEADER_H = 16
 const ADMIN_ITER_TABLE_BOTTOM_GAP = 6
 
 function administrativeIterTableHeight (rows: AdministrativeIterRow[]): number {
@@ -552,7 +550,7 @@ function administrativeIterTableHeight (rows: AdministrativeIterRow[]): number {
 }
 
 function drawAdministrativeIterTable (ctx: BuildCtx, rows: AdministrativeIterRow[]): void {
-  const headers = ['Fase', 'Nominativo', 'Ruolo', 'Presa in carico', 'Esito', 'Data']
+  const headers = ['Fase', 'Nominativo', 'Ruolo / Funzione', 'Presa in carico', 'Esito / Trasmissione', 'Data']
   const tableW = PAGE_W - M * 2
   const fixedColumnsW = 52 + 78 + 52 + 165 + 50
   const colW = [52, tableW - fixedColumnsW, 78, 52, 165, 50]
@@ -568,7 +566,14 @@ function drawAdministrativeIterTable (ctx: BuildCtx, rows: AdministrativeIterRow
   ctx.page.drawRectangle({ x: startX, y: y - headerH + 4, width: tableW, height: headerH, color: LIGHT_BLUE, borderColor: BORDER, borderWidth: 0.5 })
   let x = startX
   headers.forEach((header, i) => {
-    ctx.page.drawText(header, { x: x + 3, y: y - 6.7, size: headerSize, font: ctx.bold, color: BLUE })
+    const maxW = colW[i] - 6
+    const headerLines = wrapText(ctx.bold, header, headerSize, maxW).slice(0, 2)
+    const headerLineH = headerSize * 1.03
+    const headerBlockH = headerLines.length * headerLineH
+    const headerStartY = y - 3.2 - Math.max(0, (headerH - headerBlockH) / 2)
+    headerLines.forEach((line, lineIndex) => {
+      ctx.page.drawText(line, { x: x + 3, y: headerStartY - lineIndex * headerLineH, size: headerSize, font: ctx.bold, color: BLUE })
+    })
     if (i > 0) ctx.page.drawLine({ start: { x, y: y + 4 }, end: { x, y: y - headerH + 4 }, thickness: 0.45, color: BORDER })
     x += colW[i]
   })
@@ -608,10 +613,8 @@ function drawCalculationDetail (ctx: BuildCtx, rawText: string, m: Record<string
   const lines = source.split('\n').map(line => cleanText(line))
   const titleSize = 8.7
   const detailSize = 8.2
-  const metaSize = 8.0
   const titleLineH = titleSize * 1.34
   const detailLineH = detailSize * 1.34
-  const metaLineH = metaSize * 1.32
   const detailBulletX = M + 18
   const detailTextX = M + 31
   const detailMaxW = PAGE_W - M - detailTextX
@@ -621,13 +624,14 @@ function drawCalculationDetail (ctx: BuildCtx, rawText: string, m: Record<string
 
   const isArticleTitle = (line: string): boolean => /^Art\.\s*\d+[A-Za-z]?(?:\s*[-–—]\s*.+)?$/i.test(line)
   const isStructuredTitle = (line: string): boolean => isArticleTitle(line)
+  const isNormaViolata = (line: string): boolean => /^Norma\s+violata\s*:/i.test(String(line || '').trim())
   const isNormaSanzionatoria = (line: string): boolean => /^Norma\s+sanzionatoria\s*:/i.test(String(line || '').trim())
-  let showNormaSanzionatoriaLines = true
 
   const drawGroup = (title: string, details: string[]): void => {
     const articleMatch = String(title || '').match(/^(Art\.\s*\d+[A-Za-z]?)/i)
     const articleLabel = articleMatch ? articleMatch[1].replace(/Art\.\s*/i, 'Art. ') : ''
-    const isSubtotal = (line: string): boolean => /^Totale(?:\s+Art\.\s*\d+[A-Za-z]?)?\s*:/i.test(String(line || '').trim())
+    const contestazioneTitle = String(title || '').replace(/^Art\.\s*\d+[A-Za-z]?\s*[-–—]\s*/i, '').trim() || String(title || '').trim()
+    const isSubtotal = (line: string): boolean => /^Totale(?:\s+Art\.\s*\d+[A-Za-z]?|\s+contestazione)?\s*:/i.test(String(line || '').trim())
     const normalizedDetails = details
       .map(line => line.replace(/^[•·\-]\s*/, ''))
       .filter(Boolean)
@@ -641,10 +645,14 @@ function drawCalculationDetail (ctx: BuildCtx, rawText: string, m: Record<string
 
     const metaLines: string[] = []
     normalizedDetails.slice().forEach(line => {
-      if (showNormaSanzionatoriaLines && isNormaSanzionatoria(line)) metaLines.push(normalizeNormaSanzionatoriaLine(line))
+      if (isNormaViolata(line)) metaLines.push(normalizeNormaReferenceLine(line, 'violata'))
+      if (isNormaSanzionatoria(line)) metaLines.push(normalizeNormaReferenceLine(line, 'sanzionatoria'))
     })
+    if (articleLabel && !metaLines.some(line => /^Norma\s+violata\s*:/i.test(line))) {
+      metaLines.unshift(`Norma violata: ${articleLabel}`)
+    }
     let workingDetails = normalizedDetails
-      .filter(line => !isNormaSanzionatoria(line))
+      .filter(line => !isNormaViolata(line) && !isNormaSanzionatoria(line))
       .map(line => {
         const parts = splitMoneyLine(line)
         if (!parts) return line
@@ -661,43 +669,45 @@ function drawCalculationDetail (ctx: BuildCtx, rawText: string, m: Record<string
       else workingDetails.push(cauzioneLine)
     }
 
+    const monetaryContribution = (line: string): number | null => {
+      const text = String(line || '').trim()
+      if (!text || isSubtotal(text) || /riduzion/i.test(text) || !/€/.test(text)) return null
+      // I valori espressi in €/ha sono parametri unitari di calcolo: non sono
+      // importi autonomi da sommare al totale della contestazione.
+      if (/€\s*\/\s*ha\b/i.test(text)) return null
+      // Per formule come "300,00 × 0,5000 = 150,00 €" considera l'importo
+      // finale, non i fattori che compaiono nella parte descrittiva della riga.
+      const parts = splitMoneyLine(text)
+      const amount = parts ? moneyNumber(parts.amount) : moneyNumber(text)
+      if (!Number.isFinite(amount)) return null
+      return /cauzione|decurtat|detrazion/i.test(text) ? -Math.abs(amount) : amount
+    }
+
     const existingTotalIndex = workingDetails.findIndex(isSubtotal)
     if (isArt30) {
       const amounts = workingDetails
-        .filter(line => !isSubtotal(line) && /€/.test(line))
-        .map(line => {
-          const amount = moneyNumber(line)
-          if (!Number.isFinite(amount)) return null
-          return /cauzione|decurtat|detrazion/i.test(line) ? -Math.abs(amount) : amount
-        })
+        .map(monetaryContribution)
         .filter((value): value is number => value != null && Number.isFinite(value))
       if (amounts.length > 0) {
         const total = amounts.reduce((sum, value) => sum + value, 0)
-        const totalLine = `Totale${articleLabel ? ` ${articleLabel}` : ''}: ${formatMoneyIt(total)}`
+        const totalLine = `Totale contestazione: ${formatMoneyIt(total)}`
         if (existingTotalIndex >= 0) workingDetails[existingTotalIndex] = totalLine
         else workingDetails.push(totalLine)
       }
-    } else if (existingTotalIndex >= 0) {
-      workingDetails[existingTotalIndex] = workingDetails[existingTotalIndex].replace(
-        /^Totale(?:\s+Art\.\s*\d+[A-Za-z]?)?\s*:/i,
-        `Totale${articleLabel ? ` ${articleLabel}` : ''}:`
-      )
     } else {
       const amounts = workingDetails
-        .filter(line => !/riduzion/i.test(line))
-        .map(line => {
-          if (!/€/.test(line)) return null
-          const amount = moneyNumber(line)
-          if (!Number.isFinite(amount)) return null
-          return /cauzione|decurtat|detrazion/i.test(line) ? -Math.abs(amount) : amount
-        })
+        .map(monetaryContribution)
         .filter((value): value is number => value != null && Number.isFinite(value))
-      if (amounts.length === 1) {
-        const total = amounts[0]
-        workingDetails.push(`Totale${articleLabel ? ` ${articleLabel}` : ''}: ${formatMoneyIt(total)}`)
-      } else if (amounts.length > 1) {
+      if (amounts.length > 0) {
         const total = amounts.reduce((sum, value) => sum + value, 0)
-        workingDetails.push(`Totale${articleLabel ? ` ${articleLabel}` : ''}: ${formatMoneyIt(total)}`)
+        const totalLine = `Totale contestazione: ${formatMoneyIt(total)}`
+        if (existingTotalIndex >= 0) workingDetails[existingTotalIndex] = totalLine
+        else workingDetails.push(totalLine)
+      } else if (existingTotalIndex >= 0) {
+        workingDetails[existingTotalIndex] = workingDetails[existingTotalIndex].replace(
+          /^Totale(?:\s+Art\.\s*\d+[A-Za-z]?|\s+contestazione)?\s*:/i,
+          'Totale contestazione:'
+        )
       }
     }
 
@@ -705,13 +715,30 @@ function drawCalculationDetail (ctx: BuildCtx, rawText: string, m: Record<string
     const totalLine = totalIndex >= 0 ? workingDetails[totalIndex] : ''
     if (totalIndex >= 0) workingDetails = workingDetails.filter((_, index) => index !== totalIndex)
 
-    const titleLines = wrapText(ctx.bold, title, titleSize, PAGE_W - M * 2)
-    const metaLineCount = metaLines.reduce((count, line) => count + Math.max(1, wrapText(ctx.font, line, metaSize, PAGE_W - M * 2 - 14).length), 0)
+    const titleLines = wrapText(ctx.bold, contestazioneTitle, titleSize, PAGE_W - M * 2)
+    const normAccentX = M + 1
+    const normLabelX = M + 10
+    const normLabelW = 106
+    const normValueX = M + normLabelW
+    const normValueW = PAGE_W - M - normValueX
+    const normLabelSize = 7.4
+    const normValueSize = 8.2
+    const normValueLineH = normValueSize * 1.2
+    const normPadY = 3.2
+    const normativeRows = metaLines.map(line => {
+      const match = String(line || '').match(/^(Norma\s+violata|Norma\s+sanzionatoria)\s*:\s*(.*)$/i)
+      const label = match ? match[1] : line
+      const value = match ? cleanText(match[2]) : ''
+      const rows = wrapText(ctx.bold, value || '—', normValueSize, normValueW)
+      const rowH = Math.max(16, rows.length * normValueLineH + normPadY * 2)
+      return { label, value, rows: rows.length ? rows : ['—'], rowH }
+    })
+    const metaBlockHeight = normativeRows.reduce((sum, row) => sum + row.rowH, 0)
     const detailLineCount = workingDetails.reduce((count, detail) => {
       return count + Math.max(1, wrapText(ctx.font, detail, detailSize, detailMaxW).length)
     }, 0)
     const totalLineCount = totalLine ? Math.max(1, wrapText(ctx.bold, totalLine, detailSize, totalMaxW).length) : 0
-    const estimatedHeight = titleLines.length * titleLineH + metaLineCount * metaLineH + detailLineCount * detailLineH + totalLineCount * detailLineH + 18 + groupGap
+    const estimatedHeight = titleLines.length * titleLineH + metaBlockHeight + detailLineCount * detailLineH + totalLineCount * detailLineH + 18 + groupGap
     ensureSpace(ctx, Math.min(estimatedHeight, 118))
 
     titleLines.forEach(line => {
@@ -720,35 +747,85 @@ function drawCalculationDetail (ctx: BuildCtx, rawText: string, m: Record<string
       ctx.y -= titleLineH
     })
 
-    if (metaLines.length) {
-      ctx.y -= 1
-      metaLines.forEach(metaLine => {
-        const wrapped = wrapText(ctx.font, metaLine, metaSize, PAGE_W - M * 2 - 14)
-        const rows = wrapped.length ? wrapped : ['—']
-        ensureSpace(ctx, rows.length * metaLineH + 3)
-        rows.forEach(line => {
-          ctx.page.drawText(line, { x: M + 14, y: ctx.y, size: metaSize, font: ctx.font, color: GRAY })
-          ctx.y -= metaLineH
+    if (normativeRows.length) {
+      ctx.y -= 3
+      const blockTopY = ctx.y + 4
+      const blockHeight = normativeRows.reduce((sum, row) => sum + row.rowH, 0)
+      const blockBottomY = blockTopY - blockHeight
+      ctx.page.drawLine({
+        start: { x: normAccentX, y: blockTopY },
+        end: { x: normAccentX, y: blockBottomY },
+        thickness: 2.2,
+        color: BLUE
+      })
+
+      normativeRows.forEach((row, rowIndex) => {
+        ensureSpace(ctx, row.rowH + 2)
+        const rowTopY = ctx.y + 4
+        const rowBottomY = rowTopY - row.rowH
+        const labelY = rowBottomY + (row.rowH - normLabelSize) / 2 + 1.2
+        ctx.page.drawText(row.label.toUpperCase(), {
+          x: normLabelX,
+          y: labelY,
+          size: normLabelSize,
+          font: ctx.bold,
+          color: BLUE
         })
+
+        const textBlockH = row.rows.length * normValueLineH
+        const firstLineY = rowBottomY + (row.rowH + textBlockH) / 2 - normValueSize
+        row.rows.forEach((line, lineIndex) => {
+          ctx.page.drawText(line, {
+            x: normValueX,
+            y: firstLineY - lineIndex * normValueLineH,
+            size: normValueSize,
+            font: ctx.bold,
+            color: BLACK
+          })
+        })
+
+        if (rowIndex < normativeRows.length - 1) {
+          ctx.page.drawLine({
+            start: { x: normLabelX, y: rowBottomY },
+            end: { x: PAGE_W - M, y: rowBottomY },
+            thickness: 0.35,
+            color: BORDER
+          })
+        }
+        ctx.y -= row.rowH
       })
     }
 
-    if (workingDetails.length) ctx.y -= 2
+    if (workingDetails.length) ctx.y -= 7
     workingDetails.forEach(detail => {
-      const parts = splitMoneyLine(detail)
+      const isPerHaParameter = /€\s*\/\s*ha\b/i.test(String(detail || ''))
+      const parts = isPerHaParameter ? null : splitMoneyLine(detail)
       const labelForWrap = parts ? normalizeCalculationLabel(parts.label) : detail
       const wrapped = wrapText(ctx.font, labelForWrap, detailSize, parts ? (PAGE_W - M - detailTextX - 86) : detailMaxW)
       const rows = wrapped.length ? wrapped : ['—']
       ensureSpace(ctx, rows.length * detailLineH + 3)
       ctx.page.drawText('•', { x: detailBulletX, y: ctx.y, size: detailSize, font: ctx.bold, color: BLACK })
-      drawAlignedTextAmountLine(ctx, detail, {
-        x: detailTextX,
-        maxRightX: DETAIL_AMOUNT_RIGHT_X,
-        size: detailSize,
-        font: ctx.font,
-        color: BLACK,
-        lineH: detailLineH
-      })
+      // Un importo €/ha è un coefficiente unitario della formula, non una voce
+      // economica autonoma: viene quindi mantenuto nel testo, senza leader né
+      // allineamento nella colonna degli importi.
+      if (isPerHaParameter) {
+        const plainRows = wrapText(ctx.font, detail, detailSize, detailMaxW)
+        const safeRows = plainRows.length ? plainRows : ['—']
+        safeRows.forEach((row, lineIndex) => {
+          ctx.page.drawText(row, { x: detailTextX, y: ctx.y, size: detailSize, font: ctx.font, color: BLACK })
+          ctx.y -= detailLineH
+          if (lineIndex < safeRows.length - 1) ensureSpace(ctx, detailLineH + 2)
+        })
+      } else {
+        drawAlignedTextAmountLine(ctx, detail, {
+          x: detailTextX,
+          maxRightX: DETAIL_AMOUNT_RIGHT_X,
+          size: detailSize,
+          font: ctx.font,
+          color: BLACK,
+          lineH: detailLineH
+        })
+      }
       ctx.y -= 1
     })
 
@@ -807,8 +884,6 @@ function drawCalculationDetail (ctx: BuildCtx, rawText: string, m: Record<string
 
   const articleBlocks = blocks
     .filter((block): block is Extract<CalculationBlock, { kind: 'article' }> => block.kind === 'article')
-  const normaPresence = articleBlocks.map(block => block.details.some(line => isNormaSanzionatoria(line.replace(/^[•·\-]\s*/, ''))))
-  showNormaSanzionatoriaLines = normaPresence.length > 0 && normaPresence.every(Boolean)
 
   const orderedArticles = articleBlocks
     .sort((a, b) => articleSortKey(a.title) - articleSortKey(b.title) || a.originalIndex - b.originalIndex)
@@ -971,11 +1046,11 @@ Ditta “${trasgressore}”.`)
   if (!meta.isArchiviazione || isFinal) {
     const iterRows = [
       {
-        fase: 'Attestazione',
+        fase: 'Istruttoria',
         nominativo: v(m, 'amm_iter_compilazione_nome'),
         ruolo: 'Istruttore amministrativo',
         presa: v(m, 'amm_iter_compilazione_presa'),
-        esito: 'Attestazione di conformità',
+        esito: v(m, 'amm_iter_compilazione_esito'),
         data: v(m, 'amm_iter_compilazione_data')
       },
       {
@@ -983,7 +1058,7 @@ Ditta “${trasgressore}”.`)
         nominativo: v(m, 'amm_iter_supervisione_nome'),
         ruolo: 'Responsabile istruttoria amministrativa',
         presa: v(m, 'amm_iter_supervisione_presa'),
-        esito: 'Istruttoria amministrativa approvata',
+        esito: v(m, 'amm_iter_supervisione_esito'),
         data: v(m, 'amm_iter_supervisione_data')
       }
     ]
@@ -997,7 +1072,7 @@ Ditta “${trasgressore}”.`)
         data: v(m, 'amm_iter_approvazione_data') || v(m, 'determinazione_data')
       })
     }
-    drawAdministrativeIterSection(ctx, isFinal ? 'Iter approvativo' : 'Iter approvativo della proposta', iterRows)
+    drawAdministrativeIterSection(ctx, isFinal ? 'Iter approvativo' : 'Iter dell’istruttoria amministrativa', iterRows)
   }
 
 

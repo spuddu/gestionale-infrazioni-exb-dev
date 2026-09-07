@@ -5421,13 +5421,27 @@ function ActionsPanel (props: {
         try {
           liveProposalAttrs = await queryCurrentRecordAttrs()
         } catch {}
+        const proposalProfile = {
+          username: String(currentProfile?.username || ''),
+          fullName: String(currentProfile?.fullName || currentProfile?.full_name || currentProfile?.username || '')
+        }
+        let proposalSource: Record<string, any> = { ...(liveProposalAttrs || data || {}), ...upd }
+        try {
+          const freshSanzione = await computeSanzioneAutomatica(
+            props.sanzioneConfig,
+            proposalSource,
+            proposalFields as any,
+            proposalProfile,
+            proposalSource
+          )
+          proposalSource = { ...proposalSource, ...freshSanzione }
+        } catch (e: any) {
+          console.warn('[GII_SANZIONE] Impossibile aggiornare il dettaglio normativo della Proposta:', e?.message || e)
+        }
         const propostaBlob = await buildVerbalePdfBlob(
-          { ...(liveProposalAttrs || data || {}), ...upd },
+          proposalSource,
           proposalFields as any,
-          {
-            username: String(currentProfile?.username || ''),
-            fullName: String(currentProfile?.fullName || currentProfile?.full_name || currentProfile?.username || '')
-          }
+          proposalProfile
         )
         iaAttestationProposalSync = {
           layer,
@@ -5557,13 +5571,27 @@ function ActionsPanel (props: {
         try {
           liveProposalAttrs = await queryCurrentRecordAttrs()
         } catch {}
+        const proposalProfile = {
+          username: String(currentProfile?.username || ''),
+          fullName: String(currentProfile?.fullName || currentProfile?.full_name || currentProfile?.username || '')
+        }
+        let proposalSource: Record<string, any> = { ...(liveProposalAttrs || data || {}), ...upd }
+        try {
+          const freshSanzione = await computeSanzioneAutomatica(
+            props.sanzioneConfig,
+            proposalSource,
+            proposalFields as any,
+            proposalProfile,
+            proposalSource
+          )
+          proposalSource = { ...proposalSource, ...freshSanzione }
+        } catch (e: any) {
+          console.warn('[GII_SANZIONE] Impossibile aggiornare il dettaglio normativo della Proposta:', e?.message || e)
+        }
         const propostaBlob = await buildVerbalePdfBlob(
-          { ...(liveProposalAttrs || data || {}), ...upd },
+          proposalSource,
           proposalFields as any,
-          {
-            username: String(currentProfile?.username || ''),
-            fullName: String(currentProfile?.fullName || currentProfile?.full_name || currentProfile?.username || '')
-          }
+          proposalProfile
         )
         riaApprovedProposalSync = {
           layer,

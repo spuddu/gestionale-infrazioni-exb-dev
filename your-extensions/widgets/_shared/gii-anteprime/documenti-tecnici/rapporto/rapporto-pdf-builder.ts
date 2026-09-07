@@ -913,11 +913,15 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   // ── Tabella infrazioni ──
   const artSz = 8
 
-  // Aggiorna le descrizioni degli artt. 16 e 17 senza modificare il template PDF.
-  // La schermatura resta all'interno dei bordi originali della cella.
-  const drawViolationDescription = (lines: string[], top: number, bottom: number): void => {
+  // Il template contiene già le descrizioni correnti con la tipografia corretta.
+  // L'Art. 34 è l'unica voce da sostituire: la nuova descrizione entra su una riga
+  // e usa la stessa dimensione delle altre descrizioni a riga singola.
+  {
     const x = 71.04
     const width = 304.44 - x
+    const top = 636.84
+    const bottom = 659.52
+    const fontSize = 9.96
     p1.drawRectangle({
       x: x + 0.5,
       y: PH - bottom + 0.5,
@@ -925,21 +929,17 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
       height: bottom - top - 1,
       color: WHITE
     })
-    const fontSize = 8.2
-    const lineTop = top + 2.2
-    lines.forEach((line, index) => {
-      txt(p1, line, fR, fontSize, 73.68, bY(lineTop + index * 11.8, fontSize), BLUE, 228)
-    })
+    txt(
+      p1,
+      'Mancato rispetto delle distanze dalle opere consortili',
+      fR,
+      fontSize,
+      73.68,
+      bY(644.39, fontSize),
+      BLUE,
+      228
+    )
   }
-
-  drawViolationDescription([
-    'Art. 16 - Presentazione tardiva comunicazione',
-    'di irrigazione'
-  ], 432.60, 455.28)
-  drawViolationDescription([
-    'Art. 17 - Presentazione tardiva comunicazione',
-    'di variazione o di rinuncia.'
-  ], 455.28, 477.96)
 
   for (const row of ROWS) {
     const y = bY(row.top, artSz)
@@ -1030,6 +1030,12 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   // ── ITER DELL'ISTRUTTORIA TECNICA ──
   // Colonne iter (template v13): Fase 42.72–106.58 | Nominativo 107.06–220.00 | Ruolo 220.49–319.27 | Presa 319.75–368.83 | Esito 369.31–503.52 | Data 504.00–553.20
   const iterSz = 7.2
+
+  // Nel template storico la seconda fase è stampata come "Compilazione".
+  // La terminologia corrente del gestionale usa "Istruttoria": copriamo solo
+  // il testo della cella, lasciando intatti bordi e geometria della tabella.
+  p2.drawRectangle({ x: 44.8, y: 112.45, width: 52.6, height: 9.9, color: LABEL_BG })
+  txt(p2, 'Istruttoria', fR, 9, 45.24, 114.98, rgb(0, 0.42, 0.60))
 
   const iterRows: Array<{ top: number; nome: string; presa: string; data: string }> = [
     { top: 703.36, nome: v('iter_rilevazione_nome') || v('firma_tr'), presa: v('iter_rilevazione_presa'), data: v('iter_rilevazione_data') || v('data_rilevazione') },

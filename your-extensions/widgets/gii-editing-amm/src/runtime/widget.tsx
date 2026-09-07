@@ -3112,7 +3112,7 @@ const VIOLATION_ARTICLE_TITLES: Record<string, string> = {
   '31': 'Mancata segnalazione guasti',
   '32': 'Negato accesso ai fondi (al consorziato)',
   '33': 'Inosservanza limiti temporali di prelievo',
-  '34': 'Interferenze',
+  '34': 'Mancato rispetto delle distanze dalle opere consortili',
   '35': 'Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante',
   '36': 'Uso attrezzature non autorizzate',
   '37': 'Uso sistemi di irrigazione incompatibili',
@@ -4154,6 +4154,10 @@ function buildAutomaticSanzioneCalculation (
 
   validGroups.forEach(group => {
     dettaglio.push(`${formatArticleFallback(group.articoloViolato)} — ${displayViolationTitle(group)}`)
+    const normaViolata = articleListTitle(group.articoliViolati || [], group.articoloViolato)
+    if (normaViolata && normaViolata !== '—') {
+      dettaglio.push(`- Norma violata: ${normaViolata}`)
+    }
     const normaSanzionatoria = articleListTitle(group.articoliSanzione || [], group.articoloSanzione)
     if (normaSanzionatoria && normaSanzionatoria !== '—') {
       dettaglio.push(`- Norma sanzionatoria: ${normaSanzionatoria}`)
@@ -6734,10 +6738,8 @@ function articleListTitle (articles: RegolamentoArticolo[], fallback: string): s
   return list.map(a => articleTitleLine(a)).join('; ')
 }
 
-function violationNormSummary (group: SanzioneConsultivaGroup): string {
-  const article = formatArticleFallback(group.articoloViolato)
-  const descr = displayViolationTitle(group)
-  return descr ? `Norma violata: ${article} — ${descr}` : `Norma violata: ${article}`
+function violationNormTitle (group: SanzioneConsultivaGroup): string {
+  return `Norma violata: ${articleListTitle(group.articoliViolati, group.articoloViolato)}`
 }
 
 function normArticleColors (st: Record<string, any>, variant: 'violata' | 'sanzionatoria') {
@@ -7149,7 +7151,10 @@ function DettaglioImportiContent (props: { value: any, data?: any, fields?: Laye
               <div style={{ display: 'grid', gap: 6 }}>
                 {normGroups.map((normGroup, normIndex) => (
                   <React.Fragment key={`${group.title}-norm-${normGroup.codiceCasistica}-${normIndex}`}>
-                    <NormToggleBox variant='violata' title={violationNormSummary(normGroup)}>
+                    <div style={{ color: st.formFieldColor || '#0f172a', fontSize: Number(st.formFieldFontSize ?? 15), fontWeight: 900, lineHeight: 1.35, padding: '1px 2px 0' }}>
+                      {displayViolationTitle(normGroup)}
+                    </div>
+                    <NormToggleBox variant='violata' title={violationNormTitle(normGroup)}>
                       {articleDetailsByRole('Norma violata', normGroup.articoliViolati, 'violata')}
                     </NormToggleBox>
                     {groupVociBySanzioneArticle(normGroup, normGroup.voci).map(block => (
@@ -9693,7 +9698,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         throw new Error(detail)
       }
 
-      const propostaBlob = await buildVerbalePdfBlob({ ...base, ...cleanAttrs }, fields, { username: profile.username, fullName: profile.fullName })
+      const propostaBlob = await buildVerbalePdfBlob({ ...base, ...cleanAttrs, ...automaticValues }, fields, { username: profile.username, fullName: profile.fullName })
       const propostaFile = new File([propostaBlob.blob], propostaBlob.fileName, { type: 'application/pdf', lastModified: now })
       await replacePropostaContestazionePdfAttachment(layer, Number(oid), propostaFile, layerUrl, 'DRAFT')
       await deleteBozzaDeterminazioneAttachments(layer, Number(oid), layerUrl)
@@ -9716,7 +9721,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     } finally {
       if (operationContextIsCurrent()) setSaving(false)
     }
-  }, [active, canEdit, configuredDs, configuredDsState, deleteCurrentAmmActivitiesForRole, hasSelection, initialDraft, draft, layerFields, oid, profile.fullName, profile.role, profile.username, refreshDs, upsertAmmCycleAudit])
+  }, [active, automaticValues, canEdit, configuredDs, configuredDsState, deleteCurrentAmmActivitiesForRole, hasSelection, initialDraft, draft, layerFields, oid, profile.fullName, profile.role, profile.username, refreshDs, upsertAmmCycleAudit])
 
   const handleUndoAttestazioneIa = React.useCallback(async () => {
     setPendingUndoAttestation(false)
@@ -10169,7 +10174,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       // Ogni trasmissione a RIA apre un nuovo ciclo di verifica della versione corrente.
       // La Proposta deve quindi tornare sempre allo stato BOZZA: gli esiti RIA appena
       // azzerati vengono inclusi nella mappa dati usata dallo stesso builder condiviso.
-      const propostaDraftBlob = await buildVerbalePdfBlob({ ...base, ...attrs }, fields, { username: profile.username, fullName: profile.fullName })
+      const propostaDraftBlob = await buildVerbalePdfBlob({ ...base, ...attrs, ...automaticValues }, fields, { username: profile.username, fullName: profile.fullName })
       const propostaDraftFile = new File([propostaDraftBlob.blob], propostaDraftBlob.fileName, { type: 'application/pdf', lastModified: now })
 
       let prevRecordAttrs = { ...(initialDraft || {}) }

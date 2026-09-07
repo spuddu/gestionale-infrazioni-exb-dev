@@ -2169,7 +2169,7 @@ const CHOICES = {
     { v: 'Art31', l: 'Mancata segnalazione guasti' },
     { v: 'Art32', l: 'Negato accesso ai fondi (al consorziato)' },
     { v: 'Art33', l: 'Inosservanza limiti temporali di prelievo' },
-    { v: 'Art34', l: 'Interferenze' },
+    { v: 'Art34', l: 'Mancato rispetto delle distanze dalle opere consortili' },
     { v: 'Art35', l: 'Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante' },
     { v: 'Art36', l: 'Uso attrezzature non autorizzate' },
     { v: 'Art37', l: 'Uso sistemi di irrigazione incompatibili' },
@@ -2288,6 +2288,7 @@ const REGOLAMENTO_VIOLATA_STYLE = {
 }
 
 function RegolamentoArticleDetailsTi (props: { articleState: RegolamentoArticoliState, articleCode: string }) {
+  const fs = React.useContext(FormStyleCtx)
   const st = REGOLAMENTO_VIOLATA_STYLE
   const article = getRegolamentoArticle(props.articleState, props.articleCode)
 
@@ -2308,8 +2309,8 @@ function RegolamentoArticleDetailsTi (props: { articleState: RegolamentoArticoli
   const titleLine = article.titolo_articolo ? `${code} - ${article.titolo_articolo}` : code
   return (
     <div style={{ display: 'grid', gap: 6 }}>
-      <div style={{ color: st.articleTitleColor, fontSize: 12.5, fontWeight: 800, lineHeight: 1.35 }}>{titleLine}</div>
-      {article.testo_articolo && <div style={{ color: st.articleTextColor, fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{article.testo_articolo}</div>}
+      <div style={{ color: st.articleTitleColor, fontSize: fs.norma3FontSize, fontWeight: 800, lineHeight: 1.35 }}>{titleLine}</div>
+      {article.testo_articolo && <div style={{ color: st.articleTextColor, fontSize: fs.norma3FontSize, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{article.testo_articolo}</div>}
     </div>
   )
 }
