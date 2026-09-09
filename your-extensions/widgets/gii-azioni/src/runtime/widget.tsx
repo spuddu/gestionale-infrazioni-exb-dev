@@ -3263,7 +3263,7 @@ function ActionsPanel (props: {
   const determinazioneAdottataCorrente = determinazioneStatoCorrente === 'ADOTTATA' || determinazioneRegistrataCorrente
   const attoContestazioneWorkflowAttivo = determinazioneRegistrataCorrente &&
     !isEmptyValue(pickAttrCI(data, ['accertamento_numero', 'ACCERTAMENTO_NUMERO'])) &&
-    ['BOZZA', 'TRASMESSA_RIA', 'VALIDATA_RIA', 'EMAIL_DIRETTORE_PREPARATA'].includes(determinazioneStatoCorrente)
+    ['BOZZA', 'TRASMESSA_RIA', 'VALIDATA_RIA', 'TRASMESSA_FIRMA_DA'].includes(determinazioneStatoCorrente)
 
   const parseIaRetakeMs = (v: any): number | null => {
     if (v == null || v === '') return null
@@ -4017,7 +4017,7 @@ function ActionsPanel (props: {
   const determinazioneHaSuperatoInvioDirettore =
     determinazioneTrasmessaFirmaCorrente ||
     determinazioneAdottataCorrente ||
-    determinazioneStatoCorrente === 'EMAIL_DIRETTORE_PREPARATA'
+    determinazioneStatoCorrente === 'TRASMESSA_FIRMA_DA'
   const iaRimandoRiaInibitoDopoEmailDirettore =
     role === 'IA' && determinazioneHaSuperatoInvioDirettore
 

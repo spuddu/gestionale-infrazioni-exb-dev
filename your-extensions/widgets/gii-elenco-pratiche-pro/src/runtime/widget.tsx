@@ -3633,7 +3633,7 @@ export default function Widget(props: Props) {
       .toUpperCase();
     const attoContestazioneWorkflowAttivo =
       isDeterminazioneAdottata(d) &&
-      ["BOZZA", "TRASMESSA_RIA", "VALIDATA_RIA", "EMAIL_DIRETTORE_PREPARATA"].includes(determinazioneStato);
+      ["BOZZA", "TRASMESSA_RIA", "VALIDATA_RIA", "TRASMESSA_FIRMA_DA"].includes(determinazioneStato);
     if (isDeterminazioneAdottata(d) && !attoContestazioneWorkflowAttivo) return false;
 
     // esito/stato_RIA = Integrazione è ambiguo: RIA ha due percorsi

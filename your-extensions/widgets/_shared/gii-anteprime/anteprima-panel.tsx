@@ -1336,7 +1336,7 @@ export default function GiiAnteprimaPanel (p: {
   const bozzaTrasmessaARia = !!determinazioneStatoRaw && determinazioneStatoRaw !== 'BOZZA'
   const propostaContestazioneAvailableComputed = !!propostaContestazioneAttachment && Number(pickAttrCI(p.data, ['esito_IA'])) === 2 && (isIaRole || bozzaTrasmessaARia)
   const determinazioneAvailableComputed = !!bozzaDeterminazioneAttachment && (isIaRole || bozzaTrasmessaARia)
-  const attoContestazioneAvailableComputed = !!attoContestazioneAttachment && (isIaRole || ['TRASMESSA_RIA', 'VALIDATA_RIA', 'EMAIL_DIRETTORE_PREPARATA'].includes(determinazioneStatoRaw))
+  const attoContestazioneAvailableComputed = !!attoContestazioneAttachment && (isIaRole || ['TRASMESSA_RIA', 'VALIDATA_RIA', 'TRASMESSA_FIRMA_DA'].includes(determinazioneStatoRaw))
 
   return (
     <div css={containerCss}>

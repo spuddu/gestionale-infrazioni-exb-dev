@@ -861,7 +861,7 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
   // dell'ultimo ciclo e non deve dipendere da una copia locale di esito_IA.
   const propostaApprovata = esitoRiaNum === 2
   const determinazioneStato = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
-  const iaTrasmessaAlRia = ['TRASMESSA_RIA', 'VALIDATA_RIA', 'FASCICOLO_TRASMESSO_PROTOCOLLO', 'ADOTTATA'].includes(determinazioneStato) || Number(parseNumberInput(pickAttrCI(d, ['stato_IA'])) || 0) === 4
+  const iaTrasmessaAlRia = ['TRASMESSA_RIA', 'VALIDATA_RIA', 'TRASMESSA_FIRMA_DA', 'ADOTTATA'].includes(determinazioneStato) || Number(parseNumberInput(pickAttrCI(d, ['stato_IA'])) || 0) === 4
   const iaIterEsito = esitoIaNum === 2
     ? 'Attestazione di conformità'
     : esitoIaNum === 1

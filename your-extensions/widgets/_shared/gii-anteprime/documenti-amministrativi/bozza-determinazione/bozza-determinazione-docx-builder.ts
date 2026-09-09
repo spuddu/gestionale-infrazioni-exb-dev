@@ -571,6 +571,14 @@ function ensureBoldRunPr (runPr: string): string {
   return out
 }
 
+function setRunPrBold (runPr: string, bold: boolean): string {
+  let out = runPr || '<w:rPr></w:rPr>'
+  out = out.replace(/<w:b(?:\s[^>]*)?\s*\/>/g, '')
+  out = out.replace(/<w:bCs(?:\s[^>]*)?\s*\/>/g, '')
+  const boldXml = bold ? '<w:b/><w:bCs/>' : '<w:b w:val="0"/><w:bCs w:val="0"/>'
+  return out.replace('</w:rPr>', `${boldXml}</w:rPr>`)
+}
+
 function makeTextRun (text: string, runPr: string): string {
   if (!text) return ''
   const preserve = /^\s|\s$/.test(text) ? ' xml:space="preserve"' : ''
@@ -607,6 +615,32 @@ function replaceTextAcrossRunsWithBold (xml: string, needle: string, replacement
     if (!res.replaced) break
   }
   return out
+}
+
+
+function setTextBoldPrefix (xml: string, text: string, boldPrefix: string): string {
+  const parsed = parseTextTokens(xml)
+  const at = parsed.fullText.indexOf(text)
+  if (at < 0 || !boldPrefix || !text.startsWith(boldPrefix)) return xml
+  const end = at + text.length
+  const affected = parsed.tokens.filter(t => t.fullEnd > at && t.fullStart < end)
+  if (affected.length !== 1) return xml
+  const token = affected[0]
+  const bounds = getRunBoundsForToken(xml, token)
+  if (!bounds) return xml
+  const startInside = Math.max(0, at - token.fullStart)
+  const endInside = Math.max(0, end - token.fullStart)
+  const before = token.text.slice(0, startInside)
+  const after = token.text.slice(endInside)
+  const runXml = xml.slice(bounds.runStart, bounds.runEnd)
+  const runPr = getRunPr(runXml)
+  const rest = text.slice(boldPrefix.length)
+  const replacementXml =
+    makeTextRun(before, runPr) +
+    makeTextRun(boldPrefix, setRunPrBold(runPr, true)) +
+    makeTextRun(rest, setRunPrBold(runPr, false)) +
+    makeTextRun(after, runPr)
+  return xml.slice(0, bounds.runStart) + replacementXml + xml.slice(bounds.runEnd)
 }
 
 function addBozzaWatermarkToHeader (xml: string): string {
@@ -650,7 +684,9 @@ function buildDocumentXmlFromTemplate (xml: string, m: BozzaDeterminazioneDocxMa
   let out = xml
   out = replaceTextAcrossRuns(out, 'DITTA “__________”', `DITTA “${trasgressore.toUpperCase()}”`)
   out = replaceTextAcrossRuns(out, 'APPROVATE CON DELIBERAZIONE DEL C.d.D. N. 016 DEL 02.12.2019', 'APPROVATE CON DELIBERAZIONE DEL CONSIGLIO DEI DELEGATI N. 7 DEL 28 GIUGNO 2024')
-  out = replaceTextAcrossRuns(out, 'VISTE le vigenti “Norme Generali sulla distribuzione dell’acqua ad uso irriguo”, approvate con deliberazione del C.d.D. n. 016 del 02.12.2019, che disciplinano le modalità di esercizio del servizio irriguo, gli obblighi posti a carico degli utenti e le conseguenze derivanti dalla violazione delle relative disposizioni;', 'VISTE le vigenti “Norme Generali sulla distribuzione dell’acqua ad uso irriguo”, approvate con deliberazione del Consiglio dei Delegati n. 7 del 28 giugno 2024, che disciplinano le modalità di esercizio del servizio irriguo, gli obblighi posti a carico degli utenti e le conseguenze derivanti dalla violazione delle relative disposizioni;')
+  const normeVigenti = 'VISTE le vigenti “Norme Generali sulla distribuzione dell’acqua ad uso irriguo”, approvate con deliberazione del Consiglio dei Delegati n. 7 del 28 giugno 2024, che disciplinano le modalità di esercizio del servizio irriguo, gli obblighi posti a carico degli utenti e le conseguenze derivanti dalla violazione delle relative disposizioni;'
+  out = replaceTextAcrossRuns(out, 'VISTE le vigenti “Norme Generali sulla distribuzione dell’acqua ad uso irriguo”, approvate con deliberazione del C.d.D. n. 016 del 02.12.2019, che disciplinano le modalità di esercizio del servizio irriguo, gli obblighi posti a carico degli utenti e le conseguenze derivanti dalla violazione delle relative disposizioni;', normeVigenti)
+  out = setTextBoldPrefix(out, normeVigenti, 'VISTE')
   out = replaceTextAcrossRuns(out, 'Rapporto tecnico di rilevazione n. ______ del ________, redatto dall’Area __________ / Settore __________, con il quale sono stati rilevati i fatti riconducibili alla violazione dell’art. ____ delle suddette Norme generali;', rapportoVisto)
   out = replaceTextAcrossRuns(out, 'del Rapporto tecnico di rilevazione n. ______ del ________, redatto dall’Area __________ / Settore __________, con il quale sono stati rilevati i fatti riconducibili alla violazione dell’art. ____ delle “Norme generali sulla distribuzione dell’acqua ad uso irriguo”, approvate con Deliberazione del C.d.D. n. 016 del 02.12.2019;', rapportoDisp)
   out = replaceTextAcrossRuns(out, 'Proposta di contestazione relativa al predetto Rapporto tecnico di rilevazione, prot. n. ______ del ________, predisposta dal Settore Catasto, Ruoli e Servizi Territoriali e finalizzata alla contestazione dell’infrazione rilevata e alla quantificazione degli importi dovuti;', proposta)
