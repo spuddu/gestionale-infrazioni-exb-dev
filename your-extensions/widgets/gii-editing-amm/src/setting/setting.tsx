@@ -118,6 +118,7 @@ export default function Setting (props: Props) {
         Il pannello espone solo impostazioni effettivamente collegate agli elementi attuali di gii-editing-amm. Le impostazioni condivise indicano esplicitamente le schede interessate.
       </div>
 
+
       <Acc id='sanzioni' label='⚖️ Parametri sanzionatori' open={isOpen('sanzioni')} onToggle={() => toggle('sanzioni')} />
       {isOpen('sanzioni') && <div>
         <div style={P.hint}>URL delle tabelle AGOL usate solo in consultazione. Non modificano workflow, salvataggi o gii-header.</div>

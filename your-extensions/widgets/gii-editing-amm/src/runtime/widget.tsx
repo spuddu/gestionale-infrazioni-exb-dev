@@ -7,9 +7,10 @@ import { buildBozzaDeterminazioneDocx, getBozzaDeterminazioneDocxFileName } from
 import { buildBozzaDeterminazioneMap } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-map'
 import { ensureNsdJsonOnlyQueryFormat } from '../../../_shared/gii-anteprime/nsd-query-format-fix'
 import GiiAnteprimaPanel from '../../../_shared/gii-anteprime/anteprima-panel'
-import { buildFascicolo, mergeFascicoloPdfItems } from '../../../_shared/gii-anteprime/fascicolo-builder'
+import { buildFascicolo, buildFascicoloItems, mergeFascicoloPdfItems, type FascicoloPdfItem } from '../../../_shared/gii-anteprime/fascicolo-builder'
+import { FASCICOLO_MAP_DEFAULTS, DEFAULT_PRINT_SERVICE_URL } from '../../../_shared/gii-anteprime/fascicolo-map-defaults'
 import { computeReqPoint } from '../../../_shared/gii-anteprime/req-point'
-import GiiAttachmentViewer, { GII_ATTACHMENT_KEYWORDS, getGiiAttachmentKind, filterGiiAttachmentsForAdministrativeFascicolo, isGiiApprovedBozzaReferenceAttachment, isGiiBozzaDeterminazionePdfAttachment, isGiiLegacyBozzaDeterminazioneWordAttachment, isGiiPropostaContestazionePdfAttachment, isGiiAttoContestazionePdfAttachment, pickLatestGiiAttachment } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
+import GiiAttachmentViewer, { GII_ATTACHMENT_KEYWORDS, getGiiAttachmentKind, filterGiiAttachmentsForAdministrativeFascicolo, isGiiApprovedBozzaReferenceAttachment, isGiiBozzaDeterminazionePdfAttachment, isGiiLegacyBozzaDeterminazioneWordAttachment, isGiiPropostaContestazionePdfAttachment, isGiiAttoContestazionePdfAttachment, isGiiProtocolloFascicoloManifestAttachment, isGiiProtocolloFascicoloPdfAttachment, giiAttachmentKeywordValue, pickLatestGiiAttachment } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 import type { IMConfig, SummaryFieldConfig } from '../config'
 import { defaultConfig } from '../config'
 import { createPortal } from 'react-dom'
@@ -480,8 +481,8 @@ const ADMIN_FIELDS: AdminField[] = [
 
   { group: 'contestazioni_importi', name: 'tipo_atto_amm', label: 'Tipo atto amministrativo (automatico)', kind: 'domain', readonly: true },
   { group: 'contestazioni_importi', name: 'oggetto_atto_amm', label: 'Oggetto atto amministrativo (automatico)', kind: 'text', full: true, readonly: true },
-  { group: 'verbale', name: 'protocollo_fascicolo_numero', label: 'N. protocollo fascicolo', kind: 'text' },
-  { group: 'verbale', name: 'protocollo_fascicolo_data', label: 'Data protocollo fascicolo', kind: 'date' },
+  { group: 'verbale', name: 'protocollo_fascicolo_numero', label: 'N. protocollo fascicolo', kind: 'text', readonly: true },
+  { group: 'verbale', name: 'protocollo_fascicolo_data', label: 'Data protocollo fascicolo', kind: 'date', readonly: true },
   { group: 'verbale', name: 'accertamento_numero', label: 'Numero accertamento', kind: 'text' },
   { group: 'verbale', name: 'accertamento_data', label: 'Data accertamento', kind: 'date' },
   { group: 'verbale', name: 'note_atto_amm', label: 'Note amministrative', kind: 'textarea', full: true },
@@ -1968,6 +1969,26 @@ function hasAmmAttachmentKeywordFlag (att: AmmAttachmentInfo | null | undefined,
     .some(part => String(part || '').trim().toLowerCase() === wanted)
 }
 
+function ammAttachmentKeywordValue (att: AmmAttachmentInfo | null | undefined, key: string): string {
+  const wanted = String(key || '').trim().toLowerCase()
+  if (!wanted) return ''
+  for (const part of String(att?.keywords || '').split(/[|;\s]+/)) {
+    const item = String(part || '').trim()
+    const at = item.indexOf('=')
+    if (at <= 0) continue
+    if (item.slice(0, at).trim().toLowerCase() === wanted) return item.slice(at + 1).trim()
+  }
+  return ''
+}
+
+function isOfficialDeterminationAttachment (att: AmmAttachmentInfo | null | undefined): boolean {
+  return !!att && isGiiBozzaDeterminazionePdfAttachment(att) &&
+    hasAmmAttachmentKeywordFlag(att, 'official') && (
+      hasAmmAttachmentKeywordFlag(att, 'officialCopy') ||
+      hasAmmAttachmentKeywordFlag(att, 'signedByDa') // compatibilità con allegati archiviati in precedenza
+    )
+}
+
 function isSignedAttoContestazioneAttachment (att: AmmAttachmentInfo | null | undefined): boolean {
   return !!att && isGiiAttoContestazionePdfAttachment(att) && (
     hasAmmAttachmentKeywordFlag(att, 'attoFirmatoDa') ||
@@ -1984,6 +2005,39 @@ function isAttoDaFirmareAttachment (att: AmmAttachmentInfo | null | undefined): 
     !isSignedAttoContestazioneAttachment(att) &&
     hasAmmAttachmentKeywordFlag(att, 'attoDaFirmare') &&
     hasAmmAttachmentKeywordFlag(att, 'verifiedAgainstRia')
+}
+
+const GII_PAGOPA_ATTACHMENT_KEYWORD = 'GII_AMM_PAGOPA'
+
+function isGiiPagoPaAttachment (att: AmmAttachmentInfo | null | undefined): boolean {
+  if (!att) return false
+  const keywords = String((att as any)?.keywords || '').toUpperCase()
+  const name = String(att?.name || '').toLowerCase()
+  return keywords.includes(GII_PAGOPA_ATTACHMENT_KEYWORD) || /(?:pagopa|pago[_ -]?pa)/i.test(name)
+}
+
+function extractPagoPaDeadlineMs (textRaw: string): number {
+  const text = String(textRaw || '')
+    .replace(/[\u00a0\u2000-\u200f\u2028-\u202f\u2060\ufeff]/g, ' ')
+    .replace(/\s+/g, ' ')
+  const patterns = [
+    /(?:data\s+di\s+scadenza|data\s+scadenza|scadenza|entro\s+il)\s*[:\-]?\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4})/i,
+    /(?:scade\s+il|pagare\s+entro)\s*[:\-]?\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4})/i
+  ]
+  let raw = ''
+  for (const re of patterns) {
+    const m = text.match(re)
+    if (m?.[1]) { raw = m[1]; break }
+  }
+  if (!raw) throw new Error('Nel bollettino pagoPA non è stata individuata una data di scadenza riconoscibile.')
+  const parts = raw.split(/[\/.\-]/).map(v => Number(v))
+  const [day, month, year] = parts
+  if (!day || !month || !year) throw new Error('La data di scadenza letta dal bollettino pagoPA non è valida.')
+  const dt = new Date(year, month - 1, day)
+  if (dt.getFullYear() !== year || dt.getMonth() !== month - 1 || dt.getDate() !== day) {
+    throw new Error('La data di scadenza letta dal bollettino pagoPA non è valida.')
+  }
+  return dt.getTime()
 }
 
 function normalizeAttachmentInfos (raw: any): AmmAttachmentInfo[] {
@@ -2138,6 +2192,131 @@ async function deleteAmmAttachment (layer: any, oid: number, attachmentId: numbe
   const err = json?.error || result?.error || null
   if (!resp.ok || err || result?.success === false) {
     throw new Error(String(err?.description || err?.message || `HTTP ${resp.status}`))
+  }
+}
+
+
+async function updateAmmAttachmentFile (
+  oid: number,
+  attachmentId: number,
+  file: File,
+  layerUrl: string
+): Promise<void> {
+  if (!oid || !attachmentId || !file) throw new Error('Allegato non disponibile per la sostituzione.')
+  if (!layerUrl) throw new Error('Allegati non disponibili.')
+
+  const token = await getEsriTokenForUrl(layerUrl)
+  const fd = new FormData()
+  fd.append('attachmentId', String(attachmentId))
+  fd.append('attachment', file)
+  fd.append('f', 'json')
+  if (token) fd.append('token', token)
+  const resp = await fetch(`${layerUrl}/${Number(oid)}/updateAttachment`, { method: 'POST', body: fd, cache: 'no-store' })
+  const json: any = await resp.json().catch(() => ({}))
+  const result = json?.updateAttachmentResult || json
+  const err = json?.error || result?.error || null
+  if (!resp.ok || err || result?.success === false) {
+    throw new Error(String(err?.description || err?.message || `HTTP ${resp.status}`))
+  }
+}
+
+function protocolloFascicoloSnapshotKeywords (
+  item: ProtocolloFascicoloManifestItem,
+  protocol: OfficialProtocolMetadata,
+  batchCreatedAt: number
+): string {
+  return [
+    GII_ATTACHMENT_KEYWORDS.protocolloFascicoloPdf,
+    `protocolDocKey=${encodeURIComponent(String(item.docKey || ''))}`,
+    `protocolDocIndex=${Number(item.index) || 0}`,
+    `protocolNumber=${encodeURIComponent(String(protocol.numero || ''))}`,
+    `protocolDate=${new Date(protocol.dataMs).toISOString().slice(0, 10)}`,
+    `protocolBatch=${Number(batchCreatedAt) || Date.now()}`,
+    `fileCreatedAt=${Date.now()}`
+  ].join('|')
+}
+
+function protocolloFriendlyPdfName (item: ProtocolloFascicoloManifestItem, fallback: string): string {
+  const original = String(item.sourceAttachmentName || '').trim()
+  const raw = original || String(fallback || '').trim() || `${item.docKey}.pdf`
+  const base = raw.replace(/\.[^.]+$/, '').replace(/_protocollat[oa]$/i, '').trim() || String(item.docKey || 'documento')
+  return sanitizeEmailFileName(`${base}_protocollato.pdf`, 'documento_protocollato.pdf')
+}
+
+function normalizeProtocolloReturnFileName (value: any): string {
+  return String(value || '')
+    .replace(/^.*[\\/]/, '')
+    .normalize('NFC')
+    .trim()
+    .toLowerCase()
+}
+
+
+function protocolloFascicoloManifestKeywords (createdAt: number): string {
+  return `${GII_ATTACHMENT_KEYWORDS.protocolloFascicoloManifest}|fileCreatedAt=${createdAt}`
+}
+
+async function saveProtocolloFascicoloManifest (
+  layer: any,
+  oid: number,
+  layerUrl: string,
+  manifest: ProtocolloFascicoloManifest
+): Promise<void> {
+  const before = await queryAmmAttachments(layer, oid, layerUrl)
+  const oldManifests = before.filter(att => isGiiProtocolloFascicoloManifestAttachment(att as any))
+  const createdAt = Number(manifest.createdAt) || Date.now()
+  const file = new File(
+    [JSON.stringify(manifest, null, 2)],
+    `gii_protocollo_fascicolo_manifest_${Number(oid)}_${createdAt}.json`,
+    { type: 'application/json', lastModified: createdAt }
+  )
+  const ids = await addAmmAttachments(layer, oid, [file], layerUrl, protocolloFascicoloManifestKeywords(createdAt))
+  const keepId = Number(ids?.[0])
+  if (!Number.isFinite(keepId) || keepId <= 0) {
+    throw new Error('Impossibile registrare la composizione del fascicolo trasmesso al protocollo.')
+  }
+  for (const att of oldManifests) {
+    const id = Number(att.id)
+    if (!Number.isFinite(id) || id <= 0 || id === keepId) continue
+    try { await deleteAmmAttachment(layer, oid, id, layerUrl) } catch {}
+  }
+}
+
+async function loadProtocolloFascicoloManifest (
+  layer: any,
+  oid: number,
+  layerUrl: string
+): Promise<ProtocolloFascicoloManifest> {
+  const all = await queryAmmAttachments(layer, oid, layerUrl)
+  const manifestAtt = pickLatestGiiAttachment(
+    all.filter(att => isGiiProtocolloFascicoloManifestAttachment(att as any)) as any[]
+  ) as AmmAttachmentInfo | null
+  if (!manifestAtt) {
+    throw new Error('Non è disponibile la composizione del fascicolo trasmesso al protocollo. Predisporre nuovamente la trasmissione.')
+  }
+  const blob = await fetchAmmAttachmentBlobForPdf(manifestAtt, oid, layerUrl)
+  let parsed: any = null
+  try { parsed = JSON.parse(await blob.text()) } catch {}
+  const items = Array.isArray(parsed?.items) ? parsed.items : []
+  if (Number(parsed?.version) !== 1 || Number(parsed?.oid) !== Number(oid) || !items.length) {
+    throw new Error('La composizione registrata del fascicolo trasmesso al protocollo non è valida.')
+  }
+  const normalizedItems: ProtocolloFascicoloManifestItem[] = items.map((item: any, idx: number) => ({
+    index: Number.isFinite(Number(item?.index)) ? Math.trunc(Number(item.index)) : idx,
+    fileName: String(item?.fileName || '').trim(),
+    docKey: String(item?.docKey || '').trim(),
+    sourceAttachmentId: Number.isFinite(Number(item?.sourceAttachmentId)) ? Number(item.sourceAttachmentId) : undefined,
+    sourceAttachmentKind: String(item?.sourceAttachmentKind || '') === 'administrative' ? 'administrative' : (String(item?.sourceAttachmentKind || '') === 'technical' ? 'technical' : undefined),
+    sourceAttachmentName: String(item?.sourceAttachmentName || '').trim() || undefined,
+    sourceAttachmentKeywords: String(item?.sourceAttachmentKeywords || '').trim() || undefined
+  })).filter((item: ProtocolloFascicoloManifestItem) => !!item.fileName && !!item.docKey)
+  if (!normalizedItems.length) throw new Error('La composizione registrata del fascicolo trasmesso al protocollo è vuota.')
+  return {
+    version: 1,
+    oid: Number(oid),
+    reportCode: String(parsed?.reportCode || ''),
+    createdAt: Number(parsed?.createdAt) || 0,
+    items: normalizedItems.sort((a, b) => a.index - b.index)
   }
 }
 
@@ -4473,6 +4652,7 @@ function IaVerificationSummary (props: {
   layerUrl?: string
   bozzaRefreshKey?: string
   actionBarTarget?: HTMLElement | null
+  workflowScope?: 'approvazione' | 'notifica'
 }) {
   const st = useAdminStyle()
   const d = props.data || {}
@@ -4684,6 +4864,7 @@ function IaVerificationSummary (props: {
         ds={props.ds}
         layerUrl={props.layerUrl}
         suppressActionGuide={vistoActionPending}
+        workflowScope={props.workflowScope || 'approvazione'}
         bozzaRefreshKey={[
           props.oid ?? '',
           pickAttrCI(d, ['dt_esito_IA']) ?? '',
@@ -4691,7 +4872,8 @@ function IaVerificationSummary (props: {
           pickAttrCI(d, ['dt_esito_RIA']) ?? '',
           pickAttrCI(d, ['determinazione_stato']) ?? '',
           pickAttrCI(d, ['dt_bozza_determinazione']) ?? '',
-          pickAttrCI(d, ['bozza_determinazione_da']) ?? ''
+          pickAttrCI(d, ['bozza_determinazione_da']) ?? '',
+          props.bozzaRefreshKey ?? ''
         ].join('|')}
       />
     </div>
@@ -4717,7 +4899,7 @@ function adminBozzaWorkflowMessageForRole (kind: AdminBozzaWorkflowMessageKind, 
 
   if (kind === 'RIA_APPROVED') {
     return isIa
-      ? 'La verifica amministrativa è stata approvata. Trasmettere il fascicolo al protocollo; quando rientra la Proposta protocollata, caricarla con l’azione di caricamento. Il gestionale leggerà automaticamente numero e data di protocollo e sostituirà la versione precedente.'
+      ? 'La verifica amministrativa è stata approvata. Trasmettere gli elaborati del fascicolo al protocollo; al rientro selezionare insieme tutti i PDF protocollati. Il gestionale verificherà il fascicolo, leggerà automaticamente numero e data di protocollo e sostituirà ciascun elaborato con la relativa versione protocollata.'
       : 'La verifica amministrativa è stata approvata. La pratica è stata restituita all’Istruttore amministrativo per il completamento degli adempimenti successivi.'
   }
 
@@ -4755,8 +4937,12 @@ function PostAttestazioneIaWorkSection (props: {
   layerUrl?: string
   bozzaRefreshKey?: string
   suppressActionGuide?: boolean
+  workflowScope?: 'approvazione' | 'notifica'
 }) {
   const st = useAdminStyle()
+  const workflowScope = props.workflowScope || 'approvazione'
+  const showDeterminationWorkflow = workflowScope === 'approvazione'
+  const showAttoWorkflow = workflowScope === 'notifica'
   const d = props.data || {}
   const saved = props.savedData || {}
   const oid = props.oid != null && Number.isFinite(Number(props.oid)) ? Number(props.oid) : null
@@ -4773,7 +4959,13 @@ function PostAttestazioneIaWorkSection (props: {
     hasAdminValue(pickAttrCI(saved, ['protocollo_fascicolo_data']))
   const currentStatoBozzaCode = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
   const emailDirettorePreparata = currentStatoBozzaCode === EMAIL_DIRETTORE_PREPARATA_STATE
-  const determinazioneAdottata = isDeterminazioneAdottata(d)
+  // Numero e data possono essere compilati dall'IA prima dell'acquisizione del PDF ufficiale.
+  // In questa fase non devono, da soli, far avanzare il workflow come "ADOTTATA".
+  // Numero e data salvati della Determinazione sono il riferimento stabile che chiude
+  // definitivamente l'iter approvativo. Lo stato operativo può essere rimasto su
+  // EMAIL_DIRETTORE_PREPARATA in pratiche già avviate prima della separazione della
+  // fase Notifica e non deve riaprire il ciclo della Determinazione.
+  const determinazioneAdottata = currentStatoBozzaCode === 'ADOTTATA' || isDeterminazioneAdottata(saved)
   const determinationNumberRaw = pickAttrCI(d, ['determinazione_numero'])
   const determinationDateRaw = pickAttrCI(d, ['determinazione_data'])
   const savedDeterminationNumberRaw = pickAttrCI(saved, ['determinazione_numero'])
@@ -4800,7 +4992,7 @@ function PostAttestazioneIaWorkSection (props: {
   const determinationSectionVisible = emailDirettorePreparata || determinazioneAdottata || hasAdminValue(savedDeterminationNumberRaw) || hasAdminValue(savedDeterminationDateRaw)
   const canEditDetermination = !!props.canEditDetermination && determinationSectionVisible && !determinationLocked && !props.saving
   const attoFinaleNumero = String(pickAttrCI(d, ['accertamento_numero']) || '').trim()
-  const attoWorkflow = isDeterminazioneAdottata(d) && !!attoFinaleNumero
+  const attoWorkflow = showAttoWorkflow && isDeterminazioneAdottata(d) && !!attoFinaleNumero
   const attoWorkflowLocked =
     hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_numero'])) ||
     hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_data'])) ||
@@ -4813,11 +5005,10 @@ function PostAttestazioneIaWorkSection (props: {
   const tipoAttoFinaleLabel = displayAdminFieldValue(d, props.fields, 'tipo_atto_amm')
   const fascicoloTrasmessoAlProtocollo = currentStatoBozzaCode === 'FASCICOLO_TRASMESSO_PROTOCOLLO'
   // Dopo la trasmissione al protocollo, la normale azione di caricamento acquisisce
-  // la Proposta ufficiale protocollata e ne legge automaticamente gli estremi.
-  const propostaUfficialeDaAcquisire = riaHaApprovatoProposta && fascicoloTrasmessoAlProtocollo && !protocolloFascicoloSalvatoOk
-  // Dopo la predisposizione dell'e-mail al DA, la stessa azione acquisisce la
-  // determinazione ufficiale firmata, legge numero/data e sostituisce la bozza.
-  const determinazioneUfficialeDaAcquisire = emailDirettorePreparata && !determinazioneAdottata
+  // l’intero fascicolo restituito dal protocollo e ne legge automaticamente gli estremi.
+  const protocolloFascicoloInAttesaRientro = riaHaApprovatoProposta && fascicoloTrasmessoAlProtocollo && !protocolloFascicoloSalvatoOk
+  // L'acquisizione della determinazione ufficiale viene determinata dopo la lettura
+  // degli allegati, così numero/data compilati non vengono confusi con l'adozione.
   const canEditProtocolloFascicolo =
     props.canEdit &&
     riaHaApprovatoProposta &&
@@ -4829,8 +5020,8 @@ function PostAttestazioneIaWorkSection (props: {
     ? (protocolloFascicoloSalvatoOk
         ? 'I dati di protocollo del fascicolo sono stati registrati. È possibile procedere all’aggiornamento della bozza definitiva della determinazione.'
         : (fascicoloTrasmessoAlProtocollo
-            ? 'Il fascicolo è stato trasmesso al protocollo. Caricare la Proposta ufficiale protocollata: numero e data saranno letti automaticamente. Salvare quindi i dati per proseguire.'
-            : 'La verifica amministrativa è stata approvata. Trasmettere il fascicolo al protocollo; quando rientra la Proposta protocollata, caricarla con l’azione di caricamento. Il gestionale leggerà automaticamente numero e data di protocollo e sostituirà la versione precedente.'))
+            ? 'Il fascicolo è stato trasmesso al protocollo. Selezionare insieme tutti i PDF restituiti dal protocollo: gli elaborati saranno riconosciuti e sostituiti automaticamente e verranno letti numero e data di protocollo. Salvare quindi i dati per proseguire.'
+            : 'La verifica amministrativa è stata approvata. Trasmettere gli elaborati del fascicolo al protocollo; al rientro selezionare insieme tutti i PDF protocollati. Il gestionale verificherà il fascicolo, leggerà automaticamente numero e data di protocollo e sostituirà ciascun elaborato con la relativa versione protocollata.'))
     : adminBozzaWorkflowMessageForRole('RIA_APPROVED', props.role)
   // Una bozza è realmente generata solo dopo la produzione del Word.
   // Lo stato BOZZA viene impostato già al momento del visto e indica soltanto
@@ -4852,11 +5043,12 @@ function PostAttestazioneIaWorkSection (props: {
   const postApprovalProtocolSaved = bozzaValidataDaRia && protocolloFascicoloSalvatoOk
   const canGenerateBozzaDeterminazione =
     props.canEdit &&
+    !determinazioneAdottata &&
     iaHaAttestatoConformita &&
     !vistoDaRinnovareDopoRimando &&
     (bozzaInLavorazioneIa || postApprovalProtocolSaved)
   const bozzaAlreadyTransmitted = !!currentStatoBozzaCode && !bozzaInLavorazioneIa
-  const statoBozza = attoWorkflow
+  const statoBozza = determinazioneAdottata
     ? 'Determina adottata'
     : (emailDirettorePreparata
         ? 'E-mail al Direttore predisposta'
@@ -4865,11 +5057,19 @@ function PostAttestazioneIaWorkSection (props: {
   const generataDa = displayAdminFieldValue(d, props.fields, 'bozza_determinazione_da')
   const [bozzaAttachments, setBozzaAttachments] = React.useState<AmmAttachmentInfo[]>([])
   const [attoAttachments, setAttoAttachments] = React.useState<AmmAttachmentInfo[]>([])
+  const [pagopaAttachments, setPagopaAttachments] = React.useState<AmmAttachmentInfo[]>([])
+  const [protocolloManifestAvailable, setProtocolloManifestAvailable] = React.useState(false)
   const [attachmentsLoadedOid, setAttachmentsLoadedOid] = React.useState<number | null>(null)
   const [attachmentsLoading, setAttachmentsLoading] = React.useState(false)
   const [attachmentsBusy, setAttachmentsBusy] = React.useState(false)
   const [attachmentsError, setAttachmentsError] = React.useState<string | null>(null)
+  const [attachmentsErrorSection, setAttachmentsErrorSection] = React.useState<'bozza' | 'atto' | 'protocollo'>('bozza')
   const [attachmentsInfo, setAttachmentsInfo] = React.useState<string | null>(null)
+  const [protocolloImportResult, setProtocolloImportResult] = React.useState<{
+    numero: string
+    dataMs: number
+    items: Array<{ docKey: string, fileName: string }>
+  } | null>(null)
   const [inputKey, setInputKey] = React.useState(0)
   const [confirmDeleteBozza, setConfirmDeleteBozza] = React.useState(false)
 
@@ -4883,6 +5083,8 @@ function PostAttestazioneIaWorkSection (props: {
     if (!oid) {
       setBozzaAttachments([])
       setAttoAttachments([])
+      setPagopaAttachments([])
+      setProtocolloManifestAvailable(false)
       setAttachmentsLoadedOid(null)
       setAttachmentsError(null)
       return
@@ -4896,10 +5098,14 @@ function PostAttestazioneIaWorkSection (props: {
       const all = await queryAmmAttachments(layer, oid, layerUrl)
       setBozzaAttachments(all.filter(isGiiBozzaDeterminazionePdfAttachment))
       setAttoAttachments(all.filter(isGiiAttoContestazionePdfAttachment))
+      setPagopaAttachments(all.filter(isGiiPagoPaAttachment))
+      setProtocolloManifestAvailable(all.some(att => isGiiProtocolloFascicoloManifestAttachment(att as any)))
       setAttachmentsLoadedOid(oid)
     } catch (e: any) {
       setBozzaAttachments([])
       setAttoAttachments([])
+      setPagopaAttachments([])
+      setProtocolloManifestAvailable(false)
       setAttachmentsLoadedOid(oid)
       setAttachmentsError(e?.message || String(e))
     } finally {
@@ -4912,6 +5118,10 @@ function PostAttestazioneIaWorkSection (props: {
   }, [oid, attachmentsLoadedOid, loadBozzaAttachments])
 
   React.useEffect(() => {
+    setProtocolloImportResult(null)
+  }, [oid])
+
+  React.useEffect(() => {
     // Quando il visto viene riapposto dopo un rimando o quando cambia lo stato della bozza,
     // il parent aggiorna i campi amministrativi ma non può accedere allo stato locale
     // della bozza PDF. Azzerando il marker, il viewer rilegge gli allegati reali.
@@ -4919,8 +5129,45 @@ function PostAttestazioneIaWorkSection (props: {
   }, [props.bozzaRefreshKey])
 
   const attachmentsResolved = !oid || (attachmentsLoadedOid === oid && !attachmentsLoading)
+  // Compatibilità con pratiche trasmesse prima dell'introduzione del manifest:
+  // in quel caso la vecchia trasmissione non può essere usata per il rientro multiplo
+  // e l'IA deve poter predisporre nuovamente la stessa e-mail, senza cambiare fase.
+  const legacyProtocolloTransmissionNeedsRebuild =
+    protocolloFascicoloInAttesaRientro &&
+    attachmentsResolved &&
+    !protocolloManifestAvailable
+  const propostaUfficialeDaAcquisire =
+    protocolloFascicoloInAttesaRientro &&
+    !legacyProtocolloTransmissionNeedsRebuild
   const hasBozzaPdfCaricata = bozzaAttachments.length > 0
   const verifiedFinalPdfCaricato = bozzaAttachments.some(isVerifiedFinalBozzaAttachment)
+  const officialDeterminationPdf = bozzaAttachments.find(isOfficialDeterminationAttachment) || null
+  // Compatibilità con determinazioni archiviate prima dell'introduzione della keyword
+  // officialCopy: se la pratica è già ADOTTATA, il PDF corrente dello slot è
+  // comunque il documento archiviato da sostituire in caso di errore materiale.
+  const archivedDeterminationPdf = officialDeterminationPdf || (determinazioneAdottata
+    ? (pickLatestGiiAttachment(bozzaAttachments as any[]) as AmmAttachmentInfo | null)
+    : null)
+  const officialDeterminationMatchesDraft = !!officialDeterminationPdf &&
+    ammAttachmentKeywordValue(officialDeterminationPdf, 'detNumber') === determinationNumberText &&
+    ammAttachmentKeywordValue(officialDeterminationPdf, 'detDate') === dateInputValue(determinationDateRaw)
+  // Dopo la predisposizione dell'e-mail al DA il PDF ufficiale resta da acquisire.
+  const determinazioneUfficialeDaAcquisire = emailDirettorePreparata && !officialDeterminationMatchesDraft
+  // Dopo l'adozione l'IA può correggere esclusivamente un errore materiale di archiviazione:
+  // il nuovo PDF sostituisce quello già presente senza riaprire alcun ciclo istruttorio.
+  // La sostituzione resta disponibile finché l'Atto non è stato a sua volta adottato/protocollato/notificato.
+  const canReplaceArchivedDeterminationPdf =
+    roleCode === 'IA' &&
+    props.canEdit &&
+    determinazioneAdottata &&
+    !!archivedDeterminationPdf &&
+    !hasAdminValue(pickAttrCI(saved, ['accertamento_data'])) &&
+    !hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_numero'])) &&
+    !hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_data'])) &&
+    !hasAdminValue(pickAttrCI(saved, ['notifica_data'])) &&
+    !props.saving &&
+    !attachmentsBusy
+  const canUploadOfficialDeterminationPdf = determinazioneUfficialeDaAcquisire || canReplaceArchivedDeterminationPdf
 
   // Un PDF già caricato chiude la fase di preparazione manuale.
   // Prima dell'approvazione restano solo Trasmetti/Elimina. Dopo l'approvazione
@@ -5025,31 +5272,213 @@ function PostAttestazioneIaWorkSection (props: {
 
 
 
-  const uploadPropostaUfficiale = React.useCallback(async (file: File | null) => {
-    if (!file || !oid || !propostaUfficialeDaAcquisire || !props.canEdit || props.saving || attachmentsBusy) return
-    if (!/\.pdf$/i.test(String(file.name || ''))) {
-      setAttachmentsError('Caricare la Proposta protocollata in formato PDF.')
+  const uploadProtocolloFascicolo = React.useCallback(async (selectedFiles: File[]) => {
+    const files = Array.from(selectedFiles || []).filter(Boolean)
+    if (!files.length || !oid || !propostaUfficialeDaAcquisire || !props.canEdit || props.saving || attachmentsBusy) return
+    if (files.some(file => !/\.pdf$/i.test(String(file.name || '')))) {
+      setAttachmentsError('Caricare esclusivamente i PDF del fascicolo restituiti dal protocollo.')
       return
     }
+
     setAttachmentsBusy(true)
+    setAttachmentsErrorSection('protocollo')
     setAttachmentsError(null)
     setAttachmentsInfo(null)
+    setProtocolloImportResult(null)
     try {
       const { layer, layerUrl } = await resolveAttachmentLayer()
-      const all = await queryAmmAttachments(layer, oid, layerUrl)
-      const source = pickLatestGiiAttachment(all.filter(isGiiPropostaContestazionePdfAttachment) as any[]) as AmmAttachmentInfo | null
-      if (!source) throw new Error('La Proposta di contestazione presente nel fascicolo non è disponibile per il confronto.')
-      const sourceBlob = await fetchAmmAttachmentBlobForPdf(source, oid, layerUrl)
-      const [sourceContent, candidateContent] = await Promise.all([extractPdfVerificationContent(sourceBlob), extractPdfVerificationContent(file)])
-      if (!sourceContent.text || !candidateContent.text || !candidatePreservesApprovedPdfText(sourceContent.text, candidateContent.text)) {
-        throw new Error('Il PDF caricato non corrisponde alla Proposta presente nel fascicolo. Il documento non è stato acquisito.')
+      const manifest = await loadProtocolloFascicoloManifest(layer, oid, layerUrl)
+      const expectedByName = new Map<string, ProtocolloFascicoloManifestItem>()
+      for (const item of manifest.items) {
+        const key = normalizeProtocolloReturnFileName(item.fileName)
+        if (!key || expectedByName.has(key)) {
+          throw new Error('La composizione registrata del fascicolo contiene nomi file non univoci. Predisporre nuovamente la trasmissione al protocollo.')
+        }
+        expectedByName.set(key, item)
       }
-      const protocol = extractOfficialProtocolMetadata(candidateContent.text)
-      await replacePropostaContestazionePdfAttachment(layer, oid, file, layerUrl, 'APPROVED')
+
+      const selectedByName = new Map<string, File>()
+      for (const file of files) {
+        const key = normalizeProtocolloReturnFileName(file.name)
+        if (!key || selectedByName.has(key)) {
+          throw new Error(`Il file "${file.name}" è stato selezionato più di una volta.`)
+        }
+        selectedByName.set(key, file)
+      }
+
+      const missing = manifest.items.filter(item => !selectedByName.has(normalizeProtocolloReturnFileName(item.fileName)))
+      const unexpected = files.filter(file => !expectedByName.has(normalizeProtocolloReturnFileName(file.name)))
+      if (missing.length || unexpected.length) {
+        const parts: string[] = []
+        if (missing.length) parts.push(`mancano ${missing.length} elaborat${missing.length === 1 ? 'o' : 'i'}: ${missing.map(x => x.fileName).join(', ')}`)
+        if (unexpected.length) parts.push(`non riconosciut${unexpected.length === 1 ? 'o' : 'i'}: ${unexpected.map(x => x.name).join(', ')}`)
+        throw new Error(`Il fascicolo selezionato non coincide con quello trasmesso al protocollo (${parts.join('; ')}).`)
+      }
+
+      const ordered = manifest.items.map(item => ({
+        item,
+        file: selectedByName.get(normalizeProtocolloReturnFileName(item.fileName))!
+      }))
+      const contents = await Promise.all(ordered.map(entry => extractPdfVerificationContent(entry.file)))
+      const protocol = extractConsensusOfficialProtocol(contents)
+
+      // La Proposta resta il controllo documentale più forte: deve corrispondere
+      // alla versione approvata già presente nel fascicolo, a parte il timbro di protocollo.
+      const propostaIndex = ordered.findIndex(entry => entry.item.docKey === 'proposta')
+      if (propostaIndex < 0) throw new Error('La composizione del fascicolo trasmesso non contiene la Proposta di contestazione.')
+      const currentAttachments = await queryAmmAttachments(layer, oid, layerUrl)
+      const currentProposta = pickLatestGiiAttachment(
+        currentAttachments.filter(isGiiPropostaContestazionePdfAttachment) as any[]
+      ) as AmmAttachmentInfo | null
+      if (!currentProposta) throw new Error('La Proposta di contestazione presente nel fascicolo non è disponibile per il confronto.')
+      const currentPropostaBlob = await fetchAmmAttachmentBlobForPdf(currentProposta, oid, layerUrl)
+      const currentPropostaContent = await extractPdfVerificationContent(currentPropostaBlob)
+      const returnedPropostaContent = contents[propostaIndex]
+      if (
+        !currentPropostaContent.text ||
+        !returnedPropostaContent?.text ||
+        !candidatePreservesApprovedPdfText(currentPropostaContent.text, returnedPropostaContent.text)
+      ) {
+        throw new Error('La Proposta protocollata non corrisponde alla Proposta presente nel fascicolo. Nessun elaborato è stato acquisito.')
+      }
+
+      // Preflight: tutti gli allegati già presenti devono essere ancora identificabili
+      // prima di iniziare qualsiasi sostituzione.
+      const genericEntries = ordered.filter(entry => entry.item.docKey.startsWith('allegato:'))
+      const genericSources = new Map<number, { att: AmmAttachmentInfo; originalBlob: Blob }>()
+      for (const entry of genericEntries) {
+        const sourceId = Number(entry.item.sourceAttachmentId)
+        const source = currentAttachments.find(att => Number(att.id) === sourceId)
+        if (!Number.isFinite(sourceId) || sourceId <= 0 || !source) {
+          throw new Error(`L’allegato "${entry.item.sourceAttachmentName || entry.item.fileName}" non è più disponibile nella pratica. Nessun elaborato è stato acquisito.`)
+        }
+        genericSources.set(sourceId, {
+          att: source,
+          originalBlob: await fetchAmmAttachmentBlobForPdf(source, oid, layerUrl)
+        })
+      }
+
+      const snapshotEntries = ordered.filter(entry =>
+        entry.item.docKey === 'rapporto' ||
+        entry.item.docKey === 'mappa' ||
+        entry.item.docKey.startsWith('nota_spese:')
+      )
+      const newSnapshotIds: number[] = []
+      const oldSnapshotIds = currentAttachments
+        .filter(att => isGiiProtocolloFascicoloPdfAttachment(att as any))
+        .filter(att => snapshotEntries.some(entry => giiAttachmentKeywordValue(att as any, 'protocolDocKey') === entry.item.docKey))
+        .map(att => Number(att.id))
+        .filter(id => Number.isFinite(id) && id > 0)
+
+      const updatedGenericIds: number[] = []
+      let propostaMutationStarted = false
+      try {
+        // Rapporto, Note spese e Mappa non erano allegati persistenti: archiviamo
+        // le versioni protocollate come snapshot interne usate dal viewer.
+        for (const entry of snapshotEntries) {
+          const snapshotFile = new File(
+            [entry.file],
+            protocolloFriendlyPdfName(entry.item, entry.file.name),
+            { type: 'application/pdf', lastModified: Date.now() }
+          )
+          const ids = await addAmmAttachments(
+            layer,
+            oid,
+            [snapshotFile],
+            layerUrl,
+            protocolloFascicoloSnapshotKeywords(entry.item, protocol, manifest.createdAt)
+          )
+          const addedId = Number(ids?.[0])
+          if (!Number.isFinite(addedId) || addedId <= 0) {
+            throw new Error(`Non è stato possibile archiviare l’elaborato protocollato "${entry.item.fileName}".`)
+          }
+          newSnapshotIds.push(addedId)
+        }
+
+        // Gli allegati esistenti vengono sostituiti sullo stesso attachment ID:
+        // classificazione e riferimenti logici rimangono invariati.
+        for (const entry of genericEntries) {
+          const sourceId = Number(entry.item.sourceAttachmentId)
+          const source = genericSources.get(sourceId)!.att
+          const replacement = new File(
+            [entry.file],
+            protocolloFriendlyPdfName(entry.item, source.name || entry.file.name),
+            { type: 'application/pdf', lastModified: Date.now() }
+          )
+          await updateAmmAttachmentFile(oid, sourceId, replacement, layerUrl)
+          updatedGenericIds.push(sourceId)
+        }
+
+        const propostaEntry = ordered[propostaIndex]
+        const propostaFile = new File(
+          [propostaEntry.file],
+          protocolloFriendlyPdfName(propostaEntry.item, propostaEntry.file.name),
+          { type: 'application/pdf', lastModified: Date.now() }
+        )
+        propostaMutationStarted = true
+        await replacePropostaContestazionePdfAttachment(layer, oid, propostaFile, layerUrl, 'APPROVED')
+      } catch (mutationError) {
+        // Se una sostituzione intermedia fallisce, ripristiniamo gli allegati generici
+        // già aggiornati e rimuoviamo le snapshot appena create.
+        if (propostaMutationStarted) {
+          try {
+            const rollbackProposta = new File(
+              [currentPropostaBlob],
+              String(currentProposta.name || 'proposta_contestazione.pdf'),
+              { type: String(currentProposta.contentType || currentPropostaBlob.type || 'application/pdf'), lastModified: Date.now() }
+            )
+            await updateAmmAttachmentFile(oid, Number(currentProposta.id), rollbackProposta, layerUrl)
+          } catch {}
+        }
+        for (const sourceId of [...updatedGenericIds].reverse()) {
+          const original = genericSources.get(sourceId)
+          if (!original) continue
+          try {
+            const rollbackFile = new File(
+              [original.originalBlob],
+              String(original.att.name || `allegato_${sourceId}`),
+              { type: String(original.att.contentType || original.originalBlob.type || 'application/octet-stream'), lastModified: Date.now() }
+            )
+            await updateAmmAttachmentFile(oid, sourceId, rollbackFile, layerUrl)
+          } catch {}
+        }
+        for (const id of newSnapshotIds) {
+          try { await deleteAmmAttachment(layer, oid, id, layerUrl) } catch {}
+        }
+        throw mutationError
+      }
+
+      // Le vecchie snapshot possono essere eliminate solo dopo la riuscita completa.
+      for (const id of oldSnapshotIds) {
+        if (newSnapshotIds.includes(id)) continue
+        try { await deleteAmmAttachment(layer, oid, id, layerUrl) } catch {}
+      }
+
       props.onChange('protocollo_fascicolo_numero', protocol.numero)
       props.onChange('protocollo_fascicolo_data', protocol.dataMs)
-      setAttachmentsInfo(`Proposta ufficiale acquisita. Protocollo ${protocol.numero} del ${new Date(protocol.dataMs).toLocaleDateString('it-IT')} letto automaticamente dal documento. Salvare i dati per proseguire.`)
-      setAttachmentsLoadedOid(null)
+
+      // Aggiorniamo lo stato locale degli allegati senza passare dal reload automatico:
+      // loadBozzaAttachments() azzera attachmentsInfo e faceva sparire immediatamente
+      // il riscontro dell'acquisizione appena conclusa.
+      const allAfter = await queryAmmAttachments(layer, oid, layerUrl)
+      setBozzaAttachments(allAfter.filter(isGiiBozzaDeterminazionePdfAttachment))
+      setAttoAttachments(allAfter.filter(isGiiAttoContestazionePdfAttachment))
+      setPagopaAttachments(allAfter.filter(isGiiPagoPaAttachment))
+      setProtocolloManifestAvailable(allAfter.some(att => isGiiProtocolloFascicoloManifestAttachment(att as any)))
+      setAttachmentsLoadedOid(oid)
+
+      setProtocolloImportResult({
+        numero: protocol.numero,
+        dataMs: protocol.dataMs,
+        items: ordered.map(entry => ({
+          docKey: String(entry.item.docKey || ''),
+          fileName: String(entry.item.sourceAttachmentName || entry.item.fileName || entry.file.name || '').trim()
+        }))
+      })
+      setAttachmentsInfo(
+        `Fascicolo protocollato acquisito: ${ordered.length} elaborati riconosciuti e sostituiti. ` +
+        `Protocollo ${protocol.numero} del ${new Date(protocol.dataMs).toLocaleDateString('it-IT')} letto automaticamente. Salvare i dati per proseguire.`
+      )
       setInputKey(k => k + 1)
     } catch (e: any) {
       setAttachmentsError(e?.message || String(e))
@@ -5059,7 +5488,7 @@ function PostAttestazioneIaWorkSection (props: {
   }, [attachmentsBusy, oid, propostaUfficialeDaAcquisire, props, resolveAttachmentLayer])
 
   const uploadDeterminazioneUfficiale = React.useCallback(async (file: File | null) => {
-    if (!file || !oid || !determinazioneUfficialeDaAcquisire || !props.canEdit || props.saving || attachmentsBusy) return
+    if (!file || !oid || !canUploadOfficialDeterminationPdf || !props.canEdit || props.saving || attachmentsBusy) return
     if (!/\.pdf$/i.test(String(file.name || ''))) {
       setAttachmentsError('Caricare la determinazione ufficiale in formato PDF.')
       return
@@ -5069,24 +5498,27 @@ function PostAttestazioneIaWorkSection (props: {
     setAttachmentsInfo(null)
     try {
       const { layer, layerUrl } = await resolveAttachmentLayer()
-      const all = await queryAmmAttachments(layer, oid, layerUrl)
-      const source = pickLatestGiiAttachment(all.filter(isGiiBozzaDeterminazionePdfAttachment) as any[]) as AmmAttachmentInfo | null
-      if (!source) throw new Error('La determinazione inviata al Direttore non è disponibile per il confronto.')
-      const sourceBlob = await fetchAmmAttachmentBlobForPdf(source, oid, layerUrl)
-      const [sourceContent, candidateContent, signed] = await Promise.all([
-        extractPdfVerificationContent(sourceBlob),
-        extractPdfVerificationContent(file),
-        pdfContainsDigitalSignature(file)
-      ])
-      if (!signed) throw new Error('Il PDF non risulta firmato digitalmente. Caricare la determinazione ufficiale firmata dal Direttore.')
-      if (!sourceContent.text || !candidateContent.text || !candidatePreservesApprovedPdfText(sourceContent.text, candidateContent.text)) {
-        throw new Error('Il PDF caricato non corrisponde alla determinazione inviata al Direttore. Il documento non è stato acquisito.')
-      }
+      const candidateContent = await extractPdfVerificationContent(file)
+      if (!candidateContent.text) throw new Error('Non è stato possibile leggere il contenuto della copia PDF conforme della determinazione ufficiale.')
+      // La copia PDF conforme può differire dalla bozza inviata al DA per la normale
+      // anonimizzazione/redazione della Segreteria. Verifichiamo quindi gli elementi
+      // sostanziali della pratica, non l'identità testuale del documento.
+      verifyOfficialDeterminationAgainstPractice(candidateContent.text, d, props.fields, oid)
       const meta = extractOfficialDeterminationMetadata(candidateContent.text)
-      await replaceBozzaDeterminazionePdfAttachment(layer, oid, file, layerUrl, `official=1|signedByDa=1|officialAt=${Date.now()}`)
+      const extractedDateKey = dateInputValue(meta.dataMs)
+      await replaceBozzaDeterminazionePdfAttachment(
+        layer,
+        oid,
+        file,
+        layerUrl,
+        `official=1|officialCopy=1|officialAt=${Date.now()}|detNumber=${meta.numero}|detDate=${extractedDateKey}`
+      )
+      // Gli estremi ufficiali sono acquisiti dalla copia PDF conforme, non digitati a mano.
+      // Il controllo al salvataggio verifica poi che questi valori non siano stati alterati
+      // rispetto ai metadati estratti e registrati nelle keywords dell'allegato.
       props.onChange('determinazione_numero', String(meta.numero))
       props.onChange('determinazione_data', meta.dataMs)
-      setAttachmentsInfo(`Determinazione ufficiale acquisita: n. ${meta.numero} del ${new Date(meta.dataMs).toLocaleDateString('it-IT')}. Gli estremi sono stati letti automaticamente; usare Salva per registrarli e completare i controlli di unicità.`)
+      setAttachmentsInfo(`${canReplaceArchivedDeterminationPdf ? 'PDF ufficiale sostituito' : 'Determinazione ufficiale acquisita'}: n. ${meta.numero} del ${new Date(meta.dataMs).toLocaleDateString('it-IT')}. Numero e data sono stati letti automaticamente dalla copia PDF conforme${canReplaceArchivedDeterminationPdf ? '; se sono cambiati, usare Salva per aggiornare gli estremi registrati.' : '; usare Salva per registrarli e completare i controlli di unicità.'}`)
       setBozzaAttachments(await queryAmmAttachments(layer, oid, layerUrl).then(allAfter => allAfter.filter(isGiiBozzaDeterminazionePdfAttachment)))
       setAttachmentsLoadedOid(oid)
       setInputKey(k => k + 1)
@@ -5095,7 +5527,7 @@ function PostAttestazioneIaWorkSection (props: {
     } finally {
       setAttachmentsBusy(false)
     }
-  }, [attachmentsBusy, determinazioneUfficialeDaAcquisire, oid, props, resolveAttachmentLayer])
+  }, [attachmentsBusy, canReplaceArchivedDeterminationPdf, canUploadOfficialDeterminationPdf, d, oid, props, resolveAttachmentLayer])
 
   const downloadBozzaPdf = React.useCallback(async (att: AmmAttachmentInfo) => {
     if (!att || !oid || attachmentsBusy) return
@@ -5119,8 +5551,11 @@ function PostAttestazioneIaWorkSection (props: {
   const protocolloAttoCompleto =
     hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_numero'])) &&
     hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_data']))
-  const legacyAttoDirectPdf = attoWorkflow && attoState === 'ADOTTATA' && hasAttoPdfCaricato && hasAdminValue(pickAttrCI(saved, ['accertamento_data'])) && !attoWorkflowLocked
   const attoInLavorazioneIa = attoWorkflow && (attoState === 'ADOTTATA' || attoState === 'BOZZA')
+  const paymentModeForAtto = getPaymentMode(d, props.fields)
+  const attoPreDraftReady = !!paymentModeForAtto && hasAdminValue(pickAttrCI(d, ['notifica_tipo']))
+  const attoPostFirmaPaymentReady = hasAdminValue(pickAttrCI(d, ['pagamento_scadenza'])) &&
+    (!['PAGOPA', 'MISTO'].includes(paymentModeForAtto) || pagopaAttachments.length > 0)
   const attoRichiedeVersionePulita = attoApprovedRia && !attoEmailDirettorePreparata && !hasAttoDaFirmare
   const attoCleanWordGeneratedAfterApproval = !!props.attoCleanWordGeneratedAfterApproval
   const canGenerateAttoContestazioneWord =
@@ -5128,7 +5563,8 @@ function PostAttestazioneIaWorkSection (props: {
     attoWorkflow &&
     !attoWorkflowLocked &&
     (attoInLavorazioneIa || attoRichiedeVersionePulita) &&
-    (attoRichiedeVersionePulita || !hasAttoPdfCaricato || legacyAttoDirectPdf) &&
+    (attoRichiedeVersionePulita || !hasAttoPdfCaricato) &&
+    (attoRichiedeVersionePulita || attoPreDraftReady) &&
     !determinationDraftDirty &&
     !props.saving &&
     !attachmentsBusy
@@ -5151,7 +5587,7 @@ function PostAttestazioneIaWorkSection (props: {
     props.canEdit &&
     attoWorkflow &&
     hasAttoPdfCaricato &&
-    (attoState === 'BOZZA' || legacyAttoDirectPdf) &&
+    attoState === 'BOZZA' &&
     !attoWorkflowLocked &&
     !props.saving &&
     !attachmentsBusy
@@ -5177,19 +5613,82 @@ function PostAttestazioneIaWorkSection (props: {
     attoWorkflow &&
     attoEmailDirettorePreparata &&
     hasAttoFirmato &&
+    attoPostFirmaPaymentReady &&
     !protocolloAttoCompleto &&
     !attoWorkflowLocked &&
     !props.saving &&
     !attachmentsBusy
 
+  const uploadPagoPaPdf = React.useCallback(async (file: File | null) => {
+    if (!file || !oid || !props.canEdit || !hasAttoFirmato || protocolloAttoCompleto || !['PAGOPA', 'MISTO'].includes(paymentModeForAtto) || props.saving || attachmentsBusy) return
+    if (!/\.pdf$/i.test(String(file.name || ''))) {
+      setAttachmentsErrorSection('atto')
+      setAttachmentsError('Caricare il bollettino pagoPA in formato PDF.')
+      return
+    }
+    setAttachmentsBusy(true)
+    setAttachmentsErrorSection('atto')
+    setAttachmentsError(null)
+    setAttachmentsInfo(null)
+    try {
+      const content = await extractPdfVerificationContent(file)
+      if (!content.text) throw new Error('Non è stato possibile leggere il bollettino pagoPA.')
+      const deadlineMs = extractPagoPaDeadlineMs(content.text)
+      const { layer, layerUrl } = await resolveAttachmentLayer()
+      const allBefore = await queryAmmAttachments(layer, oid, layerUrl)
+      const ids = await addAmmAttachments(layer, oid, [file], layerUrl, `${GII_PAGOPA_ATTACHMENT_KEYWORD}|fileCreatedAt=${Date.now()}|paymentDeadline=${dateInputValue(deadlineMs)}`)
+      const keepId = Number(ids?.[0])
+      if (!Number.isFinite(keepId) || keepId <= 0) throw new Error('Bollettino pagoPA caricato, ma allegato non identificabile.')
+      for (const oldAtt of allBefore.filter(isGiiPagoPaAttachment)) {
+        const oldId = Number(oldAtt.id)
+        if (Number.isFinite(oldId) && oldId > 0 && oldId !== keepId) {
+          try { await deleteAmmAttachment(layer, oid, oldId, layerUrl) } catch {}
+        }
+      }
+      props.onChange('pagamento_scadenza', deadlineMs)
+      const allAfter = await queryAmmAttachments(layer, oid, layerUrl)
+      setPagopaAttachments(allAfter.filter(isGiiPagoPaAttachment))
+      setAttachmentsLoadedOid(oid)
+      setAttachmentsInfo(`Bollettino pagoPA acquisito. Scadenza ${new Date(deadlineMs).toLocaleDateString('it-IT')} letta automaticamente dal documento. Salvare i dati prima della trasmissione al protocollo.`)
+      setInputKey(k => k + 1)
+    } catch (e: any) {
+      setAttachmentsError(e?.message || String(e))
+    } finally {
+      setAttachmentsBusy(false)
+    }
+  }, [attachmentsBusy, hasAttoFirmato, oid, paymentModeForAtto, props, protocolloAttoCompleto, resolveAttachmentLayer])
+
+  const deletePagoPaPdf = React.useCallback(async (att: AmmAttachmentInfo) => {
+    if (!att || !oid || !props.canEdit || protocolloAttoCompleto || props.saving || attachmentsBusy) return
+    setAttachmentsBusy(true)
+    setAttachmentsErrorSection('atto')
+    setAttachmentsError(null)
+    try {
+      const { layer, layerUrl } = await resolveAttachmentLayer()
+      await deleteAmmAttachment(layer, oid, Number(att.id), layerUrl)
+      const allAfter = await queryAmmAttachments(layer, oid, layerUrl)
+      const remaining = allAfter.filter(isGiiPagoPaAttachment)
+      setPagopaAttachments(remaining)
+      if (!remaining.length) props.onChange('pagamento_scadenza', null)
+      setAttachmentsLoadedOid(oid)
+      setInputKey(k => k + 1)
+    } catch (e: any) {
+      setAttachmentsError(e?.message || String(e))
+    } finally {
+      setAttachmentsBusy(false)
+    }
+  }, [attachmentsBusy, oid, props, protocolloAttoCompleto, resolveAttachmentLayer])
+
   const uploadAttoContestazionePdf = React.useCallback(async (file: File | null) => {
     if (!file || !oid || !canUploadAttoContestazione) return
     const originalName = String(file.name || '').trim()
     if (!/\.pdf$/i.test(originalName)) {
+      setAttachmentsErrorSection('atto')
       setAttachmentsError('Caricare il documento in formato PDF.')
       return
     }
     setAttachmentsBusy(true)
+    setAttachmentsErrorSection('atto')
     setAttachmentsError(null)
     setAttachmentsInfo(null)
     try {
@@ -5208,7 +5707,7 @@ function PostAttestazioneIaWorkSection (props: {
         const candidateContent = await extractPdfVerificationContent(file)
 
         let protocolMeta: OfficialProtocolMetadata | null = null
-        if (currentSigned) protocolMeta = extractOfficialProtocolMetadata(candidateContent.text)
+        if (currentSigned) protocolMeta = extractOfficialProtocolMetadata(candidateContent.protocolSearchText || candidateContent.text)
 
         if (!currentSigned) {
           await verifySignedAttoAgainstUnsigned(currentBlob, file)
@@ -5245,25 +5744,21 @@ function PostAttestazioneIaWorkSection (props: {
         const allAfter = await queryAmmAttachments(layer, oid, layerUrl)
         setAttoAttachments(allAfter.filter(isGiiAttoContestazionePdfAttachment))
       } else if (attoApprovedRia) {
-        // Dopo l'approvazione del Responsabile il PDF può essere sostituito soltanto
-        // per eliminare una vecchia filigrana BOZZA. Il contenuto deve rimanere
-        // identico a quello effettivamente approvato.
+        // Dopo l'approvazione del Responsabile il PDF può essere sostituito con la
+        // versione senza filigrana. Se nel frattempo è stata corretta l'archiviazione
+        // della Determinazione, sono ammesse soltanto le conseguenti variazioni dei
+        // riferimenti documentali derivati; il contenuto sostanziale resta invariato.
         const allBefore = await queryAmmAttachments(layer, oid, layerUrl)
         const approvedPdf = pickLatestGiiAttachment(allBefore.filter(isGiiAttoContestazionePdfAttachment) as any[]) as AmmAttachmentInfo | null
         if (!approvedPdf) throw new Error('La versione approvata dell’Atto di accertamento non è disponibile.')
-        const approvedBlob = await fetchAmmAttachmentBlobForPdf(approvedPdf, oid, layerUrl)
-        const [approvedContent, candidateContent] = await Promise.all([
-          extractPdfVerificationContent(approvedBlob),
-          extractPdfVerificationContent(file)
-        ])
-        if (!approvedContent.text || !candidateContent.text) throw new Error('Non è stato possibile verificare il contenuto del PDF.')
-        if (/\bBOZZA\b/i.test(candidateContent.text)) {
-          throw new Error('Il PDF contiene ancora la filigrana BOZZA.')
-        }
-        const canonicalAtto = (value: string) => normalizePdfVerificationText(value).replace(/\bBOZZA\b/gi, '').replace(/\s+/g, ' ').trim()
-        if (canonicalAtto(approvedContent.text) !== canonicalAtto(candidateContent.text)) {
-          throw new Error('Il PDF non corrisponde alla versione approvata.')
-        }
+        const candidateContent = await extractPdfVerificationContent(file)
+        if (!candidateContent.text) throw new Error('Non è stato possibile verificare il contenuto del PDF.')
+        // Dopo l'approvazione RIA il generatore documentale può aver ricevuto
+        // correzioni formali (es. formato superfici o denominazioni economiche).
+        // Non confrontiamo quindi più il PDF byte/testo-per-testo con una versione
+        // storica: verifichiamo invece che il nuovo Atto riporti ancora tutti i
+        // dati sostanziali della pratica approvata.
+        verifyApprovedAttoReplacementAgainstPractice(candidateContent.text, props.data || {}, props.fields || [], oid, attoFinaleNumero)
         const fileName = originalName || `atto_accertamento_${String(attoFinaleNumero || oid).replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`
         const uploadFile = file.name === fileName ? file : new File([file], fileName, { type: file.type || 'application/pdf', lastModified: file.lastModified || now })
         const ids = await addAmmAttachments(layer, oid, [uploadFile], layerUrl, `${GII_ATTACHMENT_KEYWORDS.attoContestazione}|attoDaFirmare=1|verifiedAgainstRia=1|fileCreatedAt=${now}`)
@@ -5299,6 +5794,7 @@ function PostAttestazioneIaWorkSection (props: {
   const downloadAttoContestazionePdf = React.useCallback(async (att: AmmAttachmentInfo) => {
     if (!att || !oid || attachmentsBusy) return
     setAttachmentsBusy(true)
+    setAttachmentsErrorSection('atto')
     setAttachmentsError(null)
     try {
       const { layerUrl } = await resolveAttachmentLayer()
@@ -5313,6 +5809,7 @@ function PostAttestazioneIaWorkSection (props: {
   const deleteAttoContestazionePdf = React.useCallback(async (att: AmmAttachmentInfo) => {
     if (!att || !oid || !canDeleteAttoContestazione) return
     setAttachmentsBusy(true)
+    setAttachmentsErrorSection('atto')
     setAttachmentsError(null)
     try {
       const { layer, layerUrl } = await resolveAttachmentLayer()
@@ -5365,15 +5862,17 @@ function PostAttestazioneIaWorkSection (props: {
     hasBozzaPdfCaricata &&
     !props.saving &&
     !attachmentsBusy
-  const canPrepareEmailProtocollo = props.canEdit && riaHaApprovatoProposta && !vistoDaRinnovareDopoRimando && !protocolloFascicoloOk && !fascicoloTrasmessoAlProtocollo && !props.saving && !attachmentsBusy
+  const canPrepareEmailProtocollo = props.canEdit && riaHaApprovatoProposta && !vistoDaRinnovareDopoRimando && !protocolloFascicoloOk && (!fascicoloTrasmessoAlProtocollo || legacyProtocolloTransmissionNeedsRebuild) && !props.saving && !attachmentsBusy
   const canPrepareEmailDirettore = props.canEdit && riaHaApprovatoProposta && !vistoDaRinnovareDopoRimando && protocolloFascicoloSalvatoOk && hasBozzaGenerated && hasBozzaPdfCaricata && verifiedFinalPdfCaricato && !props.saving && !attachmentsBusy
 
   // Un solo comando e-mail nella barra Azioni: prima serve per trasmettere il fascicolo
   // al protocollo, poi (dopo la protocollazione) per predisporre l'e-mail al Direttore.
-  const emailActionIsProtocollo = !fascicoloTrasmessoAlProtocollo && !protocolloFascicoloOk && !protocolloFascicoloSalvatoOk && !emailDirettorePreparata
+  const emailActionIsProtocollo = (!fascicoloTrasmessoAlProtocollo || legacyProtocolloTransmissionNeedsRebuild) && !protocolloFascicoloOk && !protocolloFascicoloSalvatoOk && !emailDirettorePreparata
   const emailActionDisabled = emailActionIsProtocollo ? !canPrepareEmailProtocollo : !canPrepareEmailDirettore
   const emailActionTitle = emailActionIsProtocollo
-    ? (protocolloFascicoloOk ? 'Fascicolo già protocollato' : (fascicoloTrasmessoAlProtocollo ? 'Fascicolo già trasmesso al protocollo' : 'Trasmetti fascicolo al protocollo'))
+    ? (legacyProtocolloTransmissionNeedsRebuild
+        ? 'Ricrea e-mail al protocollo con la nuova composizione del fascicolo'
+        : (protocolloFascicoloOk ? 'Fascicolo già protocollato' : (fascicoloTrasmessoAlProtocollo ? 'Fascicolo già trasmesso al protocollo' : 'Trasmetti fascicolo al protocollo')))
     : (!protocolloFascicoloSalvatoOk
         ? (fascicoloTrasmessoAlProtocollo
             ? (protocolloFascicoloOk
@@ -5391,19 +5890,21 @@ function PostAttestazioneIaWorkSection (props: {
 
   // Guida IA: una sola indicazione alla volta, sempre derivata dalle stesse
   // condizioni che abilitano realmente i comandi della fase corrente.
-  const guideEnabled = String(props.role || '').toUpperCase() === 'IA' && props.canEdit && !props.saving && !attachmentsBusy && attachmentsResolved && !props.suppressActionGuide
-  const protocolNumberDraftPresent = hasAdminValue(pickAttrCI(d, ['protocollo_fascicolo_numero']))
-  const protocolDateDraftPresent = hasAdminValue(pickAttrCI(d, ['protocollo_fascicolo_data']))
-  const protocolAttentionField = guideEnabled && riaHaApprovatoProposta && fascicoloTrasmessoAlProtocollo && !protocolloFascicoloSalvatoOk
-    ? (!protocolNumberDraftPresent ? 'protocollo_fascicolo_numero' : (!protocolDateDraftPresent ? 'protocollo_fascicolo_data' : null))
-    : null
+  const guideEnabled =
+    String(props.role || '').toUpperCase() === 'IA' &&
+    props.canEdit &&
+    !props.saving &&
+    !attachmentsBusy &&
+    attachmentsResolved &&
+    !props.suppressActionGuide &&
+    (showDeterminationWorkflow || (showAttoWorkflow && attoWorkflow))
   const definitiveWordGeneratedAfterApproval = postApprovalProtocolSaved && approvalAt > 0 && wordGeneratedAt > approvalAt
 
   type IaNextAction = 'GENERATE_WORD' | 'UPLOAD_PDF' | 'TRANSMIT_RIA' | 'SEND_PROTOCOLLO' | 'EMAIL_DIRETTORE' | null
   let nextIaAction: IaNextAction = null
   if (guideEnabled && attoWorkflow) {
     if (attoInLavorazioneIa) {
-      if (!attoWordGenerated || legacyAttoDirectPdf) nextIaAction = 'GENERATE_WORD'
+      if (!attoWordGenerated && canGenerateAttoContestazioneWord) nextIaAction = 'GENERATE_WORD'
       else if (!hasAttoPdfCaricato) nextIaAction = 'UPLOAD_PDF'
       else if (canTransmitAttoContestazione) nextIaAction = 'TRANSMIT_RIA'
     } else if (attoApprovedRia && !attoEmailDirettorePreparata) {
@@ -5415,7 +5916,7 @@ function PostAttestazioneIaWorkSection (props: {
       if (!hasAttoFirmato && canUploadSignedAtto) nextIaAction = 'UPLOAD_PDF'
       else if (hasAttoFirmato && canPrepareEmailAttoProtocollo) nextIaAction = 'SEND_PROTOCOLLO'
     }
-  } else if (guideEnabled && iaHaAttestatoConformita && !vistoDaRinnovareDopoRimando) {
+  } else if (guideEnabled && !determinazioneAdottata && iaHaAttestatoConformita && !vistoDaRinnovareDopoRimando) {
     if (propostaUfficialeDaAcquisire || determinazioneUfficialeDaAcquisire) {
       nextIaAction = 'UPLOAD_PDF'
     } else if (!riaHaApprovatoProposta && bozzaInLavorazioneIa) {
@@ -5471,7 +5972,7 @@ function PostAttestazioneIaWorkSection (props: {
         ? 'Atto non modificabile in questa fase'
         : (attoRichiedeVersionePulita
             ? (attoCleanWordGeneratedAfterApproval ? 'Rigenera Atto senza filigrana' : 'Genera Atto senza filigrana')
-            : (hasAttoPdfCaricato && !legacyAttoDirectPdf ? 'Bozza PDF dell’Atto già caricata' : (attoWordGenerated && !legacyAttoDirectPdf ? 'Rigenera bozza Word dell’Atto' : 'Genera bozza Word dell’Atto'))))
+            : (hasAttoPdfCaricato ? 'Bozza PDF dell’Atto già caricata' : (attoWordGenerated ? 'Rigenera bozza Word dell’Atto' : 'Genera bozza Word dell’Atto'))))
     : generateBozzaActionTitle
   const uploadActionDisabled = !attachmentsResolved || (attoWorkflow ? !canUploadAttoContestazione : !canUploadBozza)
   const uploadActionTitle = attoWorkflow
@@ -5483,9 +5984,9 @@ function PostAttestazioneIaWorkSection (props: {
                 : 'Carica PDF senza filigrana')
             : (hasAttoPdfCaricato ? 'Bozza PDF dell’Atto di accertamento già caricata' : (attoWordGenerated ? 'Carica la bozza PDF dell’Atto di accertamento' : 'Generare prima il Word in bozza dell’Atto di accertamento'))))
     : (propostaUfficialeDaAcquisire
-        ? 'Carica Proposta protocollata'
+        ? 'Carica fascicolo protocollato'
         : (determinazioneUfficialeDaAcquisire
-            ? 'Carica determinazione firmata'
+            ? 'Carica determinazione firmata e acquisisci gli estremi'
             : uploadBozzaActionTitle))
   const transmitActionDisabled = !attachmentsResolved || (attoWorkflow ? !canTransmitAttoContestazione : !canTransmitBozza)
   const transmitActionTitle = attoWorkflow
@@ -5511,7 +6012,7 @@ function PostAttestazioneIaWorkSection (props: {
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
-      {confirmDeleteBozza && (
+      {showDeterminationWorkflow && confirmDeleteBozza && (
         <DeleteBozzaConfirmDialog
           saving={props.saving || attachmentsBusy}
           finalPdf={verifiedFinalPdfCaricato}
@@ -5529,18 +6030,39 @@ function PostAttestazioneIaWorkSection (props: {
           }}
         />
       )}
+      {showDeterminationWorkflow && (
       <AdminFormSection
         title='Protocollazione fascicolo'
-        right={<SectionInfoButton text={props.showIaInfo ? 'Acquisire la Proposta protocollata per registrarne gli estremi.' : null} title='Informazioni protocollazione fascicolo' />}
+        right={<SectionInfoButton text={props.showIaInfo ? 'Selezionare insieme tutti i PDF restituiti dal protocollo per sostituire gli elaborati del fascicolo e registrarne automaticamente gli estremi.' : null} title='Informazioni protocollazione fascicolo' />}
         group='verbale'
         draft={d}
         fields={props.fields}
         canEdit={canEditProtocolloFascicolo}
         onChange={props.onChange}
         fieldNames={PROTOCOLLO_FASCICOLO_FIELDS}
-        attentionFieldName={protocolAttentionField}
       >
+        {attachmentsError && attachmentsErrorSection === 'protocollo' && (
+          <div style={{ marginTop: 10 }}><InfoBox kind='warn'>{attachmentsError}</InfoBox></div>
+        )}
+        {protocolloImportResult && (
+          <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+            <InfoBox kind='ok'>
+              {`Acquisizione completata. ${protocolloImportResult.items.length} elaborati riconosciuti e sostituiti. Protocollo n. ${protocolloImportResult.numero} del ${new Date(protocolloImportResult.dataMs).toLocaleDateString('it-IT')}. Numero e data sono stati compilati automaticamente; premere Salva per registrarli nella pratica.`}
+            </InfoBox>
+            <div style={{ border: '1px solid #d8e6f7', borderRadius: 8, background: '#f8fbff', padding: 8, display: 'grid', gap: 5 }}>
+              <div style={{ fontWeight: 800, color: '#0d3b66', fontSize: 13 }}>Elaborati acquisiti</div>
+              {protocolloImportResult.items.map((item, index) => (
+                <div key={`${item.docKey}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, color: '#334155' }}>
+                  <span aria-hidden='true' style={{ color: '#15803d', fontWeight: 900 }}>✓</span>
+                  <span style={{ overflowWrap: 'anywhere' }}>{item.fileName || item.docKey || `Elaborato ${index + 1}`}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </AdminFormSection>
+      )}
+      {showDeterminationWorkflow && (
       <Section
         title='Bozza determinazione'
         right={<SectionInfoButton text={props.showIaInfo ? 'Il documento approvato può essere sostituito solo dalla versione definitiva.' : null} title='Informazioni bozza determinazione' />}
@@ -5558,13 +6080,15 @@ function PostAttestazioneIaWorkSection (props: {
                   label={postApprovalProtocolSaved ? 'PDF definitivo' : 'Bozza PDF'}
                   value={attachmentsLoading
                     ? 'Verifica allegati…'
-                    : (postApprovalProtocolSaved
-                        ? (verifiedFinalPdfCaricato ? 'Verificato' : (hasBozzaPdfCaricata ? 'Da verificare' : 'Da caricare'))
-                        : (hasBozzaPdfCaricata ? 'Caricata' : 'Da caricare'))}
-                  tone={(postApprovalProtocolSaved ? verifiedFinalPdfCaricato : hasBozzaPdfCaricata) ? 'auto' : 'warn'}
+                    : (determinazioneAdottata
+                        ? 'Acquisito'
+                        : (postApprovalProtocolSaved
+                            ? (verifiedFinalPdfCaricato ? 'Verificato' : (hasBozzaPdfCaricata ? 'Da verificare' : 'Da caricare'))
+                            : (hasBozzaPdfCaricata ? 'Caricata' : 'Da caricare')))}
+                  tone={determinazioneAdottata || (postApprovalProtocolSaved ? verifiedFinalPdfCaricato : hasBozzaPdfCaricata) ? 'auto' : 'warn'}
                 />}
               </div>
-              {attachmentsError && <InfoBox kind='warn'>{attachmentsError}</InfoBox>}
+              {attachmentsError && attachmentsErrorSection === 'bozza' && <InfoBox kind='warn'>{attachmentsError}</InfoBox>}
               {hasBozzaGenerated && hasBozzaPdfCaricata && (
                 <div style={{ border: '1px solid #d8e6f7', borderRadius: 8, padding: 8, background: '#f8fbff', display: 'grid', gap: 6 }}>
                   <div style={{ fontWeight: 800, color: '#0d3b66', fontSize: 13 }}>Bozza PDF corrente</div>
@@ -5616,7 +6140,7 @@ function PostAttestazioneIaWorkSection (props: {
                     ? 'E-mail al Direttore predisposta. In attesa dell’esito della determinazione.'
                     : (attachmentsInfo || 'PDF definitivo verificato: il contenuto corrisponde alla versione approvata dal Responsabile dell’istruttoria amministrativa; sono state ammesse esclusivamente le variazioni del numero e della data di protocollo.')}
                 </InfoBox>
-              ) : (!vistoDaRinnovareDopoRimando && riaHaApprovatoProposta && bozzaRientrataDaRia) ? (
+              ) : (!determinazioneAdottata && !vistoDaRinnovareDopoRimando && riaHaApprovatoProposta && bozzaRientrataDaRia) ? (
                 <InfoBox kind='warn'>
                   {riaApprovedMessage}
                 </InfoBox>
@@ -5628,22 +6152,55 @@ function PostAttestazioneIaWorkSection (props: {
             </div>
         </div>
       </Section>
+      )}
 
-      {determinationSectionVisible && (
+      {showDeterminationWorkflow && determinationSectionVisible && (
         <Section
           title='Esito determinazione'
-          right={<SectionInfoButton text={props.showIaInfo ? 'Acquisire la determinazione ufficiale firmata per registrarne gli estremi.' : null} title='Informazioni esito determinazione' />}
+          right={<SectionInfoButton text={props.showIaInfo ? 'Acquisire la copia PDF conforme della determinazione ufficiale: numero e data vengono letti automaticamente dal documento.' : null} title='Informazioni esito determinazione' />}
           bodyStyle={{ padding: 10 }}
         >
           <div style={{ display: 'grid', gap: 10 }}>
-            {emailDirettorePreparata && !determinazioneAdottata && (
-              <InfoBox>In attesa della determinazione ufficiale firmata.</InfoBox>
+            {emailDirettorePreparata && determinazioneUfficialeDaAcquisire && (
+              <InfoBox>Acquisire la copia PDF conforme della determinazione ufficiale. Numero e data saranno letti automaticamente dal documento.</InfoBox>
+            )}
+            {emailDirettorePreparata && officialDeterminationMatchesDraft && (
+              <InfoBox kind='ok'>Copia PDF conforme acquisita. Numero e data sono stati letti automaticamente dal documento; salvare per registrare la determinazione adottata.</InfoBox>
             )}
             {determinazioneAdottata && (
               <InfoBox kind='ok'>Determina adottata e registrata.</InfoBox>
             )}
-            {determinationLocked && (
-              <InfoBox kind='warn'>I dati della determina non sono più modificabili.</InfoBox>
+            {canReplaceArchivedDeterminationPdf && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label
+                  title='Carica PDF ufficiale della determinazione'
+                  aria-label='Carica PDF ufficiale della determinazione'
+                  style={{
+                    ...bozzaIconButtonStyle({ disabled: attachmentsBusy || props.saving }),
+                    width: 'auto',
+                    minWidth: 116,
+                    padding: '0 12px',
+                    gap: 7,
+                    margin: 0,
+                    fontWeight: 800,
+                    fontSize: 13
+                  }}
+                >
+                  <BozzaActionIcon name='upload' size={21} />
+                  <span>Carica PDF</span>
+                  <input
+                    key={`det-official-${inputKey}`}
+                    type='file'
+                    disabled={attachmentsBusy || props.saving}
+                    accept='.pdf,application/pdf'
+                    style={{ display: 'none' }}
+                    onChange={e => { void uploadDeterminazioneUfficiale(e.target.files?.[0] || null) }}
+                  />
+                </label>
+                <span style={{ color: '#64748b', fontSize: 12 }}>
+                  Il nuovo PDF sostituisce quello archiviato senza riaprire l’istruttoria.
+                </span>
+              </div>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 12 }}>
               <FieldEditor
@@ -5652,7 +6209,7 @@ function PostAttestazioneIaWorkSection (props: {
                 fields={props.fields}
                 canEdit={canEditDetermination}
                 onChange={props.onChange}
-                attention={canEditDetermination && !hasAdminValue(determinationNumberRaw)}
+                attention={canEditDetermination && !!officialDeterminationPdf && !hasAdminValue(determinationNumberRaw)}
               />
               <FieldEditor
                 field={{ group: 'verbale', name: 'determinazione_data', label: 'Data determinazione', kind: 'date' }}
@@ -5660,7 +6217,7 @@ function PostAttestazioneIaWorkSection (props: {
                 fields={props.fields}
                 canEdit={canEditDetermination}
                 onChange={props.onChange}
-                attention={canEditDetermination && hasAdminValue(determinationNumberRaw) && !hasAdminValue(determinationDateRaw)}
+                attention={canEditDetermination && !!officialDeterminationPdf && hasAdminValue(determinationNumberRaw) && !hasAdminValue(determinationDateRaw)}
               />
               <StatusSummaryItem
                 label='Numero Atto di accertamento'
@@ -5676,20 +6233,13 @@ function PostAttestazioneIaWorkSection (props: {
         </Section>
       )}
 
-      {attoWorkflow && (
+      {showAttoWorkflow && attoWorkflow && (
         <Section
           title='Atto di accertamento'
-          right={<SectionInfoButton text={props.showIaInfo ? 'Dopo l’approvazione, predisporre e caricare la versione senza filigrana per l’invio al Direttore.' : null} title='Informazioni Atto di accertamento' />}
           bodyStyle={{ padding: 10 }}
         >
           <div style={{ display: 'grid', gap: 10 }}>
-            {legacyAttoDirectPdf && (
-              <InfoBox kind='warn'>Il PDF presente non è definitivo. Generare nuovamente il Word dell’Atto.</InfoBox>
-            )}
-            {!legacyAttoDirectPdf && attoState === 'ADOTTATA' && (
-              <InfoBox>Determina registrata. Predisporre l’Atto di accertamento.</InfoBox>
-            )}
-            {!legacyAttoDirectPdf && attoState === 'BOZZA' && !hasAttoPdfCaricato && (
+            {attoState === 'BOZZA' && !hasAttoPdfCaricato && (
               <InfoBox>Convertire il Word in PDF e caricarlo per la verifica.</InfoBox>
             )}
             {attoState === 'BOZZA' && hasAttoPdfCaricato && (
@@ -5736,7 +6286,54 @@ function PostAttestazioneIaWorkSection (props: {
                 tone={(attoApprovedRia || attoEmailDirettorePreparata || hasAttoFirmato || protocolloAttoCompleto) ? 'auto' : 'warn'}
               />
             </div>
-            {attachmentsError && <InfoBox kind='warn'>{attachmentsError}</InfoBox>}
+            {hasAttoFirmato && !protocolloAttoCompleto && (
+              <div style={{ border: '1px solid #d8e6f7', borderRadius: 8, padding: 10, background: '#f8fbff', display: 'grid', gap: 10 }}>
+                <div style={{ fontWeight: 900, color: '#0f4c81' }}>Completamento dati di pagamento</div>
+                {['PAGOPA', 'MISTO'].includes(paymentModeForAtto) ? (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <label style={{ ...bozzaActionButtonStyle({ disabled: attachmentsBusy || props.saving }), cursor: attachmentsBusy || props.saving ? 'not-allowed' : 'pointer' }}>
+                        Carica bollettino pagoPA
+                        <input
+                          key={`pagopa-${inputKey}`}
+                          type='file'
+                          accept='application/pdf,.pdf'
+                          disabled={attachmentsBusy || props.saving}
+                          style={{ display: 'none' }}
+                          onChange={e => { void uploadPagoPaPdf(e.target.files?.[0] || null) }}
+                        />
+                      </label>
+                      <StatusSummaryItem label='Scadenza pagamento' value={displayAdminFieldValue(d, props.fields, 'pagamento_scadenza', 'Da acquisire dal bollettino')} tone={hasAdminValue(pickAttrCI(d, ['pagamento_scadenza'])) ? 'auto' : 'warn'} />
+                    </div>
+                    {pagopaAttachments.map(att => (
+                      <div key={`pagopa-${att.id}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, border: '1px solid #e5edf7', borderRadius: 7, background: '#fff', padding: '7px 8px' }}>
+                        <div style={{ minWidth: 0, fontSize: 13, fontWeight: 800, color: '#1f2937', overflowWrap: 'anywhere' }}>{att.name || `Bollettino pagoPA ${att.id}`}</div>
+                        <button
+                          type='button'
+                          title='Elimina bollettino pagoPA'
+                          aria-label='Elimina bollettino pagoPA'
+                          disabled={attachmentsBusy || props.saving}
+                          onClick={() => { void deletePagoPaPdf(att) }}
+                          style={bozzaIconButtonStyle({ danger: true, disabled: attachmentsBusy || props.saving })}
+                        >
+                          <BozzaActionIcon name='trash' size={24} />
+                        </button>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <AdminFieldsGrid
+                    group='pagamento'
+                    draft={d}
+                    fields={props.fields}
+                    canEdit={props.canEdit && !props.saving}
+                    onChange={props.onChange}
+                    fieldNames={['pagamento_scadenza']}
+                  />
+                )}
+              </div>
+            )}
+            {attachmentsError && attachmentsErrorSection === 'atto' && <InfoBox kind='warn'>{attachmentsError}</InfoBox>}
             {hasAttoPdfCaricato && (
               <div style={{ border: '1px solid #d8e6f7', borderRadius: 8, padding: 8, background: '#f8fbff', display: 'grid', gap: 6 }}>
                 <div style={{ fontWeight: 800, color: '#0d3b66', fontSize: 13 }}>Documenti dell’Atto di accertamento</div>
@@ -5800,7 +6397,7 @@ function PostAttestazioneIaWorkSection (props: {
         }}>
           <div style={{ fontSize: Number(st.actionBarTitleFontSize ?? 14), fontWeight: 700, color: String(st.actionBarTitleColor || '#111827') }}>Azioni</div>
           <div style={{ display: 'flex', gap: Number(st.actionBarButtonGap ?? 10), flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
-            {props.showIaInfo && (
+            {showDeterminationWorkflow && props.showIaInfo && (
               <span style={{ position: 'relative', display: 'inline-flex' }}>
                 {props.vistoActionPending && !props.saving && <NextActionPulse floating title='Azione successiva: apponi il visto di conformità' />}
                 <button
@@ -5835,7 +6432,11 @@ function PostAttestazioneIaWorkSection (props: {
             </span>
 
             <span style={{ position: 'relative', display: 'inline-flex' }}>
-              {nextIaAction === 'UPLOAD_PDF' && <NextActionPulse floating title={attoWorkflow ? (attoEmailDirettorePreparata ? 'Azione successiva: carica l’Atto firmato digitalmente dal Direttore' : 'Azione successiva: carica il PDF dell’Atto') : (postApprovalProtocolSaved ? 'Azione successiva: carica il PDF definitivo' : 'Azione successiva: carica la bozza PDF')} />}
+              {nextIaAction === 'UPLOAD_PDF' && <NextActionPulse floating title={attoWorkflow
+                ? (attoEmailDirettorePreparata ? 'Azione successiva: carica l’Atto firmato digitalmente dal Direttore' : 'Azione successiva: carica il PDF dell’Atto')
+                : (propostaUfficialeDaAcquisire
+                    ? 'Azione successiva: carica il fascicolo protocollato'
+                    : (postApprovalProtocolSaved ? 'Azione successiva: carica il PDF definitivo' : 'Azione successiva: carica la bozza PDF'))} />}
               <label
                 title={uploadActionTitle}
                 aria-label={uploadActionTitle}
@@ -5846,13 +6447,15 @@ function PostAttestazioneIaWorkSection (props: {
                 <input
                   key={inputKey}
                   type='file'
+                  multiple={!!propostaUfficialeDaAcquisire && !attoWorkflow}
                   disabled={uploadActionDisabled}
                   accept='.pdf,application/pdf'
                   style={{ display: 'none' }}
                   onChange={e => {
-                    const file = e.target.files?.[0] || null
+                    const selectedFiles = Array.from(e.target.files || [])
+                    const file = selectedFiles[0] || null
                     if (attoWorkflow) void uploadAttoContestazionePdf(file)
-                    else if (propostaUfficialeDaAcquisire) void uploadPropostaUfficiale(file)
+                    else if (propostaUfficialeDaAcquisire) void uploadProtocolloFascicolo(selectedFiles)
                     else if (determinazioneUfficialeDaAcquisire) void uploadDeterminazioneUfficiale(file)
                     else void uploadBozzaPdf(file)
                   }}
@@ -6032,7 +6635,7 @@ const DOMICILIO_NOTIFICA_READONLY_INFO = `I dati del domicilio per le notifiche 
 const RAPPRESENTANTE_LEGALE_READONLY_INFO = `I dati del rappresentante legale sono riportati in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
 const ANNOTAZIONI_TI_READONLY_INFO = `Le annotazioni dell’istruttore tecnico sono riportate in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
 const PAYMENT_MODE_INFO = 'Selezionare la modalità di pagamento: pagoPA, bonifico bancario, pagamento misto o altro.'
-const PROTOCOLLO_NOTIFICA_INFO = 'Protocollo e notifica vanno compilati solo dopo la registrazione di numero e data dell’atto di accertamento e contestazione.'
+const PROTOCOLLO_NOTIFICA_INFO = 'Numero e data di protocollo vengono registrati dopo il rientro dell’Atto firmato e la trasmissione al protocollo. Gli estremi della notifica si compilano solo dopo la protocollazione.'
 const RIAPERTURA_INFO = 'La riapertura è di competenza del Responsabile dell’istruttoria amministrativa, su indicazione del Direttore dell’Area Affari Generali e Programmazione Finanziaria a seguito della decisione del CdA. Questa scheda registra gli estremi; la nuova lavorazione sarà gestita secondo l’iter previsto.'
 
 function trasgressoreField (fields: LayerFieldInfo[], candidates: string[]): string | null {
@@ -6224,7 +6827,7 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
 
 function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, showContextualInfo?: boolean, sectionInfo?: React.ReactNode, onChange: (name: string, value: any) => void }) {
   const d = props.data || {}
-  const definitivo = isVerbaleDefinitivo(d)
+  const definitivo = isDeterminazioneAdottata(d) && hasAdminValue(pickAttrCI(d, ['accertamento_numero']))
   const hasVerbale = tipoAttoAmmPrevedeVerbale(d)
   const protocolloNumero = pickAttrCI(d, ['protocollo_atto_accertamento_numero'])
   const protocolloData = pickAttrCI(d, ['protocollo_atto_accertamento_data'])
@@ -6232,10 +6835,14 @@ function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, f
   const esito = notificaEsitoCode(d)
   const perfezionata = isNotificaPerfezionata(d)
   const daRipetere = isNotificaDaRipetere(d)
-  const canEditProtocollo = props.canEdit && definitivo
+  const canEditProtocollo = props.canEdit && definitivo && protocolloCompleto
   const canEditNotifica = canEditProtocollo && protocolloCompleto
   const statoProtocollo = protocolloCompleto ? 'Registrato' : 'Da completare'
   const statoNotifica = esito ? displayAdminFieldValue(d, props.fields, 'notifica_esito') : 'Da registrare'
+
+  // Numero e data di protocollo esistono solo dopo il rientro della copia protocollata.
+  // Prima di quel momento questa sezione non appartiene ancora al lavoro dell'IA.
+  if (!protocolloCompleto) return null
 
   return (
     <Section title='Protocollo e notifica' right={<SectionInfoButton text={props.showContextualInfo && definitivo && !protocolloCompleto ? PROTOCOLLO_NOTIFICA_INFO : null} title='Informazioni protocollo e notifica' />}>
@@ -6260,15 +6867,14 @@ function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, f
 
         <div>
           <div style={{ fontWeight: 900, color: '#0f4c81', marginBottom: 8 }}>Notifica dell’atto</div>
-          {!protocolloCompleto && definitivo && <InfoBox kind='warn'>Completare numero e data di protocollo prima di registrare la notifica.</InfoBox>}
-          <div style={{ marginTop: !protocolloCompleto && definitivo ? 10 : 0 }}>
+          <div>
             <AdminFieldsGrid
               group='notifica'
               draft={d}
               fields={props.fields}
               canEdit={canEditNotifica}
               onChange={props.onChange}
-              fieldNames={NOTIFICA_ATTO_FIELDS}
+              fieldNames={NOTIFICA_ATTO_FIELDS.filter(name => name !== 'notifica_tipo')}
             />
           </div>
         </div>
@@ -6283,53 +6889,67 @@ function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, f
   )
 }
 
-function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, canEditSpeseNotifica: boolean, showContextualInfo?: boolean, sectionInfo?: React.ReactNode, onChange: (name: string, value: any) => void }) {
-  const st = useAdminStyle()
+function PreparazioneNotificaAttoSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
   const d = props.data || {}
-  const mode = getPaymentMode(d, props.fields)
+  const statoAtto = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
+  const attoLocked = ['TRASMESSA_RIA', 'VALIDATA_RIA', EMAIL_DIRETTORE_PREPARATA_STATE].includes(statoAtto) ||
+    hasAdminValue(pickAttrCI(d, ['protocollo_atto_accertamento_numero'])) ||
+    hasAdminValue(pickAttrCI(d, ['protocollo_atto_accertamento_data'])) ||
+    hasAdminValue(pickAttrCI(d, ['notifica_data']))
+  const canEditPreparation = props.canEdit && isDeterminazioneAdottata(d) && !attoLocked
   const snapshot = getPaymentSnapshot(d, props.fields)
-  const showPagoPa = mode === 'PAGOPA' || mode === 'MISTO'
-  const showBonifico = mode === 'BONIFICO' || mode === 'MISTO'
-  const showAltro = mode === 'ALTRO'
-  const statusMismatch = !!snapshot.status && !!snapshot.suggestedStatus && snapshot.status !== snapshot.suggestedStatus
-  const notificationComplete = isNotificaPerfezionata(d)
+
   return (
-    <Section title='Pagamento' right={<SectionInfoButton text={props.showContextualInfo && props.canEdit ? PAYMENT_MODE_INFO : null} title='Informazioni pagamento' />}>
+    <Section title='Preparazione dell’Atto e della notifica'>
       <div style={{ display: 'grid', gap: 12 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10, alignItems: 'stretch' }}>
-          <SpeseNotificaEditor data={d} fields={props.fields} canEdit={props.canEditSpeseNotifica} onChange={props.onChange} />
           <StatusSummaryItem label='Totale da pagare' value={formatEuroText(snapshot.total)} tone='total' />
-          <StatusSummaryItem label='Importo incassato' value={formatEuroText(snapshot.paid)} />
-          <StatusSummaryItem label='Importo residuo' value={formatEuroText(snapshot.residual)} tone={snapshot.residual > 0 ? 'warn' : 'auto'} />
+          <StatusSummaryItem label='Modalità di notifica prevista' value={displayAdminFieldValue(d, props.fields, 'notifica_tipo', 'Da definire')} tone={hasAdminValue(pickAttrCI(d, ['notifica_tipo'])) ? 'auto' : 'warn'} />
         </div>
 
         <div>
-          <div style={{ fontWeight: 900, color: '#0f4c81', marginBottom: 8 }}>Istruzioni di pagamento</div>
+          <div style={{ fontWeight: 900, color: '#0f4c81', marginBottom: 8 }}>Dati da definire prima della bozza</div>
           <AdminFieldsGrid
             group='pagamento'
             draft={d}
             fields={props.fields}
-            canEdit={props.canEdit}
+            canEdit={canEditPreparation}
             onChange={props.onChange}
-            fieldNames={['pagamento_modalita', 'pagamento_scadenza']}
+            fieldNames={['pagamento_modalita']}
           />
         </div>
 
-        {showPagoPa && <details open style={{ border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#e5e7eb'}`, borderRadius: 10, background: st.formExpandableCardBg || '#f9fafb', padding: 10 }}>
-          <summary style={{ cursor: 'pointer', color: st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14), fontWeight: 900 }}>Dati pagoPA</summary>
-          <div style={{ marginTop: 10 }}>
-            <AdminFieldsGrid group='pagamento' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} fieldNames={['pagopa_iuv', 'pagopa_codice_avviso']} />
-          </div>
-        </details>}
+        <SpeseNotificaEditor data={d} fields={props.fields} canEdit={canEditPreparation} onChange={props.onChange} />
 
-        {showBonifico && <details open style={{ border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#e5e7eb'}`, borderRadius: 10, background: st.formExpandableCardBg || '#f9fafb', padding: 10 }}>
-          <summary style={{ cursor: 'pointer', color: st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14), fontWeight: 900 }}>Dati bonifico bancario</summary>
-          <div style={{ marginTop: 10 }}>
-            <AdminFieldsGrid group='bonifico' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
-          </div>
-        </details>}
+        <AdminFieldsGrid
+          group='notifica'
+          draft={d}
+          fields={props.fields}
+          canEdit={canEditPreparation}
+          onChange={props.onChange}
+          fieldNames={['notifica_tipo']}
+        />
+      </div>
+    </Section>
+  )
+}
 
-        {showAltro && <InfoBox>Indicare nel campo note le istruzioni complete per il pagamento.</InfoBox>}
+function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, canEditSpeseNotifica: boolean, showContextualInfo?: boolean, sectionInfo?: React.ReactNode, onChange: (name: string, value: any) => void }) {
+  const d = props.data || {}
+  const snapshot = getPaymentSnapshot(d, props.fields)
+  const notificationComplete = isNotificaPerfezionata(d)
+  const statusMismatch = !!snapshot.status && !!snapshot.suggestedStatus && snapshot.status !== snapshot.suggestedStatus
+  return (
+    <Section title='Pagamento' right={<SectionInfoButton text={props.showContextualInfo && props.canEdit ? 'La modalità e le istruzioni di pagamento sono già definite nella fase Notifica e riportate nell’Atto. Questa scheda registra esclusivamente l’esecuzione del pagamento.' : null} title='Informazioni pagamento' />}>
+      <div style={{ display: 'grid', gap: 12 }}>
+        {!notificationComplete && <InfoBox kind='warn'>Il monitoraggio del pagamento sarà disponibile dopo il perfezionamento della notifica.</InfoBox>}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10, alignItems: 'stretch' }}>
+          <StatusSummaryItem label='Modalità stabilita nell’Atto' value={displayAdminFieldValue(d, props.fields, 'pagamento_modalita', '—')} tone='auto' />
+          <StatusSummaryItem label='Scadenza' value={displayAdminFieldValue(d, props.fields, 'pagamento_scadenza', '—')} tone='auto' />
+          <StatusSummaryItem label='Totale da pagare' value={formatEuroText(snapshot.total)} tone='total' />
+          <StatusSummaryItem label='Importo incassato' value={formatEuroText(snapshot.paid)} />
+          <StatusSummaryItem label='Importo residuo' value={formatEuroText(snapshot.residual)} tone={snapshot.residual > 0 ? 'warn' : 'auto'} />
+        </div>
 
         <div>
           <div style={{ fontWeight: 900, color: '#0f4c81', marginBottom: 8 }}>Monitoraggio del pagamento</div>
@@ -6337,13 +6957,12 @@ function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: La
             group='pagamento'
             draft={d}
             fields={props.fields}
-            canEdit={props.canEdit}
+            canEdit={props.canEdit && notificationComplete}
             onChange={props.onChange}
             fieldNames={['pagamento_stato', 'pagamento_note']}
           />
         </div>
 
-        {snapshot.total > 0 && !notificationComplete && <InfoBox>Le istruzioni di pagamento saranno disponibili dopo la notifica.</InfoBox>}
         {notificationComplete && snapshot.residual > 0 && <InfoBox kind='ok'>Notifica perfezionata. Il pagamento è in monitoraggio fino all’incasso integrale o alla scadenza del termine.</InfoBox>}
         {statusMismatch && <InfoBox kind='warn'>Lo stato registrato non è coerente con i dati disponibili. Stato coerente: <strong>{paymentStatusDisplay(snapshot.suggestedStatus, props.fields)}</strong>.</InfoBox>}
       </div>
@@ -7357,6 +7976,7 @@ function loadAmmPdfJsForVerification (): Promise<any> {
 
 type PdfVerificationContent = {
   text: string
+  protocolSearchText: string
   protocolReferences: Array<{ numero: string, data: string }>
 }
 
@@ -7406,24 +8026,63 @@ async function extractPdfVerificationContent (blob: Blob): Promise<PdfVerificati
   const loadingTask = pdfjs.getDocument({ data: bytes })
   const pdf = await loadingTask.promise
   const pages: string[] = []
+  const protocolPages: string[] = []
   try {
     for (let pageNo = 1; pageNo <= Number(pdf?.numPages || 0); pageNo++) {
       const page = await pdf.getPage(pageNo)
       const content = await page.getTextContent()
       const parts: string[] = []
+      const records: Array<{ str: string; x: number; y: number }> = []
       for (const item of (content?.items || [])) {
         const str = String((item as any)?.str || '')
-        if (str) parts.push(str)
+        if (str) {
+          parts.push(str)
+          const tr = Array.isArray((item as any)?.transform) ? (item as any).transform : []
+          records.push({
+            str,
+            x: Number(tr?.[4]) || 0,
+            y: Number(tr?.[5]) || 0
+          })
+        }
         if ((item as any)?.hasEOL) parts.push(' ')
       }
-      pages.push(parts.join(' '))
+      const raw = parts.join(' ')
+      pages.push(raw)
+
+      // Il timbro di protocollo può essere scritto verticalmente sul margine.
+      // PDF.js conserva le coordinate dei frammenti ma l'ordine dell'array non è
+      // necessariamente quello di lettura. Manteniamo il testo normale per i
+      // confronti documentali e costruiamo, solo per la ricerca del protocollo,
+      // ulteriori ordinamenti spaziali della stessa pagina.
+      const byRows = [...records]
+        .sort((a, b) => Math.abs(b.y - a.y) > 2 ? b.y - a.y : a.x - b.x)
+        .map(r => r.str)
+        .join(' ')
+      const byColumns = [...records]
+        .sort((a, b) => Math.abs(a.x - b.x) > 2 ? a.x - b.x : b.y - a.y)
+        .map(r => r.str)
+        .join(' ')
+      const byColumnsReverse = [...records]
+        .sort((a, b) => Math.abs(a.x - b.x) > 2 ? b.x - a.x : b.y - a.y)
+        .map(r => r.str)
+        .join(' ')
+      const byColumnsBottomUp = [...records]
+        .sort((a, b) => Math.abs(a.x - b.x) > 2 ? a.x - b.x : a.y - b.y)
+        .map(r => r.str)
+        .join(' ')
+      const byColumnsReverseBottomUp = [...records]
+        .sort((a, b) => Math.abs(a.x - b.x) > 2 ? b.x - a.x : a.y - b.y)
+        .map(r => r.str)
+        .join(' ')
+      protocolPages.push([raw, byRows, byColumns, byColumnsReverse, byColumnsBottomUp, byColumnsReverseBottomUp].filter(Boolean).join(' '))
     }
   } finally {
     try { await loadingTask.destroy?.() } catch {}
     try { await pdf.destroy?.() } catch {}
   }
   const text = normalizePdfVerificationText(pages.join(' '))
-  return { text, protocolReferences: extractPropostaProtocolReferences(text) }
+  const protocolSearchText = normalizePdfVerificationText(protocolPages.join(' '))
+  return { text, protocolSearchText, protocolReferences: extractPropostaProtocolReferences(text) }
 }
 
 
@@ -7435,7 +8094,15 @@ const IT_MONTH_INDEX: Record<string, number> = {
 function parseItalianAdministrativeDate (raw: any): number | null {
   const text = normalizePdfVerificationText(raw).replace(/[.,;:]+$/g, '').trim()
   if (!text) return null
-  let m = text.match(/\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\b/)
+  let m = text.match(/\b(\d{4})[\/.\-](\d{1,2})[\/.\-](\d{1,2})\b/)
+  if (m) {
+    const year = Number(m[1])
+    const month = Number(m[2]) - 1
+    const day = Number(m[3])
+    const d = new Date(year, month, day)
+    return Number.isFinite(d.getTime()) && d.getFullYear() === year && d.getMonth() === month && d.getDate() === day ? d.getTime() : null
+  }
+  m = text.match(/\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\b/)
   if (m) {
     let year = Number(m[3])
     if (year < 100) year += 2000
@@ -7466,14 +8133,30 @@ function uniqueAdministrativeMatches<T> (items: T[], key: (item: T) => string): 
 
 type OfficialProtocolMetadata = { numero: string, dataMs: number, dataRaw: string }
 
-function extractOfficialProtocolMetadata (textValue: string): OfficialProtocolMetadata {
+function extractOfficialProtocolCandidates (textValue: string): OfficialProtocolMetadata[] {
   const text = normalizePdfVerificationText(textValue)
   const matches: OfficialProtocolMetadata[] = []
-  const patterns = [
-    /\bprotocollo\s*(?:generale\s*)?(?:n(?:umero)?\.?\s*)?[:#-]?\s*([A-Z0-9][A-Z0-9._\/-]{1,40})\s*(?:del|data)\s*((?:\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})|(?:\d{1,2}\s+(?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+\d{4}))/gi,
-    /\bprot\.?\s*(?:n(?:umero)?\.?\s*)?[:#-]?\s*([A-Z0-9][A-Z0-9._\/-]{1,40})\s*(?:del|data)\s*((?:\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})|(?:\d{1,2}\s+(?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+\d{4}))/gi
+  const datePattern = String.raw`(?:\d{4}[\/.\-]\d{1,2}[\/.\-]\d{1,2})|(?:\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})|(?:\d{1,2}\s+(?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+\d{4})`
+
+  // Timbro marginale restituito dal protocollo CBSM. Esempio reale:
+  //   CBSM - 0 - 1 - 2026-09-09 - 0012958
+  // I due valori intermedi sono codici del sistema di protocollo; gli estremi
+  // utili alla pratica sono la data ISO e l'ultimo valore, cioè il numero.
+  const cbsmStampPattern = /\bCBSM\s*[-–—]\s*\d+\s*[-–—]\s*\d+\s*[-–—]\s*(\d{4}[\/.\-]\d{1,2}[\/.\-]\d{1,2})\s*[-–—]\s*([A-Z0-9][A-Z0-9._\/-]{2,40})\b/gi
+  let cbsmMatch: RegExpExecArray | null = null
+  while ((cbsmMatch = cbsmStampPattern.exec(text)) != null) {
+    const dataRaw = String(cbsmMatch[1] || '').trim()
+    const numero = String(cbsmMatch[2] || '').replace(/[.,;:]+$/g, '').trim()
+    const dataMs = parseItalianAdministrativeDate(dataRaw)
+    if (numero && dataMs != null) matches.push({ numero, dataMs, dataRaw })
+    if (cbsmMatch.index === cbsmStampPattern.lastIndex) cbsmStampPattern.lastIndex++
+  }
+
+  const strictPatterns = [
+    new RegExp(String.raw`\bprotocollo\s*(?:generale\s*)?(?:n(?:umero)?\.?|n[°º])?\s*[:#-]?\s*([A-Z0-9][A-Z0-9._\/-]{1,40})\s*(?:del|data)\s*(${datePattern})`, 'gi'),
+    new RegExp(String.raw`\bprot\.?\s*(?:n(?:umero)?\.?|n[°º])?\s*[:#-]?\s*([A-Z0-9][A-Z0-9._\/-]{1,40})\s*(?:del|data)\s*(${datePattern})`, 'gi')
   ]
-  for (const re of patterns) {
+  for (const re of strictPatterns) {
     let m: RegExpExecArray | null = null
     while ((m = re.exec(text)) != null) {
       const numero = String(m[1] || '').replace(/[.,;:]+$/g, '').trim()
@@ -7483,33 +8166,172 @@ function extractOfficialProtocolMetadata (textValue: string): OfficialProtocolMe
       if (m.index === re.lastIndex) re.lastIndex++
     }
   }
-  const unique = uniqueAdministrativeMatches(matches, x => `${normalizeProtocolVerificationValue(x.numero)}|${new Date(x.dataMs).toISOString().slice(0, 10)}`)
+
+  // Fallback spaziale: il timbro laterale può arrivare da PDF.js come una
+  // sequenza di frammenti separati. Per ogni occorrenza "Prot./Protocollo"
+  // analizziamo una finestra locale e cerchiamo indipendentemente numero e data.
+  const protocolHead = /\b(?:protocollo|prot\.?)(?=\s|[:#\-]|$)/gi
+  let head: RegExpExecArray | null = null
+  while ((head = protocolHead.exec(text)) != null) {
+    const from = Math.max(0, head.index - 80)
+    const to = Math.min(text.length, head.index + 420)
+    const windowText = text.slice(from, to)
+
+    const dateRe = new RegExp(datePattern, 'gi')
+    const dates: Array<{ raw: string; ms: number; index: number }> = []
+    let dm: RegExpExecArray | null = null
+    while ((dm = dateRe.exec(windowText)) != null) {
+      const raw = String(dm[0] || '').trim()
+      const ms = parseItalianAdministrativeDate(raw)
+      if (ms != null) dates.push({ raw, ms, index: dm.index })
+      if (dm.index === dateRe.lastIndex) dateRe.lastIndex++
+    }
+
+    const numberPatterns = [
+      /\b(?:n(?:umero)?\.?|n[°º])\s*[:#-]?\s*([A-Z0-9][A-Z0-9._\/-]{1,40})/gi,
+      /\b(?:protocollo|prot\.?)\s*(?:generale|interno|esterno|entrata|uscita|registrazione)?\s*[:#-]?\s*([0-9][A-Z0-9._\/-]{2,40})/gi
+    ]
+    const numbers: Array<{ raw: string; index: number }> = []
+    for (const nr of numberPatterns) {
+      let nm: RegExpExecArray | null = null
+      while ((nm = nr.exec(windowText)) != null) {
+        const raw = String(nm[1] || '').replace(/[.,;:]+$/g, '').trim()
+        if (raw && /\d/.test(raw) && !/^\d{1,2}$/.test(raw)) numbers.push({ raw, index: nm.index })
+        if (nm.index === nr.lastIndex) nr.lastIndex++
+      }
+    }
+
+    for (const number of numbers) {
+      if (!dates.length) continue
+      const nearest = [...dates].sort((a, b) => Math.abs(a.index - number.index) - Math.abs(b.index - number.index))[0]
+      if (nearest) matches.push({ numero: number.raw, dataMs: nearest.ms, dataRaw: nearest.raw })
+    }
+    if (head.index === protocolHead.lastIndex) protocolHead.lastIndex++
+  }
+
+  return uniqueAdministrativeMatches(matches, x => `${normalizeProtocolVerificationValue(x.numero)}|${new Date(x.dataMs).toISOString().slice(0, 10)}`)
+}
+
+function extractOfficialProtocolMetadata (textValue: string): OfficialProtocolMetadata {
+  const unique = extractOfficialProtocolCandidates(textValue)
   if (unique.length === 0) throw new Error('Nel PDF non sono stati riconosciuti in modo affidabile il numero e la data di protocollo.')
   if (unique.length > 1) throw new Error('Nel PDF sono presenti più riferimenti di protocollo. Non è possibile individuare automaticamente quello ufficiale senza ambiguità.')
   return unique[0]
 }
 
+function extractConsensusOfficialProtocol (contents: PdfVerificationContent[]): OfficialProtocolMetadata {
+  const validContents = (contents || []).filter(Boolean)
+  if (!validContents.length) throw new Error('Nessun PDF disponibile per la lettura del protocollo.')
+
+  const occurrences = new Map<string, { meta: OfficialProtocolMetadata; files: Set<number> }>()
+  validContents.forEach((content, fileIndex) => {
+    const sourceText = content.protocolSearchText || content.text
+    const candidates = extractOfficialProtocolCandidates(sourceText)
+    const seenInFile = new Set<string>()
+    for (const candidate of candidates) {
+      const key = `${normalizeProtocolVerificationValue(candidate.numero)}|${new Date(candidate.dataMs).toISOString().slice(0, 10)}`
+      if (!key || seenInFile.has(key)) continue
+      seenInFile.add(key)
+      const current = occurrences.get(key) || { meta: candidate, files: new Set<number>() }
+      current.files.add(fileIndex)
+      occurrences.set(key, current)
+    }
+  })
+
+  if (!occurrences.size) {
+    throw new Error('Nei PDF caricati non sono stati riconosciuti in modo affidabile il numero e la data di protocollo.')
+  }
+
+  const ranked = Array.from(occurrences.values()).sort((a, b) => b.files.size - a.files.size)
+  const best = ranked[0]
+  const second = ranked[1]
+  const required = validContents.length === 1 ? 1 : Math.max(2, Math.floor(validContents.length / 2) + 1)
+
+  if (!best || best.files.size < required) {
+    throw new Error('Gli estremi di protocollo non risultano coerenti tra gli elaborati caricati.')
+  }
+  if (second && second.files.size === best.files.size) {
+    throw new Error('Sono stati riconosciuti più riferimenti di protocollo con la stessa affidabilità. Verificare i PDF caricati.')
+  }
+  return best.meta
+}
+
+
 type OfficialDeterminationMetadata = { numero: number, dataMs: number, anno: number }
+
+const IT_DAY_WORDS: Record<string, number> = {
+  uno: 1, due: 2, tre: 3, quattro: 4, cinque: 5, sei: 6, sette: 7, otto: 8, nove: 9, dieci: 10,
+  undici: 11, dodici: 12, tredici: 13, quattordici: 14, quindici: 15, sedici: 16, diciassette: 17,
+  diciotto: 18, diciannove: 19, venti: 20, ventuno: 21, ventidue: 22, ventitre: 23, ventitré: 23,
+  ventiquattro: 24, venticinque: 25, ventisei: 26, ventisette: 27, ventotto: 28, ventinove: 29,
+  trenta: 30, trentuno: 31
+}
+
+function parseItalianAdministrativeDay (raw: any): number | null {
+  const text = String(raw ?? '').trim().toLowerCase().replace(/[’']/g, '').replace(/[._-]+$/g, '')
+  if (/^\d{1,2}$/.test(text)) {
+    const n = Number(text)
+    return n >= 1 && n <= 31 ? n : null
+  }
+  const compact = text.replace(/[\s-]+/g, '')
+  return IT_DAY_WORDS[compact] ?? null
+}
+
+function canonicalizeOfficialDeterminationComparisonText (value: string): string {
+  let text = normalizePdfVerificationText(value).replace(/\bBOZZA\b/gi, '').replace(/\s+/g, ' ').trim()
+  // Numero della determinazione: nella copia inviata al Direttore può essere ancora vuoto,
+  // mentre nel PDF ufficiale è valorizzato. È una delle sole variazioni ammesse.
+  text = text.replace(
+    /(\bDETERMINAZIONE\s+DIRIGENZIALE\s+N[°º.]?\s*)(?:\d{1,9})?\s*\/\s*(\d{4})\b/i,
+    (_all, prefix, year) => `${prefix}§NUMERO_DETERMINAZIONE§/${year}`
+  )
+  // Data di adozione: nel template è lasciata in bianco e viene compilata sul documento
+  // ufficiale. Mascheriamo esclusivamente giorno e mese della formula iniziale dell'atto.
+  text = text.replace(
+    /(\bL[’']anno\b.{0,120}?\bil\s+giorno\s+)(?:_+|\d{1,2}|[A-Za-zÀ-ÖØ-öø-ÿ-]+)(\s+del\s+mese\s+di\s+)(?:_+|[A-Za-zÀ-ÖØ-öø-ÿ-]+)/i,
+    (_all, prefix, separator) => `${prefix}§GIORNO_DETERMINAZIONE§${separator}§MESE_DETERMINAZIONE§`
+  )
+  return text
+}
 
 function extractOfficialDeterminationMetadata (textValue: string): OfficialDeterminationMetadata {
   const text = normalizePdfVerificationText(textValue)
-  const matches: OfficialDeterminationMetadata[] = []
-  const re = /\bdeterminazione(?:\s+(?:dirigenziale|del\s+direttore))?\s*(?:n(?:umero)?\.?\s*)?[:#-]?\s*(\d{1,9})(?:\s*\/\s*(\d{4}))?\s*(?:del|in\s+data)\s*((?:\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})|(?:\d{1,2}\s+(?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+\d{4}))/gi
-  let m: RegExpExecArray | null = null
-  while ((m = re.exec(text)) != null) {
-    const numero = Number(m[1])
-    const dataMs = parseItalianAdministrativeDate(m[3])
-    if (Number.isSafeInteger(numero) && numero > 0 && dataMs != null) {
-      const anno = new Date(dataMs).getFullYear()
-      const annoNelNumero = m[2] ? Number(m[2]) : null
-      if (annoNelNumero == null || annoNelNumero === anno) matches.push({ numero, dataMs, anno })
+  const headerMatches: Array<{ numero: number, anno: number, index: number, end: number }> = []
+  const headerRe = /\bDETERMINAZIONE\s+DIRIGENZIALE\s+N[°º.]?\s*(\d{1,9})\s*\/\s*(\d{4})\b/gi
+  let hm: RegExpExecArray | null = null
+  while ((hm = headerRe.exec(text)) != null) {
+    const numero = Number(hm[1])
+    const anno = Number(hm[2])
+    if (Number.isSafeInteger(numero) && numero > 0 && anno >= 2000 && anno <= 2200) {
+      headerMatches.push({ numero, anno, index: hm.index, end: headerRe.lastIndex })
     }
-    if (m.index === re.lastIndex) re.lastIndex++
+    if (hm.index === headerRe.lastIndex) headerRe.lastIndex++
   }
-  const unique = uniqueAdministrativeMatches(matches, x => `${x.numero}|${x.anno}|${new Date(x.dataMs).toISOString().slice(0, 10)}`)
-  if (unique.length === 0) throw new Error('Nel PDF non sono stati riconosciuti in modo affidabile il numero e la data della determinazione.')
-  if (unique.length > 1) throw new Error('Nel PDF sono presenti più estremi di determinazione. Non è possibile individuare automaticamente quelli ufficiali senza ambiguità.')
-  return unique[0]
+  const uniqueHeaders = uniqueAdministrativeMatches(headerMatches, x => `${x.numero}|${x.anno}`)
+  if (uniqueHeaders.length === 0) {
+    throw new Error('Nel PDF non è stato riconosciuto l’estremo della determinazione nell’intestazione “DETERMINAZIONE DIRIGENZIALE N° …/…”.')
+  }
+  if (uniqueHeaders.length > 1) {
+    throw new Error('Nel PDF sono presenti più intestazioni di determinazione. Non è possibile individuare automaticamente quella ufficiale senza ambiguità.')
+  }
+
+  const header = uniqueHeaders[0]
+  // La data propria della determinazione è cercata soltanto nella formula iniziale
+  // “L’anno … il giorno … del mese di …”, così non vengono scambiate per la data
+  // dell’atto le numerose date di leggi e determinazioni richiamate nelle premesse.
+  const localText = text.slice(header.index, Math.min(text.length, header.index + 1200))
+  const adoption = localText.match(/\bL[’']anno\b.{0,140}?\bil\s+giorno\s+([0-9]{1,2}|[A-Za-zÀ-ÖØ-öø-ÿ-]+)\s+del\s+mese\s+di\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\b/i)
+  if (!adoption) {
+    throw new Error('Nel PDF non è stata riconosciuta la data della determinazione nella formula iniziale “L’anno … il giorno … del mese di …”.')
+  }
+  const day = parseItalianAdministrativeDay(adoption[1])
+  const month = IT_MONTH_INDEX[String(adoption[2] || '').toLowerCase()]
+  if (day == null || month == null) throw new Error('La data della determinazione presente nel PDF non è leggibile in modo affidabile.')
+  const date = new Date(header.anno, month, day)
+  if (date.getFullYear() !== header.anno || date.getMonth() !== month || date.getDate() !== day) {
+    throw new Error('La data della determinazione presente nel PDF non è valida.')
+  }
+  return { numero: header.numero, dataMs: date.getTime(), anno: header.anno }
 }
 
 
@@ -7587,6 +8409,204 @@ function candidatePreservesApprovedPdfText (approvedText: string, candidateText:
   if (approvedIndex !== approved.length) return false
   const maxExtras = Math.max(40, Math.ceil(approved.length * 0.12))
   return extras <= maxExtras
+}
+
+
+function normalizeDeterminationCheckText (value: any): string {
+  return normalizePdfVerificationText(value)
+    .toLowerCase()
+    .replace(/[’']/g, "'")
+    .replace(/[–—−]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function pdfContainsReportReference (textValue: string, reportCode: string): boolean {
+  const text = normalizeDeterminationCheckText(textValue).replace(/\s+/g, '')
+  const code = normalizeDeterminationCheckText(reportCode).replace(/\s+/g, '')
+  return !!code && text.includes(code)
+}
+
+function pdfContainsProtocolReference (textValue: string, protocolNumber: any, protocolDate: any): boolean {
+  const number = String(protocolNumber ?? '').trim()
+  const date = toDateObj(protocolDate)
+  if (!number || !date) return true
+  const text = normalizeDeterminationCheckText(textValue)
+  const numberNorm = normalizeDeterminationCheckText(number).replace(/\s+/g, '')
+  const compactText = text.replace(/\s+/g, '')
+  const dateVariants = [
+    date.toLocaleDateString('it-IT'),
+    `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`,
+    `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`
+  ].map(v => normalizeDeterminationCheckText(v).replace(/\s+/g, ''))
+  return compactText.includes(numberNorm) && dateVariants.some(v => v && compactText.includes(v))
+}
+
+function pdfContainsViolationSet (textValue: string, data: any, fields: LayerFieldInfo[]): boolean {
+  const expected = buildViolationRows(data || {}, fields || [])
+    .map(row => normalizeArticleNumber(row?.label))
+    .filter(Boolean)
+  if (!expected.length) return true
+  const text = normalizeDeterminationCheckText(textValue)
+  const matches = Array.from(text.matchAll(/violazione\s+degli?\s+artt?\.?\s*([^.;]{1,120})/gi))
+  if (!matches.length) return false
+  for (const match of matches) {
+    const found = new Set((String(match[1] || '').match(/\b\d{1,2}\b/g) || []).map(n => String(Number(n))))
+    if (expected.every(n => found.has(n))) return true
+  }
+  return false
+}
+
+function pdfContainsTotalAmount (textValue: string, data: any): boolean {
+  const total = Math.max(0, parseNumberInput(pickAttrCI(data || {}, ['pagamento_importo_totale'])) || 0)
+  if (!(total > 0)) return true
+  const text = normalizeDeterminationCheckText(textValue)
+  const amountIt = total.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const escaped = amountIt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\./g, '[.]?')
+  const re = new RegExp(`importo\\s+complessivo[^€]{0,80}€?\\s*${escaped}`, 'i')
+  return re.test(text)
+}
+
+function pdfContainsCoreDeterminationDisposition (textValue: string): boolean {
+  const text = normalizeDeterminationCheckText(textValue)
+  const required = [
+    'di prendere atto del rapporto tecnico di rilevazione',
+    'di approvare la proposta di contestazione',
+    'di disporre che si proceda alla contestazione'
+  ]
+  return required.every(anchor => text.includes(anchor))
+}
+
+function verifyOfficialDeterminationAgainstPractice (textValue: string, data: any, fields: LayerFieldInfo[], oid: number | null): void {
+  const reportCode = getReportCode(data || {}, oid)
+  if (reportCode && !pdfContainsReportReference(textValue, reportCode)) {
+    throw new Error(`Il PDF caricato non contiene il riferimento alla pratica ${reportCode}. Il documento non è stato acquisito.`)
+  }
+  const protocolNumber = pickAttrCI(data || {}, ['protocollo_fascicolo_numero'])
+  const protocolDate = pickAttrCI(data || {}, ['protocollo_fascicolo_data'])
+  if (!pdfContainsProtocolReference(textValue, protocolNumber, protocolDate)) {
+    throw new Error('Il PDF caricato non contiene gli estremi della Proposta protocollata registrati nella pratica. Il documento non è stato acquisito.')
+  }
+  if (!pdfContainsViolationSet(textValue, data, fields)) {
+    throw new Error('Nel PDF non è stato riconosciuto lo stesso insieme di articoli contestati presente nella pratica. Il documento non è stato acquisito.')
+  }
+  if (!pdfContainsTotalAmount(textValue, data)) {
+    throw new Error('Nel PDF non è stato riconosciuto l’importo complessivo registrato nella pratica. Il documento non è stato acquisito.')
+  }
+  if (!pdfContainsCoreDeterminationDisposition(textValue)) {
+    throw new Error('Nel PDF non è stato riconosciuto il dispositivo essenziale della determinazione approvata. Il documento non è stato acquisito.')
+  }
+}
+
+
+function compactAttoCheckText (value: any): string {
+  return normalizePdfVerificationText(value)
+    .toLowerCase()
+    .replace(/[’']/g, "'")
+    .replace(/[–—−‐‑‒]/g, '-')
+    .replace(/[\u0000-\u001f\u007f-\u009f\ufffe\uffff]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function canonicalAttoReferenceToken (value: any): string {
+  return compactAttoCheckText(value).replace(/[^a-z0-9]/g, '')
+}
+
+function attoPdfContainsReferenceToken (candidateText: string, expectedValue: any): boolean {
+  const expected = canonicalAttoReferenceToken(expectedValue)
+  if (!expected) return true
+  return canonicalAttoReferenceToken(candidateText).includes(expected)
+}
+
+function attoSurfaceAliases (raw: any): string[] {
+  const value = String(raw ?? '').trim()
+  if (!value) return []
+  const out = new Set<string>([compactAttoCheckText(value)])
+  if (/^\d+$/.test(value)) {
+    const centiare = Number(value)
+    if (Number.isSafeInteger(centiare) && centiare >= 0) {
+      const ha = Math.floor(centiare / 10000)
+      const are = Math.floor((centiare % 10000) / 100)
+      const ca = centiare % 100
+      out.add(compactAttoCheckText(`${ha}.${String(are).padStart(2, '0')}.${String(ca).padStart(2, '0')}`))
+      out.add(compactAttoCheckText(`${ha}.${String(are).padStart(2, '0')}.${String(ca).padStart(2, '0')} (ha.a.ca)`))
+    }
+  }
+  return Array.from(out).filter(Boolean)
+}
+
+function attoCandidateContainsValue (candidateText: string, value: any, isSurface = false): boolean {
+  const text = compactAttoCheckText(candidateText)
+  const aliases = isSurface ? attoSurfaceAliases(value) : [compactAttoCheckText(value)]
+  return aliases.filter(Boolean).some(alias => text.includes(alias))
+}
+
+function verifyApprovedAttoReplacementAgainstPractice (
+  candidateText: string,
+  data: any,
+  fields: LayerFieldInfo[],
+  oid: number | null,
+  attoNumber: string
+): void {
+  const text = compactAttoCheckText(candidateText)
+  if (!text) throw new Error('Non è stato possibile verificare il contenuto del PDF.')
+  if (/\bbozza\b/i.test(candidateText)) throw new Error('Il PDF contiene ancora la filigrana BOZZA.')
+
+  const reportCode = getReportCode(data || {}, oid)
+  if (reportCode && !attoPdfContainsReferenceToken(candidateText, reportCode)) {
+    throw new Error(`Il PDF non contiene il riferimento al Rapporto ${reportCode}.`)
+  }
+
+  const expectedAtto = String(attoNumber || pickAttrCI(data || {}, ['accertamento_numero']) || '').trim()
+  if (expectedAtto && !attoPdfContainsReferenceToken(candidateText, expectedAtto)) {
+    throw new Error(`Il PDF non contiene il numero dell’Atto atteso (${expectedAtto}).`)
+  }
+
+  const detNumRaw = pickAttrCI(data || {}, ['determinazione_numero'])
+  const detNum = String(detNumRaw ?? '').trim()
+  const detDateObj = toDateObj(pickAttrCI(data || {}, ['determinazione_data']))
+  if (detNum && !text.includes(compactAttoCheckText(detNum))) {
+    throw new Error(`Il PDF non contiene il numero della Determinazione registrata (${detNum}).`)
+  }
+  if (detDateObj) {
+    const variants = [
+      detDateObj.toLocaleDateString('it-IT'),
+      `${String(detDateObj.getDate()).padStart(2, '0')}/${String(detDateObj.getMonth() + 1).padStart(2, '0')}/${detDateObj.getFullYear()}`
+    ].map(compactAttoCheckText)
+    if (!variants.some(v => v && text.includes(v))) {
+      throw new Error(`Il PDF non contiene la data della Determinazione registrata (${detDateObj.toLocaleDateString('it-IT')}).`)
+    }
+  }
+
+  const fatti = String(pickAttrCI(data || {}, ['descrizione_fatti']) ?? '').trim()
+  if (fatti && !text.includes(compactAttoCheckText(fatti))) {
+    throw new Error('I Fatti accertati del PDF non corrispondono al testo dell’istruttoria tecnica approvata.')
+  }
+
+  const rows = buildViolationRows(data || {}, fields || [])
+  for (const row of rows) {
+    const label = compactAttoCheckText(row.label)
+    if (label && !text.includes(label)) {
+      throw new Error(`Nel PDF non è stata riconosciuta la violazione “${row.label}”.`)
+    }
+    for (const detail of row.details || []) {
+      const value = String(detail?.value ?? '').trim()
+      if (!value) continue
+      const surface = /superficie/i.test(String(detail?.label || ''))
+      if (!attoCandidateContainsValue(candidateText, value, surface)) {
+        throw new Error(`Nel PDF non è stato riconosciuto il dato “${detail.label}: ${value}” della violazione ${row.label}.`)
+      }
+    }
+  }
+
+  const total = Math.max(0, parseNumberInput(pickAttrCI(data || {}, ['pagamento_importo_totale'])) || 0)
+  if (total > 0) {
+    const amountIt = total.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    if (!text.includes(compactAttoCheckText(amountIt))) {
+      throw new Error(`Nel PDF non è stato riconosciuto il totale dovuto registrato nella pratica (${amountIt} €).`)
+    }
+  }
 }
 
 async function verifySignedAttoAgainstUnsigned (unsignedBlob: Blob, signedFile: File): Promise<void> {
@@ -7856,6 +8876,27 @@ function downloadBlobFile (blob: Blob, fileName: string): void {
 
 type EmailDraftAttachment = { blob: Blob; fileName: string; contentType?: string }
 
+type ProtocolloFascicoloManifestItem = {
+  index: number
+  fileName: string
+  docKey: string
+  sourceAttachmentId?: number
+  sourceAttachmentKind?: 'technical' | 'administrative'
+  sourceAttachmentName?: string
+  sourceAttachmentKeywords?: string
+}
+
+type ProtocolloFascicoloManifest = {
+  version: 1
+  oid: number
+  reportCode: string
+  createdAt: number
+  items: ProtocolloFascicoloManifestItem[]
+}
+
+type ProtocolloFascicoloEmailAttachment = EmailDraftAttachment & ProtocolloFascicoloManifestItem
+
+
 function sanitizeEmailHeaderText (value: any): string {
   return String(value ?? '').replace(/[\r\n]+/g, ' ').trim()
 }
@@ -8001,16 +9042,89 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
 }
 
 
+async function createProtocolloFascicoloHeadlessMapView (target: any | null): Promise<{ view: any; dispose: () => void } | null> {
+  if (!target || typeof document === 'undefined') return null
+  const container = document.createElement('div')
+  container.setAttribute('data-gii-protocollo-map', '1')
+  Object.assign(container.style, {
+    position: 'fixed',
+    left: '-20000px',
+    top: '0',
+    width: '900px',
+    height: '1200px',
+    opacity: '0.01',
+    pointerEvents: 'none',
+    zIndex: '-1'
+  } as any)
+  document.body.appendChild(container)
+
+  let view: any = null
+  const dispose = () => {
+    try { view?.destroy?.() } catch {}
+    try { container.remove() } catch {}
+  }
+
+  try {
+    const [MapView, Map, WebMap, FeatureLayer] = await Promise.all([
+      loadEsriModule<any>('esri/views/MapView'),
+      loadEsriModule<any>('esri/Map'),
+      loadEsriModule<any>('esri/WebMap').catch((): null => null),
+      loadEsriModule<any>('esri/layers/FeatureLayer')
+    ])
+    const cfg: any = { ...FASCICOLO_MAP_DEFAULTS }
+    let map: any = null
+    if (WebMap && String(cfg.webMapItemId || '').trim()) {
+      try {
+        map = new WebMap({ portalItem: { id: String(cfg.webMapItemId).trim() } })
+        if (typeof map?.loadAll === 'function') await map.loadAll()
+      } catch {
+        map = new Map({ basemap: String(cfg.basemap || 'satellite') })
+      }
+    } else {
+      map = new Map({ basemap: String(cfg.basemap || 'satellite') })
+    }
+
+    const localizationUrl = String(cfg.mapLayerUrl || '').trim()
+    if (localizationUrl && map) {
+      try {
+        const allLayers: any[] = map?.allLayers?.toArray?.() || map?.layers?.toArray?.() || []
+        const normalized = (value: any) => String(value || '').split(/[?#]/)[0].replace(/\/+$/, '').toLowerCase()
+        if (!allLayers.some(layer => normalized(layer?.url) === normalized(localizationUrl))) {
+          map.layers?.add?.(new FeatureLayer({
+            url: localizationUrl,
+            id: String(cfg.mapLayerId || '') || undefined,
+            title: String(cfg.mapLayerTitle || '') || undefined
+          }))
+        }
+      } catch {}
+    }
+
+    try { if (typeof map?.loadAll === 'function') await map.loadAll() } catch {}
+    view = new MapView({
+      container,
+      map,
+      center: target,
+      scale: 1000,
+      ui: { components: [] }
+    })
+    await view.when()
+    return { view, dispose }
+  } catch (e) {
+    dispose()
+    return null
+  }
+}
+
 async function buildProtocolloFascicoloEmailAttachment (
   oid: number,
   ds: any,
   layerUrl: string,
   nsConfig?: { detailUrl?: string, parametriUrl?: string, parametroCode?: string }
 ): Promise<EmailDraftAttachment> {
-  // Rapporto, nota spese e allegati generici passano dallo stesso builder condiviso
-  // del viewer. Proposta e bozza non vengono mai ricostruite: qui si usa il PDF
-  // della Proposta realmente allegato e già verificato nel workflow amministrativo.
-  const items: Array<{ blob: Blob, fileName: string }> = []
+  // Compatibilità con la successiva trasmissione dell'Atto di accertamento:
+  // in quella fase il fascicolo resta un unico allegato, ma viene ricostruito
+  // usando le eventuali versioni protocollate ormai presenti nel viewer.
+  const items: Array<{ blob: Blob; fileName: string }> = []
   const fascicoloTecnico = await buildFascicolo({
     oid,
     selection: {
@@ -8026,9 +9140,11 @@ async function buildProtocolloFascicoloEmailAttachment (
 
   const layer = await resolveLayerForEdit(ds, layerUrl)
   const attachments = await queryAmmAttachments(layer, oid, layerUrl)
-  const propostaAtt = pickLatestGiiAttachment<AmmAttachmentInfo>(attachments.filter(att => isGiiPropostaContestazionePdfAttachment(att as any)))
+  const propostaAtt = pickLatestGiiAttachment<AmmAttachmentInfo>(
+    attachments.filter(att => isGiiPropostaContestazionePdfAttachment(att as any))
+  )
   if (!propostaAtt) {
-    throw new Error('PDF della Proposta di contestazione non disponibile. Impossibile predisporre il fascicolo da protocollare.')
+    throw new Error('PDF della Proposta di contestazione non disponibile. Impossibile predisporre il fascicolo.')
   }
   items.push({
     blob: await fetchAmmAttachmentBlobForPdf(propostaAtt, oid, layerUrl),
@@ -8038,6 +9154,80 @@ async function buildProtocolloFascicoloEmailAttachment (
   const blob = items.length === 1 ? items[0].blob : await mergeFascicoloPdfItems(items)
   return { blob, fileName: fascicoloTecnico.fileName, contentType: 'application/pdf' }
 }
+
+
+async function buildProtocolloFascicoloEmailAttachments (
+  oid: number,
+  ds: any,
+  layerUrl: string,
+  opts: {
+    nsConfig?: { detailUrl?: string, parametriUrl?: string, parametroCode?: string }
+    mapView?: any | null
+    requireMap?: boolean
+  } = {}
+): Promise<ProtocolloFascicoloEmailAttachment[]> {
+  // Il Protocollo riceve un PDF distinto per ogni elaborato. Il builder condiviso
+  // produce Rapporto, Note spese, Mappa e allegati generici nello stesso ordine del viewer.
+  const fascicoloItems = await buildFascicoloItems({
+    oid,
+    selection: {
+      includeTecnici: true,
+      includeMappa: !!opts.requireMap,
+      includeRapporto: true,
+      includeNotaSpese: true
+    },
+    notaSpeseConfig: opts.nsConfig,
+    mapConfig: opts.requireMap && opts.mapView
+      ? {
+          view: opts.mapView,
+          printServiceUrl: DEFAULT_PRINT_SERVICE_URL,
+          mapLocalizationLayerUrl: String(FASCICOLO_MAP_DEFAULTS.mapLayerUrl || '')
+        }
+      : undefined,
+    fileNamePrefix: 'fascicolo_protocollo'
+  })
+
+  if (opts.requireMap && !fascicoloItems.some(item => item.docKey === 'mappa')) {
+    throw new Error('L’elaborato cartografico previsto per la pratica non è stato generato. La trasmissione al protocollo è stata annullata.')
+  }
+
+  const layer = await resolveLayerForEdit(ds, layerUrl)
+  const attachments = await queryAmmAttachments(layer, oid, layerUrl)
+  const propostaAtt = pickLatestGiiAttachment<AmmAttachmentInfo>(attachments.filter(att => isGiiPropostaContestazionePdfAttachment(att as any)))
+  if (!propostaAtt) {
+    throw new Error('PDF della Proposta di contestazione non disponibile. Impossibile predisporre il fascicolo da protocollare.')
+  }
+
+  const propostaBlob = await fetchAmmAttachmentBlobForPdf(propostaAtt, oid, layerUrl)
+  const rawItems: Array<FascicoloPdfItem & { sourceAttachmentName?: string }> = [
+    ...fascicoloItems,
+    {
+      blob: propostaBlob,
+      fileName: String(propostaAtt.name || 'proposta_contestazione.pdf'),
+      docKey: 'proposta',
+      sourceAttachmentId: Number(propostaAtt.id),
+      sourceAttachmentName: String(propostaAtt.name || 'proposta_contestazione.pdf')
+    }
+  ]
+
+  return rawItems.map((item, index) => {
+    const order = String(index + 1).padStart(2, '0')
+    const cleanName = sanitizeEmailFileName(item.fileName || `${item.docKey}.pdf`, `${item.docKey}.pdf`)
+      .replace(/\.pdf$/i, '')
+    return {
+      blob: item.blob,
+      contentType: 'application/pdf',
+      fileName: `${order}_${cleanName}.pdf`,
+      index,
+      docKey: item.docKey,
+      sourceAttachmentId: item.sourceAttachmentId,
+      sourceAttachmentKind: item.sourceAttachmentKind,
+      sourceAttachmentName: item.sourceAttachmentName,
+      sourceAttachmentKeywords: item.sourceAttachmentKeywords
+    }
+  })
+}
+
 
 function FascicoloAmmPreviewSection (props: {
   data: Record<string, any>
@@ -9155,18 +10345,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const headerVerbaleDefinitivo = isVerbaleDefinitivo(viewData || {})
   const headerHasVerbale = tipoAttoAmmPrevedeVerbale(viewData || {})
   const verbaleNotificato = isVerbaleNotificato(viewData || {})
-  const canEditPostApproval = canEdit && headerVerbaleDefinitivo
-  const canEditPostNotification = canEdit && headerVerbaleDefinitivo && verbaleNotificato
+  const canEditPostApproval = canEdit && isDeterminazioneAdottata(viewData || {})
+  const canEditPostNotification = canEdit && verbaleNotificato
   const readOnlySheetInfo = React.useMemo(() => {
     if (!hasSelection || readOnlyBannerBaseMessage) return ''
-    if ((activeAmmSection === 'pagamento' || activeAmmSection === 'notifica') && !headerVerbaleDefinitivo) return POST_APPROVAL_INFO
-    if (activeAmmSection === 'notifica' && headerVerbaleDefinitivo && !canEditPostNotification) return POST_NOTIFICATION_INFO
-    if (['ricorso', 'cda', 'riapertura', 'definizione'].includes(activeAmmSection)) {
-      if (!headerVerbaleDefinitivo) return POST_APPROVAL_INFO
+    if (activeAmmSection === 'notifica' && !isDeterminazioneAdottata(viewData || {})) return 'La fase Notifica è disponibile dopo la registrazione della determinazione adottata.'
+    if (activeAmmSection === 'pagamento' && !canEditPostNotification) return POST_NOTIFICATION_INFO
+        if (['ricorso', 'cda', 'riapertura', 'definizione'].includes(activeAmmSection)) {
       if (!canEditPostNotification) return POST_NOTIFICATION_INFO
     }
     return ''
-  }, [hasSelection, readOnlyBannerBaseMessage, activeAmmSection, headerVerbaleDefinitivo, canEditPostNotification])
+  }, [hasSelection, readOnlyBannerBaseMessage, activeAmmSection, canEditPostNotification, viewData])
   const readOnlyBannerMessage = [readOnlyBannerBaseMessage, readOnlySheetInfo].filter(Boolean).join(' ')
   const [readOnlyBannerMounted, setReadOnlyBannerMounted] = React.useState(false)
   const [readOnlyBannerOpen, setReadOnlyBannerOpen] = React.useState(false)
@@ -9861,9 +11050,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const getCompletionIssues = React.useCallback((source: Record<string, any>): string[] => {
     const current = source || {}
     const issues: string[] = []
-    if (!isVerbaleDefinitivo(current)) issues.push(tipoAttoAmmPrevedeVerbale(current)
-      ? 'Atto di accertamento: numero e data non ancora registrati.'
-      : 'Atto amministrativo: numero e data non ancora registrati.')
+    if (tipoAttoAmmPrevedeVerbale(current) && !hasAdminValue(verbaleNumberValue(current))) issues.push('Atto di accertamento: numero interno non disponibile.')
     if (!hasAdminValue(pickAttrCI(current, ['esito_IA'])) || !hasAdminValue(pickAttrCI(current, ['note_IA', 'note_atto_amm']))) issues.push('Esito verifica dell’Istruttore amministrativo: esito o note non ancora acquisiti.')
     const protocolloNumero = pickAttrCI(current, ['protocollo_atto_accertamento_numero'])
     const protocolloData = pickAttrCI(current, ['protocollo_atto_accertamento_data'])
@@ -9887,10 +11074,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (notificaEsito === 'ALTRO') issues.push('Notifica: registrare un esito conclusivo per proseguire con la fase post-notifica.')
     }
 
-    const approvalMs = dateMsOrNull(verbaleApprovalDateValue(current))
+    const approvalMs = dateMsOrNull(pickAttrCI(current, ['determinazione_data']))
     const protocolloMs = dateMsOrNull(protocolloData)
     const notificaMs = dateMsOrNull(notificaData)
-    if (approvalMs != null && protocolloMs != null && protocolloMs < approvalMs) issues.push('Protocollo: la data non può precedere la data dell’atto di accertamento e contestazione.')
+    if (approvalMs != null && protocolloMs != null && protocolloMs < approvalMs) issues.push('Protocollo: la data non può precedere la data della determinazione adottata.')
     if (protocolloMs != null && notificaMs != null && notificaMs < protocolloMs) issues.push('Notifica: la data non può precedere la data di protocollo dell’atto.')
     const totale = parseNumberInput(pickAttrCI(current, ['pagamento_importo_totale'])) || 0
     if (totale > 0) {
@@ -9984,7 +11171,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     const propostaApprovataRia = isPropostaContestazioneApprovedByRia(base)
     if (propostaApprovataRia && (!hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_numero'])) || !hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_data'])))) {
-      setDialog({ kind: 'warn', title: 'Protocollo fascicolo incompleto', text: 'Acquisire prima la Proposta protocollata.' })
+      setDialog({ kind: 'warn', title: 'Protocollo fascicolo incompleto', text: 'Acquisire prima il fascicolo protocollato.' })
       return
     }
     const currentStato = String(pickAttrCI(base, ['determinazione_stato']) || '').trim().toUpperCase()
@@ -10379,22 +11566,73 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     const statoDeterminazione = String(pickAttrCI(base, ['determinazione_stato']) || '').trim().toUpperCase()
     if (statoDeterminazione === 'FASCICOLO_TRASMESSO_PROTOCOLLO') {
-      setDialog({ kind: 'warn', title: 'Fascicolo già trasmesso', text: 'Fascicolo già trasmesso al protocollo.' })
-      return
+      try {
+        const { attachments } = await getEmailAttachmentContext()
+        const hasManifest = attachments.some(att => isGiiProtocolloFascicoloManifestAttachment(att as any))
+        if (hasManifest) {
+          setDialog({ kind: 'warn', title: 'Fascicolo già trasmesso', text: 'Fascicolo già trasmesso al protocollo. La composizione della trasmissione corrente è già registrata.' })
+          return
+        }
+        // Pratica legacy: la trasmissione è stata predisposta prima della nuova architettura.
+        // Si consente di ricreare l'e-mail e registrare il manifest senza retrocedere lo stato.
+      } catch (e: any) {
+        setDialog({ kind: 'err', title: 'Impossibile verificare la trasmissione', text: e?.message || String(e) })
+        return
+      }
     }
 
     setSaving(true)
     try {
       const { layer, layerUrl } = await getEmailAttachmentContext()
       const numero = getReportCode(base, Number(oid))
-      const fascicolo = await buildProtocolloFascicoloEmailAttachment(Number(oid), active?.ds, layerUrl, {
-        detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || ''),
-        parametriUrl: String((cfg as any).nsParametriUrl || ''),
-        parametroCode: String((cfg as any).nsParametroCode || 'SPESE_GENERALI_PERC')
-      })
+      const requireMap = computeReqPoint(base) === 1
+      const mapTarget = requireMap
+        ? await queryPointGeometryForAmm(active?.ds, Number(oid), active?.idFieldName || 'OBJECTID', layerUrl)
+        : null
+      if (requireMap && !mapTarget) {
+        throw new Error('La pratica richiede l’elaborato cartografico, ma non è disponibile una geometria valida. La trasmissione al protocollo è stata annullata.')
+      }
+
+      const mapSession = requireMap ? await createProtocolloFascicoloHeadlessMapView(mapTarget) : null
+      if (requireMap && !mapSession) {
+        throw new Error('Non è stato possibile predisporre l’elaborato cartografico. La trasmissione al protocollo è stata annullata.')
+      }
+
+      let protocolloAttachments: ProtocolloFascicoloEmailAttachment[] = []
+      try {
+        protocolloAttachments = await buildProtocolloFascicoloEmailAttachments(Number(oid), active?.ds, layerUrl, {
+          nsConfig: {
+            detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || ''),
+            parametriUrl: String((cfg as any).nsParametriUrl || ''),
+            parametroCode: String((cfg as any).nsParametroCode || 'SPESE_GENERALI_PERC')
+          },
+          mapView: mapSession?.view || null,
+          requireMap
+        })
+      } finally {
+        try { mapSession?.dispose?.() } catch {}
+      }
+
+      const manifest: ProtocolloFascicoloManifest = {
+        version: 1,
+        oid: Number(oid),
+        reportCode: String(numero || ''),
+        createdAt: Date.now(),
+        items: protocolloAttachments.map(att => ({
+          index: att.index,
+          fileName: att.fileName,
+          docKey: att.docKey,
+          sourceAttachmentId: att.sourceAttachmentId,
+          sourceAttachmentKind: att.sourceAttachmentKind,
+          sourceAttachmentName: att.sourceAttachmentName,
+          sourceAttachmentKeywords: att.sourceAttachmentKeywords
+        }))
+      }
+      await saveProtocolloFascicoloManifest(layer, Number(oid), layerUrl, manifest)
+
       const subject = `Protocollazione fascicolo - Rapporto tecnico n. ${numero || '—'}`
       const bodyLines = [
-        `Si trasmette in allegato il fascicolo relativo al Rapporto tecnico n. ${numero || '—'}, ai fini della protocollazione.`,
+        `Si trasmettono in allegato gli elaborati del fascicolo relativo al Rapporto tecnico n. ${numero || '—'}, ai fini della protocollazione.`,
         '',
         'Cordiali saluti.'
       ]
@@ -10405,7 +11643,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         to: protocolloTo,
         subject,
         body: bodyLines.join('\n'),
-        attachments: [fascicolo],
+        attachments: protocolloAttachments,
         fileName: `email_protocollo_${String(numero || oid).replace(/[^a-zA-Z0-9_-]/g, '_')}.eml`
       })
 
@@ -10447,9 +11685,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       await refreshDs(active.ds, props.id)
       setInitialDraft(prev => ({ ...(prev || {}), [statoField]: 'FASCICOLO_TRASMESSO_PROTOCOLLO' }))
       setDraft(prev => ({ ...(prev || {}), [statoField]: 'FASCICOLO_TRASMESSO_PROTOCOLLO' }))
+      setLiveRefreshVersion(v => v + 1)
       try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-fascicolo-trasmesso-protocollo', ts: Date.now() } })) } catch {}
 
-      setDialog({ kind: 'ok', title: 'E-mail preparata', text: 'E-mail al protocollo predisposta.' })
+      setDialog({ kind: 'ok', title: 'E-mail preparata', text: statoDeterminazione === 'FASCICOLO_TRASMESSO_PROTOCOLLO' ? 'E-mail al protocollo ricreata. La nuova composizione del fascicolo è stata registrata.' : 'E-mail al protocollo predisposta.' })
     } catch (e: any) {
       setDialog({ kind: 'err', title: 'Impossibile preparare l’e-mail', text: e?.message || String(e) })
     } finally {
@@ -10472,7 +11711,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return
     }
     if (!hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_numero'])) || !hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_data']))) {
-      setDialog({ kind: 'warn', title: 'Protocollo fascicolo incompleto', text: 'Acquisire prima la Proposta protocollata.' })
+      setDialog({ kind: 'warn', title: 'Protocollo fascicolo incompleto', text: 'Acquisire prima il fascicolo protocollato.' })
       return
     }
     const protocolloFascicoloSalvato =
@@ -10613,6 +11852,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       } catch {}
 
       if (!isDeterminazioneAdottata(liveAttrs)) throw new Error('Registrare prima numero e data della determinazione adottata.')
+      const paymentModeForAtto = getPaymentMode(liveAttrs, fields)
+      if (!paymentModeForAtto) throw new Error('Definire prima la modalità di pagamento nella scheda Notifica.')
+      if (!hasAdminValue(pickAttrCI(liveAttrs, ['notifica_tipo']))) throw new Error('Definire prima la modalità prevista per la notifica.')
       const numeroAtto = String(pickAttrCI(liveAttrs, ['accertamento_numero']) || '').trim()
       if (!numeroAtto) throw new Error('Numero dell’Atto non disponibile. Registrare prima gli estremi della determinazione.')
       if (
@@ -10632,8 +11874,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const layerUrl = normalizeEditLayerUrl(layer?.url || active?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
       const existingAttachments = await queryAmmAttachments(layer, Number(oid), layerUrl)
       const existingAttoPdfs = existingAttachments.filter(isGiiAttoContestazionePdfAttachment)
-      const legacyDirectPdf = statoCorrente === 'ADOTTATA' && existingAttoPdfs.length > 0 && hasAdminValue(pickAttrCI(liveAttrs, ['accertamento_data']))
-      if (existingAttoPdfs.length && !legacyDirectPdf && !postRiApproved) {
+      if (existingAttoPdfs.length && !postRiApproved) {
         throw new Error('Eliminare prima il PDF già presente.')
       }
 
@@ -10665,9 +11906,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
       if (!postRiApproved) {
         put('determinazione_stato', 'BOZZA')
-        // Le patch sperimentali 141-144 valorizzavano accertamento_data al semplice
-        // generarsi del PDF. Nel nuovo flusso quella data nascerà solo dopo la firma del DA.
-        if (legacyDirectPdf) put('accertamento_data', null)
         put('esito_RIA', null)
         put('dt_esito_RIA', null)
         put('note_RIA', null)
@@ -10685,11 +11923,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         }
       }
 
-      if (legacyDirectPdf) {
-        for (const oldAtt of existingAttoPdfs) {
-          try { await deleteAmmAttachment(layer, Number(oid), Number(oldAtt.id), layerUrl) } catch {}
-        }
-      }
 
       const next = { ...liveAttrs, ...cleanAttrs }
       const changedFields = Object.keys(cleanAttrs).filter(k => k !== idName)
@@ -10953,6 +12186,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         throw new Error('Il protocollo dell’Atto di accertamento risulta già registrato.')
       }
 
+      const paymentMode = getPaymentMode(liveAttrs, fields)
+      if (!hasAdminValue(pickAttrCI(liveAttrs, ['pagamento_scadenza']))) {
+        throw new Error('Completare la scadenza del pagamento prima della trasmissione al protocollo.')
+      }
+      const pagoPaAttachments = attachments.filter(isGiiPagoPaAttachment)
+      if (['PAGOPA', 'MISTO'].includes(paymentMode) && !pagoPaAttachments.length) {
+        throw new Error('Caricare il bollettino pagoPA prima della trasmissione al protocollo.')
+      }
+
       const signedAtt = pickLatestGiiAttachment(attachments.filter(isSignedAttoContestazioneAttachment) as any[]) as AmmAttachmentInfo | null
       if (!signedAtt) throw new Error('PDF firmato digitalmente dal Direttore non disponibile.')
       const signedBlob = await fetchAmmAttachmentBlobForPdf(signedAtt, Number(oid), layerUrl)
@@ -10961,7 +12203,21 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
 
       const numeroRapporto = getReportCode(liveAttrs, Number(oid))
-      const emailAttachment = await buildEmailAttachmentFromAmmAttachment(signedAtt, Number(oid), layerUrl)
+      const attoEmailAttachment = await buildEmailAttachmentFromAmmAttachment(signedAtt, Number(oid), layerUrl)
+      const fascicoloEmailAttachment = await buildProtocolloFascicoloEmailAttachment(
+        Number(oid),
+        active?.ds,
+        layerUrl,
+        {
+          detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || ''),
+          parametriUrl: String((cfg as any).nsParametriUrl || ''),
+          parametroCode: String((cfg as any).nsParametroCode || 'SPESE_GENERALI_PERC')
+        }
+      )
+      const pagoPaEmailAttachments: EmailDraftAttachment[] = []
+      for (const att of pagoPaAttachments) {
+        pagoPaEmailAttachments.push(await buildEmailAttachmentFromAmmAttachment(att, Number(oid), layerUrl))
+      }
       const subject = `Protocollazione Atto di accertamento ${numeroAtto} - Rapporto tecnico n. ${numeroRapporto || '—'}`
       const body = [
         `Si trasmette in allegato l’Atto di accertamento ${numeroAtto} relativo al Rapporto tecnico n. ${numeroRapporto || '—'}, firmato digitalmente dal Direttore, ai fini della protocollazione per la successiva notificazione al trasgressore.`,
@@ -10975,21 +12231,21 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         to: protocolloTo,
         subject,
         body,
-        attachments: [emailAttachment],
+        attachments: [attoEmailAttachment, fascicoloEmailAttachment, ...pagoPaEmailAttachments],
         fileName: `email_protocollo_atto_${String(numeroAtto || numeroRapporto || oid).replace(/[^a-zA-Z0-9_-]/g, '_')}.eml`
       })
 
       setDialog({
         kind: 'ok',
         title: 'E-mail preparata',
-        text: 'Il file .eml per il protocollo è stato generato con l’Atto di accertamento firmato allegato. Quando rientra la copia protocollata, caricarla con la normale azione di caricamento: sostituirà il firmato e numero/data di protocollo saranno acquisiti automaticamente.'
+        text: 'Il file .eml per il protocollo è stato generato con l’Atto firmato, il fascicolo e gli eventuali bollettini pagoPA. Quando rientra la copia protocollata, caricarla con la normale azione di caricamento: numero e data di protocollo saranno acquisiti automaticamente.'
       })
     } catch (e: any) {
       setDialog({ kind: 'err', title: 'Impossibile preparare l’e-mail', text: e?.message || String(e) })
     } finally {
       setSaving(false)
     }
-  }, [active, canEdit, currentRole, getEmailAttachmentContext, hasSelection, initialDraft, isDirty, layerFields, oid])
+  }, [active, canEdit, cfg, currentRole, getEmailAttachmentContext, hasSelection, initialDraft, isDirty, layerFields, oid])
 
   const handleSave = async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
@@ -11037,7 +12293,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           throw new Error('Operazione non consentita per il profilo corrente.')
         }
         const statoCorrente = String(pickAttrCI(initialDraft, ['determinazione_stato']) || '').trim().toUpperCase()
-        if (statoCorrente !== EMAIL_DIRETTORE_PREPARATA_STATE && statoCorrente !== 'ADOTTATA') {
+        // Distinguere la prima registrazione dalla semplice correzione dell'archivio.
+        // Una determina è già adottata anche quando il workflow è proseguito alle fasi
+        // dell'Atto e determinazione_stato non contiene più letteralmente ADOTTATA:
+        // numero + data registrati sono la fonte stabile per riconoscerla.
+        const wasAlreadyAdopted = isDeterminazioneAdottata(initialDraft || {})
+        if (!wasAlreadyAdopted && statoCorrente !== EMAIL_DIRETTORE_PREPARATA_STATE) {
           throw new Error('Predisporre prima l’e-mail al Direttore.')
         }
         if (hasAdminValue(pickAttrCI(initialDraft, ['accertamento_data'])) ||
@@ -11055,6 +12316,26 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         if (!Number.isSafeInteger(determinationNumber) || determinationNumber <= 0) throw new Error('Inserire un numero di determinazione valido e maggiore di zero.')
         const determinationYear = new Date(dateMs).getFullYear()
         if (!Number.isFinite(determinationYear) || determinationYear < 2000 || determinationYear > 2200) throw new Error('La data della determinazione non è valida.')
+
+        // Numero e data diventano definitivi solo dopo l'acquisizione della copia PDF conforme
+        // che riporta esattamente gli stessi estremi. I metadati verificati sono
+        // conservati nelle keywords dell'allegato per impedire modifiche dei campi tra
+        // la verifica del PDF e il salvataggio della determinazione adottata.
+        const determinationLayerUrl = normalizeEditLayerUrl(
+          layer?.url || active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)
+        )
+        const determinationAttachments = await queryAmmAttachments(layer, Number(oid), determinationLayerUrl)
+        const expectedDateKey = dateInputValue(dateMs)
+        const matchingOfficialPdf = determinationAttachments.find(att =>
+          isOfficialDeterminationAttachment(att) &&
+          ammAttachmentKeywordValue(att, 'detNumber') === String(determinationNumber) &&
+          ammAttachmentKeywordValue(att, 'detDate') === expectedDateKey
+        )
+        if (!matchingOfficialPdf) {
+          throw new Error(
+            `Caricare prima la copia PDF conforme della determinazione e verificarne gli estremi (n. ${determinationNumber} del ${new Date(dateMs).toLocaleDateString('it-IT')}).`
+          )
+        }
 
         const numberField = realFieldName(fields, 'determinazione_numero')
         const dateField = realFieldName(fields, 'determinazione_data')
@@ -11094,11 +12375,16 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         const derivedAccertamentoNumber = `A-${determinationNumber}/${determinationYear}`
         attrs[numberField] = numericField ? determinationNumber : String(determinationNumber)
         attrs[dateField] = dateMs
-        attrs[stateField] = 'ADOTTATA'
         attrs[accertamentoNumberField] = derivedAccertamentoNumber
-        if (registeredAtField) attrs[registeredAtField] = Date.now()
-        if (registeredByField) attrs[registeredByField] = profile.fullName || profile.username || ''
-        determinationSaveMeta = { derivedAccertamentoNumber, wasAlreadyAdopted: statoCorrente === 'ADOTTATA' }
+        if (!wasAlreadyAdopted) {
+          // Solo la prima registrazione conclude il ciclo della determinazione.
+          // La sostituzione del PDF archiviato non deve riportare indietro o alterare
+          // lo stato del workflow dell'Atto eventualmente già in corso.
+          attrs[stateField] = 'ADOTTATA'
+          if (registeredAtField) attrs[registeredAtField] = Date.now()
+          if (registeredByField) attrs[registeredByField] = profile.fullName || profile.username || ''
+        }
+        determinationSaveMeta = { derivedAccertamentoNumber, wasAlreadyAdopted }
       }
       let prevRecordAttrs = { ...(initialDraft || {}) }
       try {
@@ -11178,7 +12464,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }, [cfg])
 
-  const verificationHasSeparateActionPanel = hasSelection && activeAmmSection === 'verifica_istruttoria'
+  const workflowHasSeparateActionPanel = hasSelection && (activeAmmSection === 'verifica_istruttoria' || activeAmmSection === 'notifica')
 
   const wrapperStyle: React.CSSProperties = {
     width: '100%',
@@ -11187,10 +12473,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     flexDirection: 'column',
     minHeight: 0,
     boxSizing: 'border-box',
-    background: verificationHasSeparateActionPanel ? 'transparent' : String(adminStyle.maskBg || '#eef4fb'),
-    border: verificationHasSeparateActionPanel ? 'none' : `${Number(adminStyle.maskBorderWidth ?? 1)}px solid ${adminStyle.maskBorderColor || '#cbd8e6'}`,
-    borderRadius: verificationHasSeparateActionPanel ? 0 : Number(adminStyle.maskBorderRadius ?? 10),
-    padding: verificationHasSeparateActionPanel ? 0 : Number(adminStyle.maskInnerPadding ?? 12),
+    background: workflowHasSeparateActionPanel ? 'transparent' : String(adminStyle.maskBg || '#eef4fb'),
+    border: workflowHasSeparateActionPanel ? 'none' : `${Number(adminStyle.maskBorderWidth ?? 1)}px solid ${adminStyle.maskBorderColor || '#cbd8e6'}`,
+    borderRadius: workflowHasSeparateActionPanel ? 0 : Number(adminStyle.maskBorderRadius ?? 10),
+    padding: workflowHasSeparateActionPanel ? 0 : Number(adminStyle.maskInnerPadding ?? 12),
     overflow: 'hidden',
     color: '#111827',
     fontFamily: 'inherit',
@@ -11263,8 +12549,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const determinationToolbarDateMs = dateMsOrNull(pickAttrCI(draft, ['determinazione_data']))
   const determinationToolbarComplete = /^\d+$/.test(determinationToolbarNumberText) && determinationToolbarDateMs != null
   const iaVistoGuidePending = currentRole === 'IA' && canEdit && isIaVistoActionPending(viewData || {})
-  const pulseSaveProtocol = currentRole === 'IA' && !iaVistoGuidePending && !saveDisabled && toolbarDeterminationState === 'FASCICOLO_TRASMESSO_PROTOCOLLO' && protocolDraftComplete && !protocolSavedComplete
-  const pulseSaveDetermination = currentRole === 'IA' && !iaVistoGuidePending && !saveDisabled && determinationIsDirty && determinationToolbarComplete && (toolbarDeterminationState === EMAIL_DIRETTORE_PREPARATA_STATE || toolbarDeterminationState === 'ADOTTATA')
+  // La guida di salvataggio appartiene esclusivamente all'Iter approvativo.
+  // Dopo la separazione Iter/Notifica non deve "trapelare" sulla scheda Notifica.
+  const iterToolbarGuideActive = activeAmmSection === 'verifica_istruttoria'
+  const pulseSaveProtocol = iterToolbarGuideActive && currentRole === 'IA' && !iaVistoGuidePending && !saveDisabled && toolbarDeterminationState === 'FASCICOLO_TRASMESSO_PROTOCOLLO' && protocolDraftComplete && !protocolSavedComplete
+  const pulseSaveDetermination = iterToolbarGuideActive && currentRole === 'IA' && !iaVistoGuidePending && !saveDisabled && determinationIsDirty && determinationToolbarComplete && (toolbarDeterminationState === EMAIL_DIRETTORE_PREPARATA_STATE || toolbarDeterminationState === 'ADOTTATA')
   const pulseSave = pulseSaveDetermination || pulseSaveProtocol
   const pulseSaveTitle = pulseSaveDetermination ? 'Azione successiva: salva numero e data della determina' : 'Azione successiva: salva numero e data di protocollo'
 
@@ -11386,7 +12675,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           }}
         />
       )}
-      <div style={verificationHasSeparateActionPanel ? verificationMainPanelStyle : { display: 'contents' }}>
+      <div style={workflowHasSeparateActionPanel ? verificationMainPanelStyle : { display: 'contents' }}>
         <div style={{
           flex: '0 0 auto',
           position: 'relative',
@@ -11567,16 +12856,58 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     ds={(active as any)?.ds}
                     layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}
                     actionBarTarget={verificationActionBarTarget}
+                    workflowScope='approvazione'
+                    bozzaRefreshKey={String(liveRefreshVersion)}
                   />
                 </>
               )}
 
               {activeAmmSection === 'pagamento' && (
-                <PagamentoGuidatoSection data={viewData || {}} fields={layerFields} canEdit={canEditPostApproval} canEditSpeseNotifica={canEditPostApproval} showContextualInfo={showContextualSectionInfo} onChange={onFieldChange} />
+                <PagamentoGuidatoSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} canEditSpeseNotifica={canEditPostNotification} showContextualInfo={showContextualSectionInfo} onChange={onFieldChange} />
               )}
 
               {activeAmmSection === 'notifica' && (
                 <>
+                  <PreparazioneNotificaAttoSection data={viewData || {}} fields={layerFields} canEdit={canEditPostApproval} onChange={onFieldChange} />
+                  <PostAttestazioneIaWorkSection
+                    data={viewData || {}}
+                    savedData={initialDraft || {}}
+                    fields={layerFields}
+                    canEdit={canEdit && (currentRole === 'IA' || currentRole === 'ADMIN')}
+                    role={currentRole}
+                    showIaInfo={currentRole === 'IA' && canEdit}
+                    saving={saving}
+                    onChange={onFieldChange}
+                    actionBarTarget={verificationActionBarTarget}
+                    vistoActionPending={false}
+                    onApplyAttestation={setPendingAttestationText}
+                    onGenerateBozzaDeterminazioneWord={handleGenerateBozzaDeterminazioneWord}
+                    onDeleteBozzaDeterminazione={handleDeleteBozzaDeterminazione}
+                    onTransmitBozzaDeterminazioneRia={handleTransmitBozzaDeterminazioneRia}
+                    onPrepareEmailDirettore={handlePrepareEmailDirettore}
+                    onPrepareEmailProtocollo={handlePrepareEmailProtocollo}
+                    onGenerateAttoContestazioneWord={handleGenerateAttoContestazioneWord}
+                    attoCleanWordGeneratedAfterApproval={
+                      !!attoCleanWordGeneratedMarker &&
+                      Number(oid) === attoCleanWordGeneratedMarker.oid &&
+                      String(pickAttrCI(viewData || {}, ['determinazione_stato']) || '').trim().toUpperCase() === 'VALIDATA_RIA'
+                    }
+                    onTransmitAttoContestazioneRia={handleTransmitAttoContestazioneRia}
+                    onPrepareEmailAttoDirettore={handlePrepareEmailAttoDirettore}
+                    onPrepareEmailAttoProtocollo={handlePrepareEmailAttoProtocollo}
+                    canEditDetermination={false}
+                    oid={oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null}
+                    ds={(active as any)?.ds}
+                    layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}
+                    workflowScope='notifica'
+                    bozzaRefreshKey={[
+                      oid ?? '',
+                      pickAttrCI(viewData || {}, ['determinazione_stato']) ?? '',
+                      pickAttrCI(viewData || {}, ['dt_esito_RIA']) ?? '',
+                      pickAttrCI(viewData || {}, ['protocollo_atto_accertamento_numero']) ?? '',
+                      pickAttrCI(viewData || {}, ['protocollo_atto_accertamento_data']) ?? ''
+                    ].join('|')}
+                  />
                   <ProtocolloNotificaGuidataSection data={viewData || {}} fields={layerFields} canEdit={canEditPostApproval} showContextualInfo={showContextualSectionInfo} onChange={onFieldChange} />
                   <ChiusuraIstruttoriaSummary
                     data={viewData || {}}
@@ -11656,9 +12987,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       </div>
       </div>
 
-      {hasSelection && activeAmmSection === 'verifica_istruttoria' && (
+      {hasSelection && (activeAmmSection === 'verifica_istruttoria' || activeAmmSection === 'notifica') && (
         <div
-          data-gii-editing-amm-verifica-actions-footer='1'
+          data-gii-editing-amm-workflow-actions-footer='1'
           style={{
             flex: '0 0 auto',
             width: '100%',

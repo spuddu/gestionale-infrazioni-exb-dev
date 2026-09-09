@@ -17,7 +17,7 @@ import { buildPlaceholderMap, type UtenteCached } from './documenti-tecnici/rapp
 import { applyNotaSpeseQueryResultToRapportoMap, queryNotaSpeseRowsForPractice, buildArt30RapportoSummary, type NotaSpeseConfig } from './documenti-tecnici/rapporto/rapporto-nota-spese-summary'
 import { buildRapportoPdf, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf } from './documenti-tecnici/rapporto/rapporto-pdf-builder'
 import { buildNotaSpesePdf, type NotaSpeseData } from './documenti-tecnici/rapporto/notaspese-pdf-builder'
-import { getGiiAttachmentKind, isGiiSpecialAdministrativeAttachment } from './allegati/gii-attachment-viewer'
+import { getGiiAttachmentKind, getGiiProtocolloFascicoloDocIndex, getGiiProtocolloFascicoloDocKey, isGiiProtocolloFascicoloPdfAttachment, isGiiSpecialAdministrativeAttachment } from './allegati/gii-attachment-viewer'
 import { RAPPORTO_TECHNICAL_BODY_BOX, drawRapportoTechnicalHeadersByPage, attachmentTechnicalDocumentTitle, wrapMapPdfBlobWithRapportoTechnicalHeader } from './documenti-tecnici/rapporto/technical-document-header'
 import { listGiiPrintableMapLayers, ensureGiiPrintableMapLayersReady, computePrintExtentForView, buildGiiMapLegendItemsForView, type GiiPrintableMapLayerItem } from './viewer-documenti/map-layers'
 
@@ -67,6 +67,16 @@ export type FascicoloBuildParams = {
 }
 
 type AttachmentInfo = { id: number, name: string, contentType: string, url?: string, keywords?: string }
+
+export type FascicoloPdfItem = {
+  blob: Blob
+  fileName: string
+  docKey: string
+  sourceAttachmentId?: number
+  sourceAttachmentKind?: 'technical' | 'administrative'
+  sourceAttachmentName?: string
+  sourceAttachmentKeywords?: string
+}
 
 function pickAttrCI (data: any, names: string[]): any {
   if (!data) return null
@@ -195,8 +205,8 @@ function isRecuperableTesseraMetaRowFascicolo (row: any): boolean {
     !!String(row?.riferimento_attrezzatura_id || '').trim()
 }
 
-async function buildRapportoSection (attrs: Record<string, any>, notaSpeseConfig: NotaSpeseConfig | undefined, selection: FascicoloDocumentSelection): Promise<Array<{ blob: Blob, fileName: string }>> {
-  const items: Array<{ blob: Blob, fileName: string }> = []
+async function buildRapportoSection (attrs: Record<string, any>, notaSpeseConfig: NotaSpeseConfig | undefined, selection: FascicoloDocumentSelection): Promise<FascicoloPdfItem[]> {
+  const items: FascicoloPdfItem[] = []
   const emptyNsQueryResult = { rowsByCategory: {} as any, percentualeSpeseGenerali: 15 }
   const [utentiCache, cicli, nsQueryResult] = await Promise.all([
     ensureUtentiCache(),
@@ -211,7 +221,7 @@ async function buildRapportoSection (attrs: Record<string, any>, notaSpeseConfig
   const base = String(map.cod_pratica || 'rapporto').replace(/[^a-zA-Z0-9_-]/g, '_')
   if (selection.includeRapporto !== false) {
     const rapportoBytes = await buildRapportoPdf(map)
-    items.push({ blob: new Blob([rapportoBytes as any], { type: 'application/pdf' }), fileName: `rapporto_tecnico_${base}.pdf` })
+    items.push({ blob: new Blob([rapportoBytes as any], { type: 'application/pdf' }), fileName: `rapporto_tecnico_${base}.pdf`, docKey: 'rapporto' })
   }
 
   if (selectedGroups.length) {
@@ -256,7 +266,7 @@ async function buildRapportoSection (attrs: Record<string, any>, notaSpeseConfig
       } as any
       const bytes = await buildNotaSpesePdf(nsData)
       const suffix = groupHasRealRaRows ? '_risarcimento_attrezzature' : (selectedGroups.length > 1 ? `_nota_${i + 1}` : '')
-      items.push({ blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `nota_spese_${base}${suffix}.pdf` })
+      items.push({ blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `nota_spese_${base}${suffix}.pdf`, docKey: `nota_spese:${i + 1}:${String(group.codiceCasistica || '').replace(/[^a-zA-Z0-9_-]/g, '_')}` })
     }
   }
   return items
@@ -293,30 +303,29 @@ async function normalizeAttachmentImageBytes (bytes: Uint8Array, isPng: boolean)
   }
 }
 
-async function buildAllegatiSection (oid: number, selection: FascicoloDocumentSelection, numeroRapportoTecnico: string): Promise<{ blob: Blob, fileName: string } | null> {
+async function buildAllegatiItems (oid: number, selection: FascicoloDocumentSelection, numeroRapportoTecnico: string): Promise<FascicoloPdfItem[]> {
   const { attachments: allRaw, resolvedUrl } = await queryFascicoloAttachments(oid)
   const all = allRaw.filter(a => !isGeneratedAdminDocument(a))
   const selected = selection.selectedAttachmentIds ? all.filter(a => selection.selectedAttachmentIds!.includes(a.id)) : all
-  if (!selected.length) return null
-
-  const out = await PDFDocument.create()
-  let added = 0
+  const items: FascicoloPdfItem[] = []
+  let globalPageIndex = 0
   let imageIndex = 0
-  const pageTitles: string[] = []
-  const technicalPageIndexes = new Set<number>()
+
   for (const att of selected) {
     const blob = await fetchAttachmentBlob(att, oid, resolvedUrl)
     const bytes = new Uint8Array(await blob.arrayBuffer())
     const attachmentKind = getGiiAttachmentKind(att as any)
     const isTechnicalAttachment = attachmentKind === 'technical'
+    const out = await PDFDocument.create()
+    let added = 0
+    let technicalImageTitle = ''
+
     if (att.contentType.toLowerCase().includes('pdf') || att.name.toLowerCase().endsWith('.pdf')) {
       const src = await PDFDocument.load(bytes)
       const pages = await out.copyPages(src, src.getPageIndices())
       pages.forEach(pg => {
         out.addPage(pg)
-        if (isTechnicalAttachment) technicalPageIndexes.add(added)
         added++
-        pageTitles.push('')
       })
     } else if (isImageAttachment(att)) {
       imageIndex++
@@ -331,22 +340,36 @@ async function buildAllegatiSection (oid: number, selection: FascicoloDocumentSe
       const w = img.width * scale
       const h = img.height * scale
       page.drawImage(img, { x: box.x + (box.width - w) / 2, y: box.y + (box.height - h) / 2, width: w, height: h })
-      if (isTechnicalAttachment) technicalPageIndexes.add(added)
-      pageTitles.push(isTechnicalAttachment ? attachmentTechnicalDocumentTitle(imageIndex, numeroRapportoTecnico) : '')
-      added++
+      technicalImageTitle = isTechnicalAttachment ? attachmentTechnicalDocumentTitle(imageIndex, numeroRapportoTecnico) : ''
+      added = 1
     }
+
+    if (!added) continue
+    if (isTechnicalAttachment) {
+      const pageOffset = globalPageIndex
+      await drawRapportoTechnicalHeadersByPage(
+        out,
+        localIndex => technicalImageTitle || attachmentTechnicalDocumentTitle(pageOffset + localIndex + 1, numeroRapportoTecnico)
+      )
+    }
+    globalPageIndex += added
+
+    const outBytes = await out.save()
+    const baseName = String(att.name || `allegato_${att.id}`)
+      .replace(/\.[^.]+$/, '')
+      .replace(/[^a-zA-Z0-9_.-]/g, '_')
+      .replace(/^_+|_+$/g, '') || `allegato_${att.id}`
+    items.push({
+      blob: new Blob([outBytes as any], { type: 'application/pdf' }),
+      fileName: `allegato_${att.id}_${baseName}.pdf`,
+      docKey: `allegato:${att.id}`,
+      sourceAttachmentId: att.id,
+      sourceAttachmentKind: attachmentKind === 'administrative' ? 'administrative' : 'technical',
+      sourceAttachmentName: att.name,
+      sourceAttachmentKeywords: att.keywords
+    })
   }
-  if (!added) return null
-  if (technicalPageIndexes.size) {
-    await drawRapportoTechnicalHeadersByPage(
-      out,
-      index => pageTitles[index] || attachmentTechnicalDocumentTitle(index + 1, numeroRapportoTecnico),
-      undefined,
-      index => technicalPageIndexes.has(index)
-    )
-  }
-  const bytes = await out.save()
-  return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `allegati_${numeroRapportoTecnico}.pdf`.replace(/[^a-zA-Z0-9_.-]/g, '_') }
+  return items
 }
 
 function normalizeArcgisLayerUrl (raw?: string | null): string {
@@ -428,7 +451,7 @@ async function buildMappaSection (
   geometry: any | null,
   mapConfig: { printServiceUrl?: string, mapLayerVisibility?: Record<string, boolean>, mapBasemap?: string, mapScale?: number, mapLayout?: string, mapLocalizationLayerUrl?: string } | undefined,
   numeroRapportoTecnico: string
-): Promise<{ blob: Blob, fileName: string } | null> {
+): Promise<FascicoloPdfItem | null> {
   const serviceUrl = String(mapConfig?.printServiceUrl || '').trim()
   if (!view || !geometry || !serviceUrl) {
     return null
@@ -581,7 +604,7 @@ async function buildMappaSection (
         legendItems,
         sourceLayout: opts.mapLayout
       })
-      return { blob: wrapped, fileName: `mappa_${numeroRapportoTecnico}.pdf`.replace(/[^a-zA-Z0-9_.-]/g, '_') }
+      return { blob: wrapped, fileName: `mappa_${numeroRapportoTecnico}.pdf`.replace(/[^a-zA-Z0-9_.-]/g, '_'), docKey: 'mappa' }
     } finally {
       if (printMarker && view?.graphics) {
         try { view.graphics.remove(printMarker) } catch {}
@@ -608,31 +631,104 @@ function getNumeroRapportoTecnico (attrs: Record<string, any>): string {
 }
 
 /**
+ * Restituisce gli elaborati del fascicolo come PDF distinti e nello stesso ordine
+ * in cui vengono poi uniti dal viewer. Dopo il rientro dal Protocollo, eventuali
+ * snapshot protocollati di Rapporto / Note spese / Mappa sostituiscono la
+ * rigenerazione dinamica: il fascicolo riaperto resta quindi integralmente
+ * protocollato e non diventa un ibrido.
+ */
+export async function buildFascicoloItems (params: FascicoloBuildParams): Promise<FascicoloPdfItem[]> {
+  const { attrs, geometry } = await queryFascicoloRecord(params.oid)
+  const numeroRapportoTecnico = getNumeroRapportoTecnico(attrs)
+  const items: FascicoloPdfItem[] = []
+
+  const { attachments: rawAttachments, resolvedUrl } = await queryFascicoloAttachments(params.oid)
+  const protocolSnapshots = rawAttachments
+    .filter(att => isGiiProtocolloFascicoloPdfAttachment(att as any))
+    .sort((a, b) => {
+      const ai = getGiiProtocolloFascicoloDocIndex(a as any)
+      const bi = getGiiProtocolloFascicoloDocIndex(b as any)
+      if (ai !== bi) return ai - bi
+      return Number(a.id) - Number(b.id)
+    })
+
+  const latestSnapshotByKey = new Map<string, AttachmentInfo>()
+  for (const att of protocolSnapshots) {
+    const key = getGiiProtocolloFascicoloDocKey(att as any)
+    if (!key) continue
+    const current = latestSnapshotByKey.get(key)
+    if (!current || Number(att.id) > Number(current.id)) latestSnapshotByKey.set(key, att)
+  }
+
+  const snapshotItem = async (att: AttachmentInfo, fallbackKey: string): Promise<FascicoloPdfItem> => ({
+    blob: await fetchAttachmentBlob(att, params.oid, resolvedUrl),
+    fileName: String(att.name || `${fallbackKey}.pdf`),
+    docKey: getGiiProtocolloFascicoloDocKey(att as any) || fallbackKey
+  })
+
+  if (params.selection.includeTecnici) {
+    const representedKeys = new Set<string>()
+    const protocolRapporto = latestSnapshotByKey.get('rapporto')
+    const protocolNotaItems = protocolSnapshots.filter(att => getGiiProtocolloFascicoloDocKey(att as any).startsWith('nota_spese:'))
+    const needsGeneratedRapporto = params.selection.includeRapporto !== false && !protocolRapporto
+    const needsGeneratedNote = params.selection.includeNotaSpese !== false && protocolNotaItems.length === 0
+    const generatedRapportoItems = (needsGeneratedRapporto || needsGeneratedNote)
+      ? await buildRapportoSection(attrs, params.notaSpeseConfig, {
+          ...params.selection,
+          includeRapporto: needsGeneratedRapporto,
+          includeNotaSpese: needsGeneratedNote
+        })
+      : []
+
+    if (params.selection.includeRapporto !== false && protocolRapporto) {
+      items.push(await snapshotItem(protocolRapporto, 'rapporto'))
+      representedKeys.add('rapporto')
+    }
+
+    for (const generated of generatedRapportoItems) {
+      representedKeys.add(generated.docKey)
+      items.push(generated)
+    }
+
+    // Dopo la protocollazione le snapshot sono la fonte di verità del fascicolo:
+    // non rigeneriamo Note spese già protocollate dalle tabelle correnti.
+    if (params.selection.includeNotaSpese !== false && protocolNotaItems.length) {
+      for (const snap of protocolNotaItems) {
+        const key = getGiiProtocolloFascicoloDocKey(snap as any)
+        if (!key || representedKeys.has(key)) continue
+        items.push(await snapshotItem(snap, key))
+        representedKeys.add(key)
+      }
+    }
+
+    const wantsMappa = params.selection.includeMappa !== false
+    if (wantsMappa) {
+      const protocolMap = latestSnapshotByKey.get('mappa')
+      if (protocolMap) {
+        items.push(await snapshotItem(protocolMap, 'mappa'))
+      } else {
+        const mappaItem = await buildMappaSection(params.mapConfig?.view, geometry, params.mapConfig, numeroRapportoTecnico)
+        if (mappaItem) items.push(mappaItem)
+      }
+    }
+
+    const allegatiItems = await buildAllegatiItems(params.oid, params.selection, numeroRapportoTecnico)
+    allegatiItems.forEach(item => items.push(item))
+  }
+
+  if (!items.length) throw new Error('Nessun documento selezionato da includere nel fascicolo.')
+  return items
+}
+
+/**
  * Punto unico di generazione del fascicolo documentale, richiamato dal viewer
  * condiviso dei due editor. Il builder riceve l'OID e le opzioni selezionate,
  * mentre i dati della pratica vengono riletti dalla fonte unica.
  */
 export async function buildFascicolo (params: FascicoloBuildParams): Promise<{ blob: Blob, fileName: string }> {
-  const { attrs, geometry } = await queryFascicoloRecord(params.oid)
+  const { attrs } = await queryFascicoloRecord(params.oid)
   const numeroRapportoTecnico = getNumeroRapportoTecnico(attrs)
-  const items: Array<{ blob: Blob, fileName: string }> = []
-
-  if (params.selection.includeTecnici) {
-    const rapportoItems = await buildRapportoSection(attrs, params.notaSpeseConfig, params.selection)
-    rapportoItems.forEach(item => items.push(item))
-
-    const wantsMappa = params.selection.includeMappa !== false
-    if (wantsMappa) {
-      const mappaItem = await buildMappaSection(params.mapConfig?.view, geometry, params.mapConfig, numeroRapportoTecnico)
-      if (mappaItem) items.push(mappaItem)
-    }
-
-    const allegatiItem = await buildAllegatiSection(params.oid, params.selection, numeroRapportoTecnico)
-    if (allegatiItem) items.push(allegatiItem)
-  }
-
-  if (!items.length) throw new Error('Nessun documento selezionato da includere nel fascicolo.')
-
+  const items = await buildFascicoloItems(params)
   const blob = items.length === 1 ? items[0].blob : await mergeFascicoloPdfItems(items)
   const prefix = params.fileNamePrefix || 'fascicolo'
   const safe = String(numeroRapportoTecnico || params.oid).replace(/[^a-zA-Z0-9_-]/g, '_')

@@ -124,6 +124,62 @@ function euroLine (label: string, value: string): string {
   const cleanValue = clean(value)
   return cleanValue && cleanValue !== '—' ? `${label}: ${cleanValue}` : ''
 }
+function numberValue (raw: any): number | null {
+  if (raw == null || raw === '') return null
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null
+  const text = String(raw).trim().replace(/\s*€\s*$/i, '').replace(/\./g, '').replace(',', '.')
+  const n = Number(text)
+  return Number.isFinite(n) ? n : null
+}
+function moneyText (value: number): string {
+  return `${Number(value || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+}
+
+function formatAttoSurfaceCentiare (raw: any): string {
+  const text = String(raw ?? '').trim()
+  if (!/^\d+$/.test(text)) return text
+  const centiare = Number(text)
+  if (!Number.isSafeInteger(centiare) || centiare < 0) return text
+  const ha = Math.floor(centiare / 10000)
+  const are = Math.floor((centiare % 10000) / 100)
+  const ca = centiare % 100
+  return `${ha}.${String(are).padStart(2, '0')}.${String(ca).padStart(2, '0')} (ha.a.ca)`
+}
+
+function formatAttoViolationSurfaces (value: string): string {
+  return String(value || '').replace(
+    /(•\s*Superficie[^:\n]*:\s*)(\d+)(?=\s*(?:\n|$))/gi,
+    (_all, prefix, raw) => `${prefix}${formatAttoSurfaceCentiare(raw)}`
+  )
+}
+function isCheckedFlag (raw: any): boolean {
+  const normalized = String(raw ?? '').trim().toLowerCase()
+  return raw === true || raw === 1 || normalized === '1' || normalized === 'si' || normalized === 'sì' || normalized === 'true'
+}
+function notaSpeseTotalFromData (data: any, equipmentAmountToExclude = 0): number | null {
+  const componentNames = [
+    'ns_totale_attrezzature_trasporti',
+    'ns_totale_materiali_costruzione',
+    'ns_totale_manodopera',
+    'ns_totale_semilavorati',
+    'ns_totale_prodotti_finiti',
+    'ns_importo_spese_generali'
+  ]
+  const componentValues = componentNames.map(name => numberValue(pickAttrCI(data || {}, [name])))
+  // I subtotali AT/PR/RU/SL/PF + spese generali rappresentano esattamente la
+  // voce "a piè di lista" e NON comprendono le righe RA dell'Art. 30.
+  // Se i campi sono presenti, anche tutti a zero, sono quindi la fonte preferita.
+  if (componentValues.some(value => value != null)) {
+    return Math.round(componentValues.reduce((sum, value) => sum + (value != null && Number.isFinite(value) ? value : 0), 0) * 100) / 100
+  }
+  let total = numberValue(pickAttrCI(data || {}, ['ns_totale_complessivo']))
+  if (total == null || !Number.isFinite(total)) return null
+  // Compatibilità con alcuni dati storici/di passaggio memorizzati in centesimi interi.
+  if (Number.isInteger(total) && total >= 10000 && total % 100 !== 0) total = Math.round(total) / 100
+  // Il totale complessivo della Nota spese può comprendere anche il risarcimento
+  // attrezzature (categoria RA): nell'Atto quella voce è esposta separatamente.
+  return Math.max(0, Math.round((total - Math.max(0, equipmentAmountToExclude || 0)) * 100) / 100)
+}
 function actTitle (m: Record<string, string>): string {
   const n = clean(m.accertamento_numero) || 'A-___/____'
   const tipo = clean(m.tipo_atto_amm).toUpperCase()
@@ -241,13 +297,57 @@ function buildLastPageFooter (tokens: Record<string, string>): string {
     `</w:p>` +
     `</w:ftr>`
 }
+function normalizeNotificationTypeForAtto (data: any, m: Record<string, string>): string {
+  const explicit = clean(pickAttrCI(data || {}, ['notifica_tipo'])).toUpperCase()
+  if (explicit) return explicit
+  // Default concordato: PEC se disponibile nell'istruttoria; in assenza, Raccomandata A/R.
+  return clean(m.pec) ? 'PEC' : 'RAC_AR'
+}
+
+function patchModInvioSelection (xml: string, notificationType: string): string {
+  const selectedLabel = notificationType === 'PEC'
+    ? 'P.E.C.'
+    : notificationType === 'RAC_AR'
+      ? 'Raccom. A/R'
+      : notificationType === 'CONSEGNA_MANO'
+        ? 'A Mano'
+        : ''
+
+  const labels = ['Racc.', 'Raccom. A/R', 'Corriere', 'Telematica', 'Posta P.', 'Fax', 'P.E.C.', 'A Mano']
+  let out = xml
+  for (const label of labels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    // Il modello storico contiene due copie AlternateContent dello stesso riquadro.
+    // Per ogni etichetta sostituiamo il marcatore immediatamente precedente con x/□.
+    const re = new RegExp(`(<w:t[^>]*>)(?:x|□)(<\\/w:t>(?:(?!<w:t[^>]*>(?:x|□)<\\/w:t>)[\\s\\S]){0,900}?<w:t[^>]*>\\s*${escaped}<\\/w:t>)`, 'g')
+    out = out.replace(re, `$1${label === selectedLabel ? 'x' : '□'}$2`)
+  }
+  return out
+}
+
 function buildTokens (data: any, fields: any[], profile: { username: string, fullName: string }, options?: AttoContestazioneDocxOptions): Record<string, string> {
   const m = buildVerbalePdfMap(data, fields as any, profile)
   const isPg = clean(m.trasgressore_tipo).toUpperCase() === 'PG'
+  const equipmentAmount = numberValue(clean(m.attrezzature_importo_netto) || clean(m.attrezzature_risarcimento_importo))
+  const notaSpeseTotal = notaSpeseTotalFromData(data, equipmentAmount || 0)
+  const hasNotaSpeseArticle = ['v_art08', 'v_art27', 'v_art30', 'v_art39'].some(name => isCheckedFlag(pickAttrCI(data || {}, [name])))
+  const risarcimentoAggregato = numberValue(m.risarcimento_danni_importo)
+  // La voce amministrativa risarcimento_danni_importo può comprendere anche le spese
+  // a piè di lista. Nell'Atto le separiamo, come nella Proposta, senza alterare il totale.
+  const risarcimentoDanniNetto = risarcimentoAggregato != null
+    ? Math.max(0, Math.round((risarcimentoAggregato - (notaSpeseTotal || 0)) * 100) / 100)
+    : null
   const amounts = [
     euroLine('Sanzione pecuniaria', clean(m.sanzione_importo_base) || clean(m.sanzione_importo_ridotta)),
-    euroLine('Rimborso attrezzature', clean(m.attrezzature_importo_netto) || clean(m.attrezzature_risarcimento_importo)),
-    euroLine('Risarcimento danni', clean(m.risarcimento_danni_importo)),
+    (hasNotaSpeseArticle || (notaSpeseTotal != null && notaSpeseTotal > 0))
+      ? euroLine('Rimborso spese a piè di lista', moneyText(notaSpeseTotal || 0))
+      : '',
+    equipmentAmount != null && equipmentAmount > 0
+      ? euroLine('Risarcimento attrezzature', moneyText(equipmentAmount))
+      : '',
+    risarcimentoDanniNetto != null && risarcimentoDanniNetto > 0
+      ? euroLine('Risarcimento danni', moneyText(risarcimentoDanniNetto))
+      : '',
     euroLine('Spese di notifica', clean(m.sanzione_spese_notifica)),
     euroLine('Totale dovuto', clean(m.pagamento_importo_totale))
   ].filter(Boolean)
@@ -268,8 +368,8 @@ function buildTokens (data: any, fields: any[], profile: { username: string, ful
     '{{OGGETTO}}': actTitle(m),
     '{{RIFERIMENTI}}': `Rapporto tecnico di rilevazione n. ${clean(m.n_rapporto) || '—'} – Determinazione n. ${clean(m.determinazione_numero) || '—'} del ${clean(m.determinazione_data) || '—'}`,
     '{{INTRODUZIONE}}': introText(m),
-    '{{FATTI}}': `Fatti accertati\n${clean(m.descrizione_fatti) || '[DA COMPLETARE]'}`,
-    '{{VIOLAZIONI}}': `Violazioni contestate\n${clean(m.violazioni) || '[DA COMPLETARE]'}`,
+    '{{FATTI}}': `Fatti accertati\n${clean(m.descrizione_fatti) || '[NON VALORIZZATI NEL RAPPORTO TECNICO APPROVATO]'}`,
+    '{{VIOLAZIONI}}': `Violazioni contestate\n${formatAttoViolationSurfaces(clean(m.violazioni)) || '[DA COMPLETARE]'}`,
     '{{IMPORTI}}': `Importi\n${amounts.length ? amounts.join('\n') : 'Nessun importo da corrispondere.'}`,
     '{{PAGAMENTO}}': paymentText(m),
     '{{AVVERTENZE}}': 'Avvertenze e strumenti di tutela\n[DA COMPLETARE/VERIFICARE PRIMA DELLA NOTIFICA]',
@@ -301,10 +401,13 @@ export function getAttoContestazioneDocxFileName (data: any): string {
 export async function buildAttoContestazioneDocx (data: any, fields: any[], profile: { username: string, fullName: string }, options?: AttoContestazioneDocxOptions): Promise<Uint8Array> {
   const entries = readZipStored(base64ToBytes(ATTO_CONTESTAZIONE_TEMPLATE_DOCX_B64))
   const tokens = buildTokens(data, fields, profile, options)
+  const mapForNotification = buildVerbalePdfMap(data, fields as any, profile)
+  const notificationType = normalizeNotificationTypeForAtto(data, mapForNotification)
   const patched = entries.map(entry => {
     if (entry.name === 'word/document.xml') {
       let xml = readUtf8(entry.data)
       Object.entries(tokens).forEach(([token, value]) => { xml = replaceToken(xml, token, value) })
+      xml = patchModInvioSelection(xml, notificationType)
       return { name: entry.name, data: utf8(xml) }
     }
     if (entry.name === 'docProps/core.xml') return { name: entry.name, data: utf8(patchCoreProps(readUtf8(entry.data), profile.fullName || profile.username)) }

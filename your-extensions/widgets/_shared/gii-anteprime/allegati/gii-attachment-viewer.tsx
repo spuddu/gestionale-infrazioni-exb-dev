@@ -23,7 +23,7 @@ export type GiiAttachmentViewerItem = {
   readOnlyReason?: string
 }
 
-export type GiiAttachmentKind = 'technical' | 'administrative' | 'bozza-determinazione' | 'proposta-contestazione' | 'atto-contestazione' | 'internal-reference'
+export type GiiAttachmentKind = 'technical' | 'administrative' | 'bozza-determinazione' | 'proposta-contestazione' | 'atto-contestazione' | 'protocol-fascicolo' | 'internal-reference'
 
 export const GII_ATTACHMENT_KEYWORDS = {
   technical: 'GII_ALLEGATO_TECNICO',
@@ -33,7 +33,9 @@ export const GII_ATTACHMENT_KEYWORDS = {
   propostaContestazione: 'GII_PROPOSTA_CONTESTAZIONE_PDF',
   attoFinale: 'GII_ATTO_FINALE_PDF', // compatibilità con le patch sperimentali 141-144
   attoContestazione: 'GII_ATTO_CONTESTAZIONE_PDF',
-  approvedBozzaReference: 'GII_BOZZA_APPROVATA_RIA_REFERENCE'
+  approvedBozzaReference: 'GII_BOZZA_APPROVATA_RIA_REFERENCE',
+  protocolloFascicoloPdf: 'GII_PROTOCOLLO_FASCICOLO_PDF',
+  protocolloFascicoloManifest: 'GII_PROTOCOLLO_FASCICOLO_MANIFEST'
 } as const
 
 function normalizeGiiAttachmentText (value?: string): string {
@@ -52,8 +54,14 @@ function attachmentKeywordHas (item: GiiAttachmentViewerItem | null | undefined,
 
 export function getGiiAttachmentKind (item: GiiAttachmentViewerItem | null | undefined): GiiAttachmentKind {
   const nameKey = normalizeGiiAttachmentText((item as any)?.name)
-  if (attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.approvedBozzaReference)) {
+  if (
+    attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.approvedBozzaReference) ||
+    attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.protocolloFascicoloManifest)
+  ) {
     return 'internal-reference'
+  }
+  if (attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.protocolloFascicoloPdf)) {
+    return 'protocol-fascicolo'
   }
   if (
     attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.bozzaDeterminazione) ||
@@ -76,12 +84,12 @@ export function getGiiAttachmentKind (item: GiiAttachmentViewerItem | null | und
 }
 
 export function isGiiApprovedBozzaReferenceAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
-  return !!item && getGiiAttachmentKind(item) === 'internal-reference'
+  return !!item && attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.approvedBozzaReference)
 }
 
 export function isGiiSpecialAdministrativeAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
   const kind = getGiiAttachmentKind(item)
-  return kind === 'bozza-determinazione' || kind === 'proposta-contestazione' || kind === 'atto-contestazione' || kind === 'internal-reference'
+  return kind === 'bozza-determinazione' || kind === 'proposta-contestazione' || kind === 'atto-contestazione' || kind === 'protocol-fascicolo' || kind === 'internal-reference'
 }
 
 export function isGiiBozzaDeterminazionePdfAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
@@ -102,6 +110,39 @@ export function isGiiPropostaContestazionePdfAttachment (item: GiiAttachmentView
 
 export function isGiiAttoContestazionePdfAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
   return getGiiAttachmentKind(item) === 'atto-contestazione' && !!item && isPdfAttachment(item)
+}
+
+export function isGiiProtocolloFascicoloPdfAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
+  return getGiiAttachmentKind(item) === 'protocol-fascicolo' && !!item && isPdfAttachment(item)
+}
+
+export function isGiiProtocolloFascicoloManifestAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
+  return !!item && attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.protocolloFascicoloManifest)
+}
+
+export function giiAttachmentKeywordValue (item: GiiAttachmentViewerItem | null | undefined, key: string): string {
+  if (!item || !key) return ''
+  const wanted = String(key).trim().toLowerCase()
+  for (const raw of String(item.keywords || '').split(/[|;]+/)) {
+    const part = String(raw || '').trim()
+    const eq = part.indexOf('=')
+    if (eq <= 0) continue
+    if (part.slice(0, eq).trim().toLowerCase() === wanted) {
+      const value = part.slice(eq + 1).trim()
+      try { return decodeURIComponent(value) } catch { return value }
+    }
+  }
+  return ''
+}
+
+export function getGiiProtocolloFascicoloDocKey (item: GiiAttachmentViewerItem | null | undefined): string {
+  if (!isGiiProtocolloFascicoloPdfAttachment(item)) return ''
+  return giiAttachmentKeywordValue(item, 'protocolDocKey')
+}
+
+export function getGiiProtocolloFascicoloDocIndex (item: GiiAttachmentViewerItem | null | undefined): number {
+  const raw = Number(giiAttachmentKeywordValue(item, 'protocolDocIndex'))
+  return Number.isFinite(raw) && raw >= 0 ? Math.trunc(raw) : Number.MAX_SAFE_INTEGER
 }
 
 export const isGiiAttoFinalePdfAttachment = isGiiAttoContestazionePdfAttachment

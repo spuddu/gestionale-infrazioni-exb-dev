@@ -285,7 +285,7 @@ function buildDefaultOggetto (data: any): string {
   const d = data || {}
   const ragioneSociale = String(pickAttrCI(d, ['ragione_sociale']) || '').trim()
   const trasgressore = ragioneSociale || joinParts(String(pickAttrCI(d, ['cognome']) || ''), String(pickAttrCI(d, ['nome']) || ''))
-  return `Contestazione di infrazione alle “Norme generali sulla distribuzione dell’acqua ad uso irriguo”, approvate con deliberazione del C.d.D. n. 016 del 02.12.2019${trasgressore ? ` – Ditta “${trasgressore}”` : ''}.`
+  return `Contestazione di infrazione alle “Norme generali sulla distribuzione dell’acqua ad uso irriguo”, approvate con deliberazione del Consiglio dei Delegati n. 7 del 28 giugno 2024${trasgressore ? ` – Ditta “${trasgressore}”` : ''}.`
 }
 
 export function buildBozzaDeterminazioneMap (data: any, profile: { username: string, fullName: string }): Record<string, string> {
