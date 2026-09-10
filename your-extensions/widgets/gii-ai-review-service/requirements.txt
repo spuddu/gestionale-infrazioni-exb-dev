@@ -1,0 +1,4 @@
+azure-functions>=1.21.3
+azure-identity>=1.19.0
+openai>=2.0.0
+pydantic>=2.8.2

@@ -21,6 +21,8 @@ import { getGiiPracticeContextStamp, isGiiPracticeContextStampCurrent, isGiiPrac
 const LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 const GII_ATTIVITA_CORRENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_ATTIVITA_CORRENTI/FeatureServer/0'
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
+const GII_VIEW_PAGAMENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_PAGAMENTI/FeatureServer/0'
+const GII_VIEW_EDIT_PAGAMENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EDIT_PAGAMENTI/FeatureServer/0'
 const NOTA_SPESE_DETTAGLIO_VIEW_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_NOTA_SPESE_DETTAGLIO/FeatureServer/0'
 
 function loadEsriModule<T = any> (path: string): Promise<T> {
@@ -2171,6 +2173,520 @@ function extractPagoPaDeadlineMs (textRaw: string): number {
   return dt.getTime()
 }
 
+
+type GiiPaymentPosition = {
+  objectId: number
+  globalId: string
+  attributes: Record<string, any>
+  attachments: AmmAttachmentInfo[]
+}
+
+type GiiPagoPaExtractedData = {
+  scadenzaMs: number | null
+  importo: number | null
+  iuv: string
+  codiceAvviso: string
+}
+
+const GII_PAYMENT_DOCUMENT_KEYWORD = 'GII_PAGAMENTO_DOCUMENTO'
+const GII_PAYMENT_LAYER_CACHE: Record<string, any> = {}
+
+function giiPaymentLayerUrl (editable: boolean): string {
+  return editable ? GII_VIEW_EDIT_PAGAMENTI_URL : GII_VIEW_PAGAMENTI_URL
+}
+
+async function getGiiPaymentLayer (editable: boolean): Promise<any> {
+  const url = giiPaymentLayerUrl(editable)
+  const cached = GII_PAYMENT_LAYER_CACHE[url]
+  if (cached) return cached
+  const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+  const layer = new FeatureLayer({ url, outFields: ['*'] })
+  if (typeof layer?.load === 'function') await layer.load()
+  GII_PAYMENT_LAYER_CACHE[url] = layer
+  return layer
+}
+
+function giiPaymentPracticeWhere (raw: any): string {
+  const variants = globalIdVariantsForLog(raw)
+  return variants.length ? variants.map(value => `pratica_globalid = ${sqlQuote(value)}`).join(' OR ') : '1=0'
+}
+
+function giiPaymentObjectId (attrs: Record<string, any>, oidField = 'OBJECTID'): number {
+  const raw = pickAttrCI(attrs || {}, [oidField, 'OBJECTID'])
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+async function queryGiiPaymentPositions (practiceGlobalId: any, editableAccess: boolean, includeAttachments = true): Promise<GiiPaymentPosition[]> {
+  const gid = String(practiceGlobalId ?? '').trim()
+  if (!gid) return []
+  const layer = await getGiiPaymentLayer(editableAccess)
+  const url = giiPaymentLayerUrl(editableAccess)
+  const oidField = String(layer?.objectIdField || 'OBJECTID')
+  const globalIdField = String(layer?.globalIdField || 'GlobalID')
+  const result = await layer.queryFeatures({
+    where: giiPaymentPracticeWhere(gid),
+    outFields: ['*'],
+    returnGeometry: false,
+    orderByFields: ['piano_pagamento ASC', 'numero_rata ASC', `${oidField} ASC`]
+  })
+  const rows: GiiPaymentPosition[] = []
+  for (const feature of (result?.features || [])) {
+    const attrs = { ...(feature?.attributes || {}) }
+    const objectId = giiPaymentObjectId(attrs, oidField)
+    if (!objectId) continue
+    let attachments: AmmAttachmentInfo[] = []
+    if (includeAttachments) {
+      try { attachments = await queryAmmAttachments(layer, objectId, url) } catch { attachments = [] }
+    }
+    rows.push({
+      objectId,
+      globalId: String(pickAttrCI(attrs, [globalIdField, 'GlobalID']) || '').trim(),
+      attributes: attrs,
+      attachments
+    })
+  }
+  return rows.sort((a, b) => {
+    const ta = String(pickAttrCI(a.attributes, ['tipo_posizione']) || '').toUpperCase()
+    const tb = String(pickAttrCI(b.attributes, ['tipo_posizione']) || '').toUpperCase()
+    if (ta !== tb) {
+      if (ta === 'UNICA_SOLUZIONE') return -1
+      if (tb === 'UNICA_SOLUZIONE') return 1
+    }
+    const pa = String(pickAttrCI(a.attributes, ['piano_pagamento']) || '')
+    const pb = String(pickAttrCI(b.attributes, ['piano_pagamento']) || '')
+    if (pa !== pb) return pa.localeCompare(pb, 'it')
+    return (Number(pickAttrCI(a.attributes, ['numero_rata'])) || 0) - (Number(pickAttrCI(b.attributes, ['numero_rata'])) || 0)
+  })
+}
+
+function throwPaymentEditFailure (result: any, actionLabel: string): void {
+  const buckets = [result?.addFeatureResults, result?.updateFeatureResults, result?.deleteFeatureResults, result?.addResults, result?.updateResults, result?.deleteResults]
+  for (const bucket of buckets) {
+    if (!Array.isArray(bucket)) continue
+    for (const row of bucket) {
+      if (row?.error || row?.success === false) {
+        const err = row?.error || {}
+        throw new Error(`${actionLabel}: ${String(err?.message || err?.description || 'operazione non riuscita')}`)
+      }
+    }
+  }
+}
+
+async function addGiiPaymentPositions (attributesList: Array<Record<string, any>>): Promise<void> {
+  if (!attributesList.length) return
+  const layer = await getGiiPaymentLayer(true)
+  const result = await layer.applyEdits({ addFeatures: attributesList.map(attributes => ({ attributes })) })
+  throwPaymentEditFailure(result, 'Creazione delle posizioni di pagamento non riuscita')
+}
+
+async function updateGiiPaymentPosition (objectId: number, attrs: Record<string, any>): Promise<void> {
+  if (!objectId) return
+  const layer = await getGiiPaymentLayer(true)
+  const oidField = String(layer?.objectIdField || 'OBJECTID')
+  const result = await layer.applyEdits({ updateFeatures: [{ attributes: { ...attrs, [oidField]: objectId } }] })
+  throwPaymentEditFailure(result, 'Aggiornamento della posizione di pagamento non riuscito')
+}
+
+async function giiPaymentDeleteGraphics (layer: any, objectIds: number[]): Promise<any[]> {
+  const Graphic = await loadEsriModule<any>('esri/Graphic')
+  const oidField = String(layer?.objectIdField || 'OBJECTID')
+  return objectIds
+    .filter(objectId => Number.isFinite(Number(objectId)) && Number(objectId) > 0)
+    .map(objectId => new Graphic({ attributes: { [oidField]: Number(objectId) } }))
+}
+
+async function replaceGiiPaymentPositions (positions: GiiPaymentPosition[], attributesList: Array<Record<string, any>>): Promise<void> {
+  const layer = await getGiiPaymentLayer(true)
+  // FeatureLayer.applyEdits richiede Graphic reali per deleteFeatures. Passare
+  // semplici oggetti { objectId } può generare internamente "getAttribute is not a function".
+  const deleteFeatures = await giiPaymentDeleteGraphics(layer, positions.map(row => row.objectId))
+  const result = await layer.applyEdits({
+    deleteFeatures,
+    addFeatures: attributesList.map(attributes => ({ attributes }))
+  }, { rollbackOnFailureEnabled: true })
+  throwPaymentEditFailure(result, 'Ricreazione delle posizioni di pagamento non riuscita')
+}
+
+function giiPaymentModeForPosition (practiceMode: PaymentMode): string | null {
+  if (practiceMode === 'PAGOPA') return 'PAGOPA'
+  if (practiceMode === 'BONIFICO') return 'BONIFICO'
+  // Per MISTO e ALTRO la modalità effettiva appartiene alla singola posizione
+  // (pagoPA, bonifico, bollettino postale o altra modalità).
+  return null
+}
+
+function giiPaymentInstallmentAmounts (totalRaw: any, rateCount: number): number[] {
+  const total = Math.max(0, parseNumberInput(totalRaw) || 0)
+  const count = Math.max(0, Math.trunc(Number(rateCount) || 0))
+  if (count <= 0) return []
+  const cents = Math.round(total * 100)
+  const base = Math.floor(cents / count)
+  let remainder = cents - (base * count)
+  const out: number[] = []
+  for (let i = 0; i < count; i++) {
+    const value = base + (remainder > 0 ? 1 : 0)
+    if (remainder > 0) remainder -= 1
+    out.push(value / 100)
+  }
+  return out
+}
+
+function buildGiiPaymentPlanAttributes (
+  practiceGlobalId: string,
+  practiceMode: PaymentMode,
+  totalRaw: any,
+  rateCountRaw: number,
+  username: string
+): Array<Record<string, any>> {
+  const total = Math.max(0, parseNumberInput(totalRaw) || 0)
+  if (!(total > 0)) return []
+  const rateCount = Math.max(0, Math.trunc(Number(rateCountRaw) || 0))
+  if (rateCount === 1 || rateCount < 0) throw new Error('Il numero di rate deve essere 0 oppure almeno 2.')
+  const now = Date.now()
+  const mode = giiPaymentModeForPosition(practiceMode)
+  const baseAudit = {
+    pratica_globalid: practiceGlobalId,
+    modalita_pagamento: mode,
+    stato_pagamento: 'DA_PAGARE',
+    creato_il: now,
+    creato_da: username || null,
+    aggiornato_il: now,
+    aggiornato_da: username || null
+  }
+  const rows: Array<Record<string, any>> = [{
+    ...baseAudit,
+    tipo_posizione: 'UNICA_SOLUZIONE',
+    piano_pagamento: 'UNICA',
+    numero_rata: null,
+    numero_rate: 1,
+    importo_dovuto: roundMoneyValue(total),
+    scadenza: null,
+    tipo_riferimento: null,
+    riferimento_pagamento: null,
+    tipo_riferimento_secondario: null,
+    riferimento_secondario: null,
+    importo_pagato: null,
+    data_pagamento: null,
+    note: null
+  }]
+  if (rateCount >= 2) {
+    const amounts = giiPaymentInstallmentAmounts(total, rateCount)
+    for (let i = 0; i < rateCount; i++) {
+      rows.push({
+        ...baseAudit,
+        tipo_posizione: 'RATA',
+        piano_pagamento: `RATE_${rateCount}`,
+        numero_rata: i + 1,
+        numero_rate: rateCount,
+        importo_dovuto: amounts[i],
+        scadenza: null,
+        tipo_riferimento: null,
+        riferimento_pagamento: null,
+        tipo_riferimento_secondario: null,
+        riferimento_secondario: null,
+        importo_pagato: null,
+        data_pagamento: null,
+        note: null
+      })
+    }
+  }
+  return rows
+}
+
+function giiPaymentRateCount (positions: GiiPaymentPosition[]): number {
+  const rateRows = positions.filter(row => String(pickAttrCI(row.attributes, ['tipo_posizione']) || '').toUpperCase() === 'RATA')
+  if (!rateRows.length) return 0
+  const declared = Math.max(...rateRows.map(row => Number(pickAttrCI(row.attributes, ['numero_rate'])) || 0))
+  return declared > 0 ? declared : rateRows.length
+}
+
+function giiPaymentReferenceValue (attrs: Record<string, any>, typeWanted: string): string {
+  const wanted = String(typeWanted || '').toUpperCase()
+  const type1 = String(pickAttrCI(attrs, ['tipo_riferimento']) || '').toUpperCase()
+  const type2 = String(pickAttrCI(attrs, ['tipo_riferimento_secondario']) || '').toUpperCase()
+  if (type1 === wanted) return String(pickAttrCI(attrs, ['riferimento_pagamento']) || '').trim()
+  if (type2 === wanted) return String(pickAttrCI(attrs, ['riferimento_secondario']) || '').trim()
+  return ''
+}
+
+function giiPaymentPositionLabel (attrs: Record<string, any>): string {
+  const type = String(pickAttrCI(attrs, ['tipo_posizione']) || '').toUpperCase()
+  if (type === 'UNICA_SOLUZIONE') return 'Unica soluzione'
+  if (type === 'RATA') {
+    const n = Number(pickAttrCI(attrs, ['numero_rata'])) || 0
+    const total = Number(pickAttrCI(attrs, ['numero_rate'])) || 0
+    return n > 0 && total > 0 ? `Rata ${n} di ${total}` : (n > 0 ? `Rata ${n}` : 'Rata')
+  }
+  return domainLabel(null, pickAttrCI(attrs, ['tipo_posizione']))
+}
+
+function giiPaymentModeLabel (codeRaw: any): string {
+  const code = String(codeRaw || '').toUpperCase()
+  if (code === 'PAGOPA') return 'pagoPA'
+  if (code === 'BONIFICO') return 'Bonifico'
+  if (code === 'BOLLETTINO') return 'Bollettino postale'
+  if (code === 'ALTRO') return 'Altro'
+  return code || 'Da definire'
+}
+
+const GII_PAYMENT_EDITABLE_FIELDS = [
+  'modalita_pagamento',
+  'importo_dovuto',
+  'scadenza',
+  'tipo_riferimento',
+  'riferimento_pagamento',
+  'tipo_riferimento_secondario',
+  'riferimento_secondario',
+  'note'
+]
+
+function giiPaymentComparableValue (fieldName: string, raw: any): any {
+  if (fieldName === 'importo_dovuto') return parseNumberInput(raw)
+  if (fieldName === 'scadenza') return dateMsOrNull(raw)
+  return String(raw ?? '').trim()
+}
+
+function giiPaymentDraftChanged (saved: Record<string, any>, draft: Record<string, any>): boolean {
+  return GII_PAYMENT_EDITABLE_FIELDS.some(name =>
+    giiPaymentComparableValue(name, pickAttrCI(saved || {}, [name])) !==
+    giiPaymentComparableValue(name, pickAttrCI(draft || {}, [name]))
+  )
+}
+
+function giiPaymentActivePositions (positions: GiiPaymentPosition[]): GiiPaymentPosition[] {
+  return positions.filter(row => String(pickAttrCI(row.attributes, ['stato_pagamento']) || '').toUpperCase() !== 'ANNULLATO')
+}
+
+function giiPaymentValidationIssues (positions: GiiPaymentPosition[], totalRaw: any, practiceMode: PaymentMode): string[] {
+  const total = Math.max(0, parseNumberInput(totalRaw) || 0)
+  if (!(total > 0)) return []
+  const active = giiPaymentActivePositions(positions)
+  const issues: string[] = []
+  if (!active.length) return ['Configurare le posizioni di pagamento.']
+  const unica = active.filter(row => String(pickAttrCI(row.attributes, ['tipo_posizione']) || '').toUpperCase() === 'UNICA_SOLUZIONE')
+  if (unica.length !== 1) issues.push('Deve essere presente una sola posizione in unica soluzione.')
+  const expectedMode = giiPaymentModeForPosition(practiceMode)
+  for (const row of active) {
+    const attrs = row.attributes || {}
+    const label = giiPaymentPositionLabel(attrs)
+    const mode = String(pickAttrCI(attrs, ['modalita_pagamento']) || '').toUpperCase()
+    const amount = Math.max(0, parseNumberInput(pickAttrCI(attrs, ['importo_dovuto'])) || 0)
+    if (!mode) issues.push(`${label}: indicare la modalità di pagamento.`)
+    if (expectedMode && mode && mode !== expectedMode) issues.push(`${label}: la modalità non è coerente con quella stabilita nell’Atto.`)
+    if (!(amount > 0)) issues.push(`${label}: indicare l’importo dovuto.`)
+    if (!hasAdminValue(pickAttrCI(attrs, ['scadenza']))) issues.push(`${label}: indicare la scadenza.`)
+    if (mode === 'PAGOPA') {
+      if (!giiPaymentReferenceValue(attrs, 'IUV')) issues.push(`${label}: indicare l’IUV.`)
+      if (!giiPaymentReferenceValue(attrs, 'CODICE_AVVISO')) issues.push(`${label}: indicare il codice avviso.`)
+      if (!row.attachments.length) issues.push(`${label}: caricare il relativo avviso pagoPA.`)
+    }
+    if (mode === 'BOLLETTINO' && !row.attachments.length) issues.push(`${label}: caricare il relativo bollettino.`)
+  }
+  if (unica.length === 1) {
+    const amount = Math.max(0, parseNumberInput(pickAttrCI(unica[0].attributes, ['importo_dovuto'])) || 0)
+    if (Math.abs(amount - total) > 0.009) issues.push(`L’importo dell’unica soluzione deve essere ${formatEuroText(total)}.`)
+  }
+  const rateRows = active.filter(row => String(pickAttrCI(row.attributes, ['tipo_posizione']) || '').toUpperCase() === 'RATA')
+  const byPlan = new Map<string, GiiPaymentPosition[]>()
+  for (const row of rateRows) {
+    const plan = String(pickAttrCI(row.attributes, ['piano_pagamento']) || '').trim() || 'RATE'
+    const list = byPlan.get(plan) || []
+    list.push(row)
+    byPlan.set(plan, list)
+  }
+  for (const [plan, rows] of byPlan) {
+    const declared = Math.max(...rows.map(row => Number(pickAttrCI(row.attributes, ['numero_rate'])) || 0))
+    if (declared < 2 || rows.length !== declared) issues.push(`${plan}: il numero delle rate non coincide con le posizioni presenti.`)
+    const nums = rows.map(row => Number(pickAttrCI(row.attributes, ['numero_rata'])) || 0).sort((a, b) => a - b)
+    if (declared >= 2 && nums.some((n, idx) => n !== idx + 1)) issues.push(`${plan}: la numerazione delle rate non è completa.`)
+    const sum = roundMoneyValue(rows.reduce((acc, row) => acc + Math.max(0, parseNumberInput(pickAttrCI(row.attributes, ['importo_dovuto'])) || 0), 0))
+    if (Math.abs(sum - total) > 0.009) issues.push(`${plan}: la somma delle rate deve essere ${formatEuroText(total)}.`)
+  }
+  return Array.from(new Set(issues))
+}
+
+function earliestGiiPaymentDeadline (positions: GiiPaymentPosition[]): number | null {
+  const deadlines = giiPaymentActivePositions(positions)
+    .map(row => dateMsOrNull(pickAttrCI(row.attributes, ['scadenza'])))
+    .filter((value): value is number => value != null)
+    .sort((a, b) => a - b)
+  return deadlines.length ? deadlines[0] : null
+}
+
+function extractPagoPaStructuredData (textRaw: string): GiiPagoPaExtractedData {
+  const text = String(textRaw || '')
+    .replace(/[\u00a0\u2000-\u200f\u2028-\u202f\u2060\ufeff]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  let scadenzaMs: number | null = null
+  try { scadenzaMs = extractPagoPaDeadlineMs(text) } catch {}
+
+  const refMatch = (patterns: RegExp[]): string => {
+    for (const re of patterns) {
+      const m = text.match(re)
+      if (m?.[1]) return String(m[1]).replace(/[\s.\-]+/g, '').trim()
+    }
+    return ''
+  }
+
+  let iuv = refMatch([
+    /(?:\bI\.?\s*U\.?\s*V\.?\b|identificativo\s+univoco\s+(?:di\s+)?versamento)\s*(?:n(?:umero)?\.?|codice)?\s*[:\-]?\s*([0-9][0-9\s.\-]{8,34})/i,
+    /(?:identificativo\s+pagamento|id\s+versamento)\s*[:\-]?\s*([0-9][0-9\s.\-]{8,34})/i
+  ])
+  let codiceAvviso = refMatch([
+    /(?:codice|numero)\s+(?:dell[’']?\s*)?(?:di\s+)?avviso\s*[:\-]?\s*([0-9][0-9\s.\-]{10,34})/i,
+    /avviso\s+(?:di\s+pagamento\s+)?(?:n(?:umero)?\.?|codice)\s*[:\-]?\s*([0-9][0-9\s.\-]{10,34})/i
+  ])
+
+  // Negli avvisi pagoPA il numero avviso è normalmente di 18 cifre e contiene
+  // l'IUV dopo la cifra ausiliaria. Usiamo questa derivazione solo come fallback
+  // quando il PDF non espone una label IUV separata.
+  if (!iuv && /^\d{18}$/.test(codiceAvviso)) iuv = codiceAvviso.slice(1)
+
+  if (!codiceAvviso) {
+    const longNums = Array.from(text.matchAll(/(?:^|\D)(\d(?:[\s.\-]*\d){17})(?!\d)/g))
+      .map(m => String(m[1] || '').replace(/[\s.\-]+/g, ''))
+      .filter(v => /^\d{18}$/.test(v))
+    if (longNums.length === 1) {
+      codiceAvviso = longNums[0]
+      if (!iuv) iuv = codiceAvviso.slice(1)
+    }
+  }
+
+  let importo: number | null = null
+  const amountPatterns = [
+    /(?:importo\s+(?:da\s+pagare|dovuto|totale)?|totale\s+(?:da\s+pagare|dovuto)|quanto\s+(?:devi\s+)?pagare)\s*[:\-]?\s*(?:€|eur|euro)?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}|[0-9]+[.,][0-9]{2})/i,
+    /(?:€|eur|euro)\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}|[0-9]+[.,][0-9]{2})/i,
+    /([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}|[0-9]+[.,][0-9]{2})\s*(?:€|eur|euro)/i
+  ]
+  for (const re of amountPatterns) {
+    const m = text.match(re)
+    if (!m?.[1]) continue
+    const value = parseNumberInput(m[1])
+    if (value != null && value >= 0) { importo = roundMoneyValue(value); break }
+  }
+  return { scadenzaMs, importo, iuv, codiceAvviso }
+}
+
+type GiiPagoPaBatchPlanItem = {
+  file: File
+  parsed: GiiPagoPaExtractedData
+  attributes: Record<string, any>
+}
+
+function buildGiiPagoPaBatchPlan (
+  parsedFiles: Array<{ file: File, parsed: GiiPagoPaExtractedData }>,
+  practiceGlobalId: string,
+  totalRaw: any,
+  username: string
+): GiiPagoPaBatchPlanItem[] {
+  const total = Math.max(0, parseNumberInput(totalRaw) || 0)
+  const totalCents = Math.round(total * 100)
+  if (!(totalCents > 0)) throw new Error('Il totale da pagare non è disponibile.')
+  if (!parsedFiles.length) throw new Error('Selezionare almeno un avviso pagoPA.')
+
+  const normalized = parsedFiles.map(entry => {
+    const name = String(entry.file?.name || 'avviso pagoPA')
+    const amount = entry.parsed.importo
+    if (amount == null || !(amount > 0)) throw new Error(`“${name}”: importo non riconosciuto.`)
+    if (entry.parsed.scadenzaMs == null) throw new Error(`“${name}”: scadenza non riconosciuta.`)
+    if (!entry.parsed.iuv) throw new Error(`“${name}”: IUV non riconosciuto.`)
+    if (!entry.parsed.codiceAvviso) throw new Error(`“${name}”: codice avviso non riconosciuto.`)
+    return { ...entry, amountCents: Math.round(amount * 100) }
+  })
+
+  const duplicateValues = (values: string[], label: string) => {
+    const seen = new Set<string>()
+    for (const raw of values) {
+      const value = String(raw || '').trim()
+      if (!value) continue
+      if (seen.has(value)) throw new Error(`${label} duplicato nel gruppo di avvisi: ${value}.`)
+      seen.add(value)
+    }
+  }
+  duplicateValues(normalized.map(v => v.parsed.iuv), 'IUV')
+  duplicateValues(normalized.map(v => v.parsed.codiceAvviso), 'Codice avviso')
+
+  const unicaCandidates = normalized.filter(v => v.amountCents === totalCents)
+  if (unicaCandidates.length !== 1) {
+    throw new Error(`Deve essere presente un solo avviso in unica soluzione di ${formatEuroText(total)}; ne sono stati riconosciuti ${unicaCandidates.length}.`)
+  }
+  const unica = unicaCandidates[0]
+  const rates = normalized.filter(v => v !== unica)
+  if (rates.length === 1) throw new Error('Il gruppo contiene una sola rata oltre all’unica soluzione. Un piano rateale deve contenere almeno 2 rate.')
+
+  if (rates.length >= 2) {
+    const rateSum = rates.reduce((sum, row) => sum + row.amountCents, 0)
+    if (rateSum !== totalCents) {
+      throw new Error(`La somma delle rate (${formatEuroText(rateSum / 100)}) non coincide con il totale dovuto (${formatEuroText(total)}).`)
+    }
+    // Le rate devono rappresentare una ripartizione uniforme del totale; quando
+    // i centesimi non sono divisibili esattamente è ammesso il normale scarto di 1 centesimo.
+    const expected = giiPaymentInstallmentAmounts(total, rates.length).map(v => Math.round(v * 100)).sort((a, b) => a - b)
+    const actual = rates.map(v => v.amountCents).sort((a, b) => a - b)
+    if (expected.length !== actual.length || expected.some((value, idx) => value !== actual[idx])) {
+      throw new Error(`Gli importi delle ${rates.length} rate non corrispondono alla ripartizione del totale dovuto. È ammesso soltanto l’eventuale scarto di 1 centesimo dovuto all’arrotondamento.`)
+    }
+  }
+
+  rates.sort((a, b) => {
+    const da = Number(a.parsed.scadenzaMs) || 0
+    const db = Number(b.parsed.scadenzaMs) || 0
+    if (da !== db) return da - db
+    return String(a.file.name || '').localeCompare(String(b.file.name || ''), 'it')
+  })
+
+  const now = Date.now()
+  const base = {
+    pratica_globalid: practiceGlobalId,
+    modalita_pagamento: 'PAGOPA',
+    stato_pagamento: 'DA_PAGARE',
+    creato_il: now,
+    creato_da: username || null,
+    aggiornato_il: now,
+    aggiornato_da: username || null,
+    importo_pagato: null,
+    data_pagamento: null,
+    note: null
+  }
+  const toItem = (entry: typeof unica, type: 'UNICA_SOLUZIONE' | 'RATA', index: number, count: number): GiiPagoPaBatchPlanItem => ({
+    file: entry.file,
+    parsed: entry.parsed,
+    attributes: {
+      ...base,
+      tipo_posizione: type,
+      piano_pagamento: type === 'UNICA_SOLUZIONE' ? 'UNICA' : `RATE_${count}`,
+      numero_rata: type === 'RATA' ? index : null,
+      numero_rate: type === 'RATA' ? count : 1,
+      importo_dovuto: roundMoneyValue(entry.amountCents / 100),
+      scadenza: entry.parsed.scadenzaMs,
+      tipo_riferimento: 'IUV',
+      riferimento_pagamento: entry.parsed.iuv,
+      tipo_riferimento_secondario: 'CODICE_AVVISO',
+      riferimento_secondario: entry.parsed.codiceAvviso
+    }
+  })
+
+  return [toItem(unica, 'UNICA_SOLUZIONE', 0, 1), ...rates.map((entry, idx) => toItem(entry, 'RATA', idx + 1, rates.length))]
+}
+
+function giiPaymentDocumentKeywords (row: GiiPaymentPosition, modeRaw: any): string {
+  return [
+    GII_PAYMENT_DOCUMENT_KEYWORD,
+    `paymentGlobalId=${encodeURIComponent(String(row.globalId || ''))}`,
+    `paymentObjectId=${Number(row.objectId) || 0}`,
+    `paymentMode=${encodeURIComponent(String(modeRaw || ''))}`,
+    `fileCreatedAt=${Date.now()}`
+  ].join('|')
+}
+
+function dispatchGiiPaymentsChanged (practiceGlobalId: any): void {
+  try {
+    window.dispatchEvent(new CustomEvent('gii-pagamenti-changed', { detail: { practiceGlobalId: String(practiceGlobalId || ''), ts: Date.now() } }))
+  } catch {}
+}
+
 function normalizeAttachmentInfos (raw: any): AmmAttachmentInfo[] {
   const pull = (obj: any): any[] => {
     if (!obj) return []
@@ -2438,6 +2954,8 @@ async function loadProtocolloFascicoloManifest (
     docKey: String(item?.docKey || '').trim(),
     sourceAttachmentId: Number.isFinite(Number(item?.sourceAttachmentId)) ? Number(item.sourceAttachmentId) : undefined,
     sourceAttachmentKind: String(item?.sourceAttachmentKind || '') === 'administrative' ? 'administrative' : (String(item?.sourceAttachmentKind || '') === 'technical' ? 'technical' : undefined),
+    sourceStore: String(item?.sourceStore || '') === 'payment' ? 'payment' : (String(item?.sourceStore || '') === 'practice' ? 'practice' : undefined),
+    sourceParentOid: Number.isFinite(Number(item?.sourceParentOid)) ? Number(item.sourceParentOid) : undefined,
     sourceAttachmentName: String(item?.sourceAttachmentName || '').trim() || undefined,
     sourceAttachmentKeywords: String(item?.sourceAttachmentKeywords || '').trim() || undefined
   })).filter((item: ProtocolloFascicoloManifestItem) => !!item.fileName && !!item.docKey)
@@ -2506,6 +3024,8 @@ async function loadProtocolloAttoManifest (
     docKey: String(item?.docKey || '').trim(),
     sourceAttachmentId: Number.isFinite(Number(item?.sourceAttachmentId)) ? Number(item.sourceAttachmentId) : undefined,
     sourceAttachmentKind: String(item?.sourceAttachmentKind || '') === 'administrative' ? 'administrative' : (String(item?.sourceAttachmentKind || '') === 'technical' ? 'technical' : undefined),
+    sourceStore: String(item?.sourceStore || '') === 'payment' ? 'payment' : (String(item?.sourceStore || '') === 'practice' ? 'practice' : undefined),
+    sourceParentOid: Number.isFinite(Number(item?.sourceParentOid)) ? Number(item.sourceParentOid) : undefined,
     sourceAttachmentName: String(item?.sourceAttachmentName || '').trim() || undefined,
     sourceAttachmentKeywords: String(item?.sourceAttachmentKeywords || '').trim() || undefined
   })).filter((item: ProtocolloFascicoloManifestItem) => !!item.fileName && !!item.docKey)
@@ -3252,6 +3772,44 @@ function BlockingDialog (props: { kind: 'ok' | 'err' | 'warn', title: string, te
         <div style={{ padding: 16, color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{props.text}</div>
         <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-end' }}>
           <button type='button' onClick={props.onClose} style={{ border: '1px solid #0d3b66', background: '#0d3b66', color: '#fff', borderRadius: 9, padding: '8px 14px', fontWeight: 700, fontSize: adminFieldFontSize(st), cursor: 'pointer' }}>OK</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+function ConfirmActionDialog (props: { title: string, text: string, confirmLabel?: string, saving?: boolean, danger?: boolean, onCancel: () => void, onConfirm: () => void }) {
+  const st = useAdminStyle()
+  const confirmBg = props.danger ? '#b42318' : '#0d3b66'
+  return (
+    <div style={{ position: 'fixed', zIndex: 2147483000, inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div role='dialog' aria-modal='true' style={{ width: 'min(620px, 100%)', background: '#fff', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
+        <div style={{ background: props.danger ? '#fff1f0' : '#eff6ff', color: props.danger ? '#b42318' : '#0d3b66', padding: '14px 16px', fontWeight: 900, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>{props.title}</div>
+        <div style={{ padding: 16, color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{props.text}</div>
+        <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button type='button' disabled={!!props.saving} onClick={props.onCancel} style={{ border: '1px solid #94a3b8', background: '#fff', color: '#334155', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>Annulla</button>
+          <button type='button' disabled={!!props.saving} onClick={props.onConfirm} style={{ border: `1px solid ${confirmBg}`, background: props.saving ? '#e5e7eb' : confirmBg, color: props.saving ? '#9ca3af' : '#fff', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>{props.saving ? 'Operazione in corso…' : (props.confirmLabel || 'Conferma')}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+function PaymentPlanConfirmDialog (props: { currentCount: number, rateCount: number, saving?: boolean, onCancel: () => void, onConfirm: () => void }) {
+  const st = useAdminStyle()
+  const nextCount = props.rateCount >= 2 ? props.rateCount + 1 : 1
+  return (
+    <div style={{ position: 'fixed', zIndex: 2147483000, inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div role='dialog' aria-modal='true' style={{ width: 'min(620px, 100%)', background: '#fff', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
+        <div style={{ background: '#eff6ff', color: '#0d3b66', padding: '14px 16px', fontWeight: 900, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>Ricreare le posizioni di pagamento</div>
+        <div style={{ padding: 16, color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45 }}>
+          Le {props.currentCount} posizioni attuali, ancora prive di documenti e incassi, saranno sostituite con {nextCount} {nextCount === 1 ? 'posizione' : 'posizioni'}: {props.rateCount >= 2 ? `unica soluzione + ${props.rateCount} rate` : 'unica soluzione'}.
+        </div>
+        <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button type='button' disabled={!!props.saving} onClick={props.onCancel} style={{ border: '1px solid #94a3b8', background: '#fff', color: '#334155', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>Annulla</button>
+          <button type='button' disabled={!!props.saving} onClick={props.onConfirm} style={{ border: '1px solid #0d3b66', background: props.saving ? '#e5e7eb' : '#0d3b66', color: props.saving ? '#9ca3af' : '#fff', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>{props.saving ? 'Aggiornamento in corso…' : 'Ricrea posizioni'}</button>
         </div>
       </div>
     </div>
@@ -4041,9 +4599,6 @@ function paymentDetailsReady (data: Record<string, any>, fields: LayerFieldInfo[
   if (total <= 0) return true
   const mode = getPaymentMode(d, fields)
   if (!mode || !hasAdminValue(pickAttrCI(d, ['pagamento_scadenza']))) return false
-  if (mode === 'PAGOPA' || mode === 'MISTO') {
-    if (!hasAdminValue(pickAttrCI(d, ['pagopa_iuv'])) || !hasAdminValue(pickAttrCI(d, ['pagopa_codice_avviso']))) return false
-  }
   if (mode === 'BONIFICO' || mode === 'MISTO') {
     if (!hasAdminValue(pickAttrCI(d, ['bonifico_iban_snapshot']))) return false
     if (!hasAdminValue(pickAttrCI(d, ['bonifico_intestatario_snapshot']))) return false
@@ -5304,6 +5859,12 @@ function PostAttestazioneIaWorkSection (props: {
   const attoEmailDirettorePreparata = attoWorkflow && !!props.attoDirettoreEmailPrepared
   const tipoAttoFinaleLabel = displayAdminFieldValue(d, props.fields, 'tipo_atto_amm')
   const roleCode = String(props.role || '').trim().toUpperCase()
+  const [paymentTableHasRows, setPaymentTableHasRows] = React.useState<boolean | null>(null)
+  const [paymentTableReady, setPaymentTableReady] = React.useState<boolean | null>(null)
+  React.useEffect(() => {
+    setPaymentTableHasRows(null)
+    setPaymentTableReady(null)
+  }, [oid])
   // Una bozza è realmente generata solo dopo la produzione del Word.
   // Lo stato BOZZA viene impostato già al momento del visto e indica soltanto
   // l'apertura del ciclo: non deve quindi sbloccare prematuramente il caricamento PDF.
@@ -5958,8 +6519,13 @@ function PostAttestazioneIaWorkSection (props: {
   const attoInLavorazioneIa = attoWorkflow && (attoState === '' || attoState === 'BOZZA')
   const paymentModeForAtto = getPaymentMode(d, props.fields)
   const attoPreDraftReady = !!paymentModeForAtto && hasAdminValue(pickAttrCI(d, ['notifica_tipo']))
-  const attoPostFirmaPaymentReady = hasAdminValue(pickAttrCI(d, ['pagamento_scadenza'])) &&
+  const legacyAttoPostFirmaPaymentReady = hasAdminValue(pickAttrCI(d, ['pagamento_scadenza'])) &&
     (!['PAGOPA', 'MISTO'].includes(paymentModeForAtto) || pagopaAttachments.length > 0)
+  const attoPostFirmaPaymentReady = paymentTableHasRows === true
+    ? paymentTableReady === true
+    : paymentTableHasRows === false
+      ? legacyAttoPostFirmaPaymentReady
+      : false
   const attoRichiedeVersionePulita = attoApprovedRia && !hasAttoDaFirmare && !hasAttoFirmato
   const attoCleanWordGeneratedAfterApproval = !!props.attoCleanWordGeneratedAfterApproval
   const canGenerateAttoContestazioneWord =
@@ -6021,45 +6587,6 @@ function PostAttestazioneIaWorkSection (props: {
     !attoWorkflowLocked &&
     !props.saving &&
     !attachmentsBusy
-
-  const uploadPagoPaPdf = React.useCallback(async (file: File | null) => {
-    if (!file || !oid || !props.canEdit || !hasAttoFirmato || protocolloAttoCompleto || !['PAGOPA', 'MISTO'].includes(paymentModeForAtto) || props.saving || attachmentsBusy) return
-    if (!/\.pdf$/i.test(String(file.name || ''))) {
-      setAttachmentsErrorSection('atto')
-      setAttachmentsError('Caricare il bollettino pagoPA in formato PDF.')
-      return
-    }
-    setAttachmentsBusy(true)
-    setAttachmentsErrorSection('atto')
-    setAttachmentsError(null)
-    setAttachmentsInfo(null)
-    try {
-      const content = await extractPdfVerificationContent(file)
-      if (!content.text) throw new Error('Non è stato possibile leggere il bollettino pagoPA.')
-      const deadlineMs = extractPagoPaDeadlineMs(content.text)
-      const { layer, layerUrl } = await resolveAttachmentLayer()
-      const allBefore = await queryAmmAttachments(layer, oid, layerUrl)
-      const ids = await addAmmAttachments(layer, oid, [file], layerUrl, `${GII_PAGOPA_ATTACHMENT_KEYWORD}|fileCreatedAt=${Date.now()}|paymentDeadline=${dateInputValue(deadlineMs)}`)
-      const keepId = Number(ids?.[0])
-      if (!Number.isFinite(keepId) || keepId <= 0) throw new Error('Bollettino pagoPA caricato, ma allegato non identificabile.')
-      for (const oldAtt of allBefore.filter(isGiiPagoPaAttachment)) {
-        const oldId = Number(oldAtt.id)
-        if (Number.isFinite(oldId) && oldId > 0 && oldId !== keepId) {
-          try { await deleteAmmAttachment(layer, oid, oldId, layerUrl) } catch {}
-        }
-      }
-      props.onChange('pagamento_scadenza', deadlineMs)
-      const allAfter = await queryAmmAttachments(layer, oid, layerUrl)
-      setPagopaAttachments(allAfter.filter(isGiiPagoPaAttachment))
-      setAttachmentsLoadedOid(oid)
-      setAttachmentsInfo(`Bollettino pagoPA acquisito. Scadenza ${new Date(deadlineMs).toLocaleDateString('it-IT')} letta automaticamente dal documento. Salvare i dati prima della trasmissione al protocollo.`)
-      setInputKey(k => k + 1)
-    } catch (e: any) {
-      setAttachmentsError(e?.message || String(e))
-    } finally {
-      setAttachmentsBusy(false)
-    }
-  }, [attachmentsBusy, hasAttoFirmato, oid, paymentModeForAtto, props, protocolloAttoCompleto, resolveAttachmentLayer])
 
   const deletePagoPaPdf = React.useCallback(async (att: AmmAttachmentInfo) => {
     if (!att || !oid || !props.canEdit || protocolloAttoCompleto || props.saving || attachmentsBusy) return
@@ -6268,22 +6795,59 @@ function PostAttestazioneIaWorkSection (props: {
       const protocol = extractConsensusOfficialProtocol(returnedContents)
       const allBefore = await queryAmmAttachments(layer, oid, layerUrl)
 
-      const sourceById = new Map<number, { att: AmmAttachmentInfo; blob: Blob }>()
+      type ProtocolloSourceSnapshot = {
+        key: string
+        att: AmmAttachmentInfo
+        blob: Blob
+        sourceId: number
+        parentOid: number
+        layerUrl: string
+      }
+      const sourceKeyForItem = (item: ProtocolloFascicoloManifestItem): string => {
+        const store = item.sourceStore === 'payment' ? 'payment' : 'practice'
+        const parentOid = store === 'payment' ? Number(item.sourceParentOid) : Number(oid)
+        return `${store}:${parentOid}:${Number(item.sourceAttachmentId)}`
+      }
+      const sourceByKey = new Map<string, ProtocolloSourceSnapshot>()
+      const paymentAttachmentsByParent = new Map<number, AmmAttachmentInfo[]>()
+      const paymentLayer = ordered.some(entry => entry.item.sourceStore === 'payment') ? await getGiiPaymentLayer(true) : null
       for (const entry of ordered) {
         const sourceId = Number(entry.item.sourceAttachmentId)
-        const source = Number.isFinite(sourceId) && sourceId > 0
-          ? allBefore.find(att => Number(att.id) === sourceId)
-          : null
-        if (!source) throw new Error(`Il documento originale “${entry.item.sourceAttachmentName || entry.item.fileName}” non è più disponibile nella pratica.`)
-        if (!sourceById.has(sourceId)) {
-          sourceById.set(sourceId, { att: source, blob: await fetchAmmAttachmentBlobForPdf(source, oid, layerUrl) })
+        const store = entry.item.sourceStore === 'payment' ? 'payment' : 'practice'
+        const parentOid = store === 'payment' ? Number(entry.item.sourceParentOid) : Number(oid)
+        if (!Number.isFinite(sourceId) || sourceId <= 0 || !Number.isFinite(parentOid) || parentOid <= 0) {
+          throw new Error(`Il riferimento al documento originale “${entry.item.sourceAttachmentName || entry.item.fileName}” non è valido.`)
+        }
+        let sourceList: AmmAttachmentInfo[]
+        let sourceLayerUrl: string
+        if (store === 'payment') {
+          sourceLayerUrl = GII_VIEW_EDIT_PAGAMENTI_URL
+          if (!paymentAttachmentsByParent.has(parentOid)) {
+            paymentAttachmentsByParent.set(parentOid, await queryAmmAttachments(paymentLayer, parentOid, sourceLayerUrl))
+          }
+          sourceList = paymentAttachmentsByParent.get(parentOid) || []
+        } else {
+          sourceLayerUrl = layerUrl
+          sourceList = allBefore
+        }
+        const source = sourceList.find(att => Number(att.id) === sourceId) || null
+        if (!source) throw new Error(`Il documento originale “${entry.item.sourceAttachmentName || entry.item.fileName}” non è più disponibile.`)
+        const key = sourceKeyForItem(entry.item)
+        if (!sourceByKey.has(key)) {
+          sourceByKey.set(key, {
+            key,
+            att: source,
+            blob: await fetchAmmAttachmentBlobForPdf(source, parentOid, sourceLayerUrl),
+            sourceId,
+            parentOid,
+            layerUrl: sourceLayerUrl
+          })
         }
       }
 
       const attoIndex = ordered.findIndex(entry => entry.item.docKey === 'atto_accertamento')
       if (attoIndex < 0) throw new Error('La trasmissione registrata non contiene l’Atto di accertamento firmato.')
-      const attoSourceId = Number(ordered[attoIndex].item.sourceAttachmentId)
-      const attoSource = sourceById.get(attoSourceId)
+      const attoSource = sourceByKey.get(sourceKeyForItem(ordered[attoIndex].item))
       if (!attoSource) throw new Error('L’Atto firmato presente nella pratica non è disponibile per il confronto.')
       const attoSourceContent = await extractPdfVerificationContent(attoSource.blob)
       const returnedAttoContent = returnedContents[attoIndex]
@@ -6306,8 +6870,7 @@ function PostAttestazioneIaWorkSection (props: {
       // soltanto aggiungere testo di protocollo sul margine opposto.
       for (let i = 0; i < ordered.length; i++) {
         if (i === attoIndex) continue
-        const sourceId = Number(ordered[i].item.sourceAttachmentId)
-        const source = sourceById.get(sourceId)
+        const source = sourceByKey.get(sourceKeyForItem(ordered[i].item))
         if (!source) continue
         const sourceContent = await extractPdfVerificationContent(source.blob)
         const returnedContent = returnedContents[i]
@@ -6316,30 +6879,30 @@ function PostAttestazioneIaWorkSection (props: {
         }
       }
 
-      const updatedIds: number[] = []
+      const updatedKeys: string[] = []
       try {
         for (const entry of ordered) {
-          const sourceId = Number(entry.item.sourceAttachmentId)
-          const source = sourceById.get(sourceId)!
+          const key = sourceKeyForItem(entry.item)
+          const source = sourceByKey.get(key)!
           const replacement = new File(
             [entry.file],
             String(entry.item.sourceAttachmentName || source.att.name || entry.file.name),
             { type: 'application/pdf', lastModified: Date.now() }
           )
-          await updateAmmAttachmentFile(oid, sourceId, replacement, layerUrl)
-          updatedIds.push(sourceId)
+          await updateAmmAttachmentFile(source.parentOid, source.sourceId, replacement, source.layerUrl)
+          updatedKeys.push(key)
         }
       } catch (mutationError) {
-        for (const sourceId of [...updatedIds].reverse()) {
-          const source = sourceById.get(sourceId)
+        for (const key of [...updatedKeys].reverse()) {
+          const source = sourceByKey.get(key)
           if (!source) continue
           try {
             const rollback = new File(
               [source.blob],
-              String(source.att.name || `allegato_${sourceId}.pdf`),
+              String(source.att.name || `allegato_${source.sourceId}.pdf`),
               { type: String(source.att.contentType || source.blob.type || 'application/pdf'), lastModified: Date.now() }
             )
-            await updateAmmAttachmentFile(oid, sourceId, rollback, layerUrl)
+            await updateAmmAttachmentFile(source.parentOid, source.sourceId, rollback, source.layerUrl)
           } catch {}
         }
         throw mutationError
@@ -6350,6 +6913,7 @@ function PostAttestazioneIaWorkSection (props: {
       const allAfter = await queryAmmAttachments(layer, oid, layerUrl)
       setAttoAttachments(allAfter.filter(isGiiAttoContestazionePdfAttachment))
       setPagopaAttachments(allAfter.filter(isGiiPagoPaAttachment))
+      if (manifest.items.some(item => item.sourceStore === 'payment')) dispatchGiiPaymentsChanged(pickAttrCI(d, ['GlobalID', 'globalid']))
       setAttachmentsLoadedOid(oid)
       setInputKey(k => k + 1)
       setAttachmentsInfo(
@@ -6903,53 +7467,39 @@ function PostAttestazioneIaWorkSection (props: {
                 ))}
               </div>
             )}
-            {hasAttoFirmato && !protocolloAttoCompleto && (
+            {hasAttoFirmato && (
               <div style={{ marginTop: 12, border: '1px solid #b8cfe8', borderRadius: 8, padding: 10, background: '#fff', display: 'grid', gap: 10, overflow: 'hidden' }}>
                 <div style={{ margin: '-10px -10px 0', padding: '7px 10px', fontWeight: 900, color: '#0f4c81', background: '#eaf3fb', borderBottom: '1px solid #b8cfe8', textTransform: 'uppercase', fontSize: 12 }}>Dati di pagamento</div>
-                {['PAGOPA', 'MISTO'].includes(paymentModeForAtto) ? (
-                  <>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                      <label style={{ ...bozzaActionButtonStyle({ disabled: attachmentsBusy || props.saving }), cursor: attachmentsBusy || props.saving ? 'not-allowed' : 'pointer' }}>
-                        Carica bollettino pagoPA
-                        <input
-                          key={`pagopa-${inputKey}`}
-                          type='file'
-                          accept='application/pdf,.pdf'
-                          disabled={attachmentsBusy || props.saving}
-                          style={{ display: 'none' }}
-                          onChange={e => { void uploadPagoPaPdf(e.target.files?.[0] || null) }}
-                        />
-                      </label>
-                      <StatusSummaryItem label='Scadenza pagamento' value={displayAdminFieldValue(d, props.fields, 'pagamento_scadenza', 'Da acquisire dal bollettino')} tone={hasAdminValue(pickAttrCI(d, ['pagamento_scadenza'])) ? 'auto' : 'warn'} />
-                    </div>
+                <GiiPaymentDocumentsPanel
+                  data={d}
+                  fields={props.fields}
+                  canEdit={props.canEdit}
+                  role={roleCode}
+                  disabled={attachmentsBusy || props.saving || protocolloAttoCompleto}
+                  onChange={props.onChange}
+                  onPresenceChange={setPaymentTableHasRows}
+                  onReadyChange={setPaymentTableReady}
+                />
+                {paymentTableHasRows === false && pagopaAttachments.length > 0 && (
+                  <div style={{ borderTop: '1px solid #dbe7f3', paddingTop: 10, display: 'grid', gap: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 900, color: '#64748b', textTransform: 'uppercase' }}>Bollettino già acquisito nella gestione precedente</div>
+                    <StatusSummaryItem label='Scadenza pagamento' value={displayAdminFieldValue(d, props.fields, 'pagamento_scadenza', '—')} tone={hasAdminValue(pickAttrCI(d, ['pagamento_scadenza'])) ? 'auto' : 'warn'} />
                     {pagopaAttachments.map(att => (
-                      <div key={`pagopa-${att.id}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, border: '1px solid #e5edf7', borderRadius: 7, background: '#fff', padding: '7px 8px' }}>
-                        <div style={{ minWidth: 0, display: 'grid', gap: 2 }}>
-                          <div style={{ fontSize: 13, fontWeight: 800, color: '#1f2937' }}>Bollettino pagoPA</div>
-                          <div style={{ fontSize: 12, color: '#64748b', overflowWrap: 'anywhere' }}>{att.name || `Allegato ${att.id}`}</div>
-                        </div>
+                      <div key={`pagopa-legacy-${att.id}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, border: '1px solid #e5edf7', borderRadius: 7, background: '#fff', padding: '7px 8px' }}>
+                        <div style={{ minWidth: 0, fontSize: 12, color: '#64748b', overflowWrap: 'anywhere' }}>{att.name || `Allegato ${att.id}`}</div>
                         <button
                           type='button'
                           title='Elimina bollettino pagoPA'
                           aria-label='Elimina bollettino pagoPA'
-                          disabled={attachmentsBusy || props.saving}
+                          disabled={attachmentsBusy || props.saving || protocolloAttoCompleto}
                           onClick={() => { void deletePagoPaPdf(att) }}
-                          style={bozzaIconButtonStyle({ danger: true, disabled: attachmentsBusy || props.saving })}
+                          style={bozzaIconButtonStyle({ danger: true, disabled: attachmentsBusy || props.saving || protocolloAttoCompleto })}
                         >
                           <BozzaActionIcon name='trash' size={24} />
                         </button>
                       </div>
                     ))}
-                  </>
-                ) : (
-                  <AdminFieldsGrid
-                    group='pagamento'
-                    draft={d}
-                    fields={props.fields}
-                    canEdit={props.canEdit && !props.saving}
-                    onChange={props.onChange}
-                    fieldNames={['pagamento_scadenza']}
-                  />
+                  </div>
                 )}
               </div>
             )}
@@ -7464,6 +8014,518 @@ function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, f
         {protocolloCompleto && <InfoBox>Le ricevute PEC, la relata, l’avviso di ricevimento o altra documentazione probatoria devono essere caricati nella scheda Allegati.</InfoBox>}
       </div>
     </Section>
+  )
+}
+
+
+function GiiPaymentDocumentsPanel (props: {
+  data: Record<string, any>
+  fields: LayerFieldInfo[]
+  canEdit: boolean
+  role: string
+  disabled?: boolean
+  onChange: (name: string, value: any) => void
+  onReadyChange?: (ready: boolean | null) => void
+  onPresenceChange?: (hasRows: boolean | null) => void
+}) {
+  const st = useAdminStyle()
+  const data = props.data || {}
+  const role = String(props.role || '').trim().toUpperCase()
+  const editableAccess = role === 'IA' || role === 'ADMIN'
+  const canMutate = !!props.canEdit && editableAccess && !props.disabled
+  const practiceGlobalId = String(pickAttrCI(data, ['GlobalID', 'globalid']) || '').trim()
+  const practiceMode = getPaymentMode(data, props.fields)
+  const total = Math.max(0, parseNumberInput(pickAttrCI(data, ['pagamento_importo_totale'])) || 0)
+  const [positions, setPositions] = React.useState<GiiPaymentPosition[]>([])
+  const [drafts, setDrafts] = React.useState<Record<number, Record<string, any>>>({})
+  const [rateInput, setRateInput] = React.useState('0')
+  const [loadedGid, setLoadedGid] = React.useState('')
+  const [loading, setLoading] = React.useState(false)
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const [info, setInfo] = React.useState<string | null>(null)
+  const [inputKey, setInputKey] = React.useState(0)
+  const [confirmPlanRateCount, setConfirmPlanRateCount] = React.useState<number | null>(null)
+  const [pendingPagoPaBatch, setPendingPagoPaBatch] = React.useState<GiiPagoPaBatchPlanItem[] | null>(null)
+  const [deleteDocumentTarget, setDeleteDocumentTarget] = React.useState<{ row: GiiPaymentPosition, att: AmmAttachmentInfo } | null>(null)
+  const rateTouchedRef = React.useRef(false)
+
+  const buildDrafts = React.useCallback((rows: GiiPaymentPosition[]) => {
+    const next: Record<number, Record<string, any>> = {}
+    for (const row of rows) next[row.objectId] = { ...(row.attributes || {}) }
+    setDrafts(next)
+  }, [])
+
+  const publishState = React.useCallback((rows: GiiPaymentPosition[]) => {
+    const hasRows = rows.length > 0
+    props.onPresenceChange?.(hasRows)
+    props.onReadyChange?.(hasRows ? giiPaymentValidationIssues(rows, total, practiceMode).length === 0 : null)
+  }, [practiceMode, props.onPresenceChange, props.onReadyChange, total])
+
+  const reload = React.useCallback(async () => {
+    if (!practiceGlobalId) {
+      setPositions([])
+      setDrafts({})
+      setLoadedGid('')
+      props.onPresenceChange?.(null)
+      props.onReadyChange?.(null)
+      return [] as GiiPaymentPosition[]
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const rows = await queryGiiPaymentPositions(practiceGlobalId, editableAccess, true)
+      setPositions(rows)
+      buildDrafts(rows)
+      setLoadedGid(practiceGlobalId)
+      if (!rateTouchedRef.current) setRateInput(String(giiPaymentRateCount(rows)))
+      publishState(rows)
+      return rows
+    } catch (e: any) {
+      setPositions([])
+      setDrafts({})
+      setLoadedGid(practiceGlobalId)
+      props.onPresenceChange?.(null)
+      props.onReadyChange?.(null)
+      setError(e?.message || String(e))
+      return [] as GiiPaymentPosition[]
+    } finally {
+      setLoading(false)
+    }
+  }, [buildDrafts, editableAccess, practiceGlobalId, props.onPresenceChange, props.onReadyChange, publishState])
+
+  React.useEffect(() => {
+    rateTouchedRef.current = false
+    setPositions([])
+    setDrafts({})
+    setLoadedGid('')
+    setError(null)
+    setInfo(null)
+    setRateInput('0')
+    setConfirmPlanRateCount(null)
+    setPendingPagoPaBatch(null)
+    setDeleteDocumentTarget(null)
+  }, [practiceGlobalId])
+
+  React.useEffect(() => {
+    if (practiceGlobalId && loadedGid !== practiceGlobalId) void reload()
+  }, [loadedGid, practiceGlobalId, reload])
+
+  React.useEffect(() => {
+    const handler = (event: Event) => {
+      const gid = String((event as CustomEvent)?.detail?.practiceGlobalId || '').trim()
+      if (!gid || globalIdVariantsForLog(gid).some(v => globalIdVariantsForLog(practiceGlobalId).includes(v))) void reload()
+    }
+    window.addEventListener('gii-pagamenti-changed', handler as EventListener)
+    return () => window.removeEventListener('gii-pagamenti-changed', handler as EventListener)
+  }, [practiceGlobalId, reload])
+
+  const syncPracticeSummary = React.useCallback((rows: GiiPaymentPosition[]) => {
+    const deadline = earliestGiiPaymentDeadline(rows)
+    props.onChange('pagamento_scadenza', deadline)
+    const complete = rows.length > 0 && giiPaymentValidationIssues(rows, total, practiceMode).length === 0
+    const current = String(pickAttrCI(data, ['pagamento_stato']) || '').trim().toUpperCase()
+    if (!['NOTIFICATO', 'PARZIALE', 'PAGATO', 'SCADUTO', 'ANNULLATO'].includes(current)) {
+      props.onChange('pagamento_stato', complete ? 'GENERATO' : 'DA_GENERARE')
+    }
+  }, [data, practiceMode, props, total])
+
+  const executePlan = React.useCallback(async (n: number) => {
+    if (!practiceGlobalId || !canMutate || busy) return
+    setBusy(true)
+    setError(null)
+    setInfo(null)
+    try {
+      const profile = readUserProfile()
+      const rows = buildGiiPaymentPlanAttributes(practiceGlobalId, practiceMode, total, n, profile.username)
+      if (positions.length) await replaceGiiPaymentPositions(positions, rows)
+      else await addGiiPaymentPositions(rows)
+      rateTouchedRef.current = false
+      const updated = await reload()
+      const expectedCount = n >= 2 ? n + 1 : 1
+      if (updated.length !== expectedCount || giiPaymentRateCount(updated) !== n) {
+        throw new Error('Le posizioni sono state registrate, ma la configurazione riletta non coincide con il piano richiesto. Aggiornare la scheda e riprovare.')
+      }
+      syncPracticeSummary(updated)
+      setInfo(n >= 2
+        ? `Piano predisposto: unica soluzione + ${n} rate (${n + 1} posizioni di pagamento).`
+        : 'Piano predisposto: pagamento in unica soluzione.')
+      dispatchGiiPaymentsChanged(practiceGlobalId)
+    } catch (e: any) {
+      setError(e?.message || String(e))
+    } finally {
+      setBusy(false)
+      setConfirmPlanRateCount(null)
+    }
+  }, [busy, canMutate, positions, practiceGlobalId, practiceMode, reload, syncPracticeSummary, total])
+
+  const applyPlan = React.useCallback(async () => {
+    if (!practiceGlobalId || !canMutate || busy) return
+    setError(null)
+    setInfo(null)
+    try {
+      if (!practiceMode) throw new Error('Definire prima la modalità di pagamento nella sezione Preparazione dell’Atto e della notifica.')
+      if (!(total > 0)) throw new Error('Il totale da pagare non è disponibile.')
+      const n = Number(rateInput)
+      if (!Number.isInteger(n) || n < 0 || n === 1) throw new Error('Indicare 0 per la sola unica soluzione oppure un numero di rate pari almeno a 2.')
+      const protectedRows = positions.filter(row =>
+        (parseNumberInput(pickAttrCI(row.attributes, ['importo_pagato'])) || 0) > 0 ||
+        hasAdminValue(pickAttrCI(row.attributes, ['data_pagamento']))
+      )
+      if (protectedRows.length) throw new Error('Il piano non può essere ricreato perché sono già presenti dati di pagamento.')
+      if (positions.length) {
+        setConfirmPlanRateCount(n)
+        return
+      }
+      await executePlan(n)
+    } catch (e: any) {
+      setError(e?.message || String(e))
+    }
+  }, [busy, canMutate, executePlan, positions, practiceGlobalId, practiceMode, rateInput, total])
+
+  const setDraftField = React.useCallback((objectId: number, name: string, value: any) => {
+    setDrafts(prev => ({ ...prev, [objectId]: { ...(prev[objectId] || {}), [name]: value } }))
+  }, [])
+
+  const savePosition = React.useCallback(async (row: GiiPaymentPosition) => {
+    if (!row?.objectId || !canMutate || busy) return
+    setError(null)
+    setInfo(null)
+    setBusy(true)
+    try {
+      const draft = drafts[row.objectId] || row.attributes || {}
+      const profile = readUserProfile()
+      const attrs: Record<string, any> = {
+        modalita_pagamento: String(pickAttrCI(draft, ['modalita_pagamento']) || '').trim() || null,
+        importo_dovuto: parseNumberInput(pickAttrCI(draft, ['importo_dovuto'])),
+        scadenza: dateMsOrNull(pickAttrCI(draft, ['scadenza'])),
+        tipo_riferimento: String(pickAttrCI(draft, ['tipo_riferimento']) || '').trim() || null,
+        riferimento_pagamento: String(pickAttrCI(draft, ['riferimento_pagamento']) || '').trim() || null,
+        tipo_riferimento_secondario: String(pickAttrCI(draft, ['tipo_riferimento_secondario']) || '').trim() || null,
+        riferimento_secondario: String(pickAttrCI(draft, ['riferimento_secondario']) || '').trim() || null,
+        note: String(pickAttrCI(draft, ['note']) || '').trim() || null,
+        aggiornato_il: Date.now(),
+        aggiornato_da: profile.username || null
+      }
+      if (!(Number(attrs.importo_dovuto) > 0)) throw new Error(`${giiPaymentPositionLabel(row.attributes)}: indicare un importo dovuto maggiore di zero.`)
+      await updateGiiPaymentPosition(row.objectId, attrs)
+      const updated = await reload()
+      syncPracticeSummary(updated)
+      setInfo(`${giiPaymentPositionLabel(row.attributes)} aggiornata.`)
+      dispatchGiiPaymentsChanged(practiceGlobalId)
+    } catch (e: any) {
+      setError(e?.message || String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [busy, canMutate, drafts, practiceGlobalId, reload, syncPracticeSummary])
+
+  const executePagoPaBatch = React.useCallback(async (plan: GiiPagoPaBatchPlanItem[]) => {
+    if (!plan.length || !practiceGlobalId || !canMutate || busy) return
+    setBusy(true)
+    setError(null)
+    setInfo(null)
+    const layer = await getGiiPaymentLayer(true)
+    const oidField = String(layer?.objectIdField || 'OBJECTID')
+    let newObjectIds: number[] = []
+    try {
+      const temporaryAttrs = plan.map(item => ({ ...item.attributes, stato_pagamento: 'ANNULLATO' }))
+      const addResult = await layer.applyEdits({ addFeatures: temporaryAttrs.map(attributes => ({ attributes })) }, { rollbackOnFailureEnabled: true })
+      throwPaymentEditFailure(addResult, 'Creazione delle posizioni pagoPA non riuscita')
+      const addRows = Array.isArray(addResult?.addFeatureResults) ? addResult.addFeatureResults : (Array.isArray(addResult?.addResults) ? addResult.addResults : [])
+      newObjectIds = addRows.map((row: any) => Number(row?.objectId)).filter((oid: number) => Number.isFinite(oid) && oid > 0)
+      if (newObjectIds.length !== plan.length) throw new Error('Le nuove posizioni sono state create, ma non è stato possibile identificarle tutte.')
+
+      for (let i = 0; i < plan.length; i++) {
+        const oid = newObjectIds[i]
+        const syntheticRow: GiiPaymentPosition = { objectId: oid, globalId: '', attributes: plan[i].attributes, attachments: [] }
+        const ids = await addAmmAttachments(layer, oid, [plan[i].file], GII_VIEW_EDIT_PAGAMENTI_URL, giiPaymentDocumentKeywords(syntheticRow, 'PAGOPA'))
+        if (!Number.isFinite(Number(ids?.[0])) || Number(ids?.[0]) <= 0) throw new Error(`Non è stato possibile associare “${plan[i].file.name}” alla relativa posizione.`)
+      }
+
+      const oldDeleteFeatures = await giiPaymentDeleteGraphics(layer, positions.map(row => row.objectId))
+      const finalResult = await layer.applyEdits({
+        updateFeatures: newObjectIds.map(oid => ({ attributes: { [oidField]: oid, stato_pagamento: 'DA_PAGARE', aggiornato_il: Date.now(), aggiornato_da: readUserProfile().username || null } })),
+        deleteFeatures: oldDeleteFeatures
+      }, { rollbackOnFailureEnabled: true })
+      throwPaymentEditFailure(finalResult, 'Sostituzione delle posizioni pagoPA non riuscita')
+
+      const updated = await reload()
+      syncPracticeSummary(updated)
+      setInputKey(k => k + 1)
+      const rateCount = plan.filter(item => String(item.attributes.tipo_posizione || '').toUpperCase() === 'RATA').length
+      setInfo(rateCount
+        ? `Avvisi pagoPA acquisiti: unica soluzione + ${rateCount} rate (${plan.length} avvisi).`
+        : 'Avviso pagoPA acquisito: pagamento in unica soluzione.')
+      dispatchGiiPaymentsChanged(practiceGlobalId)
+    } catch (e: any) {
+      if (newObjectIds.length) {
+        try {
+          const cleanupGraphics = await giiPaymentDeleteGraphics(layer, newObjectIds)
+          await layer.applyEdits({ deleteFeatures: cleanupGraphics }, { rollbackOnFailureEnabled: true })
+        } catch {}
+      }
+      setError(e?.message || String(e))
+    } finally {
+      setBusy(false)
+      setPendingPagoPaBatch(null)
+    }
+  }, [busy, canMutate, positions, practiceGlobalId, reload, syncPracticeSummary])
+
+  const preparePagoPaBatch = React.useCallback(async (files: File[]) => {
+    if (!files.length || !practiceGlobalId || !canMutate || busy) return
+    setError(null)
+    setInfo(null)
+    setBusy(true)
+    try {
+      if (practiceMode !== 'PAGOPA') throw new Error('Il caricamento automatico multiplo è disponibile quando la modalità di pagamento della pratica è pagoPA.')
+      const notPdf = files.find(file => !/\.pdf$/i.test(String(file?.name || '')))
+      if (notPdf) throw new Error(`“${notPdf.name}” non è un PDF.`)
+      const parsedFiles: Array<{ file: File, parsed: GiiPagoPaExtractedData }> = []
+      for (const file of files) {
+        const content = await extractPdfVerificationContent(file)
+        if (!content.text) throw new Error(`“${file.name}”: non è stato possibile leggere il contenuto del PDF.`)
+        parsedFiles.push({ file, parsed: extractPagoPaStructuredData(content.text) })
+      }
+      const plan = buildGiiPagoPaBatchPlan(parsedFiles, practiceGlobalId, total, readUserProfile().username)
+      const protectedRows = positions.filter(row =>
+        (parseNumberInput(pickAttrCI(row.attributes, ['importo_pagato'])) || 0) > 0 ||
+        hasAdminValue(pickAttrCI(row.attributes, ['data_pagamento']))
+      )
+      if (protectedRows.length) throw new Error('Gli avvisi non possono essere sostituiti perché risultano già registrati dati di pagamento.')
+      setBusy(false)
+      if (positions.length) setPendingPagoPaBatch(plan)
+      else await executePagoPaBatch(plan)
+    } catch (e: any) {
+      setError(e?.message || String(e))
+      setBusy(false)
+      setInputKey(k => k + 1)
+    }
+  }, [busy, canMutate, executePagoPaBatch, positions, practiceGlobalId, practiceMode, total])
+
+  const uploadPositionDocument = React.useCallback(async (row: GiiPaymentPosition, file: File | null) => {
+    if (!file || !row?.objectId || !canMutate || busy) return
+    setError(null)
+    setInfo(null)
+    if (!/\.pdf$/i.test(String(file.name || ''))) { setError('Caricare il documento di pagamento in formato PDF.'); return }
+    setBusy(true)
+    try {
+      const draft = drafts[row.objectId] || row.attributes || {}
+      const mode = String(pickAttrCI(draft, ['modalita_pagamento']) || '').trim().toUpperCase()
+      if (!mode) throw new Error(`${giiPaymentPositionLabel(row.attributes)}: indicare prima la modalità di pagamento.`)
+      const layer = await getGiiPaymentLayer(true)
+      const before = await queryAmmAttachments(layer, row.objectId, GII_VIEW_EDIT_PAGAMENTI_URL)
+      const ids = await addAmmAttachments(layer, row.objectId, [file], GII_VIEW_EDIT_PAGAMENTI_URL, giiPaymentDocumentKeywords(row, mode))
+      const keepId = Number(ids?.[0])
+      if (!Number.isFinite(keepId) || keepId <= 0) throw new Error('Documento caricato, ma allegato non identificabile.')
+      for (const old of before) {
+        const oldId = Number(old.id)
+        if (Number.isFinite(oldId) && oldId > 0 && oldId !== keepId) {
+          try { await deleteAmmAttachment(layer, row.objectId, oldId, GII_VIEW_EDIT_PAGAMENTI_URL) } catch {}
+        }
+      }
+      const updated = await reload()
+      syncPracticeSummary(updated)
+      setInputKey(k => k + 1)
+      setInfo(`${giiPaymentPositionLabel(row.attributes)}: documento acquisito.`)
+      dispatchGiiPaymentsChanged(practiceGlobalId)
+    } catch (e: any) {
+      setError(e?.message || String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [busy, canMutate, drafts, practiceGlobalId, reload, syncPracticeSummary])
+
+  const confirmDeletePositionDocument = React.useCallback(async () => {
+    const target = deleteDocumentTarget
+    if (!target?.row?.objectId || !target?.att?.id || !canMutate || busy) return
+    setBusy(true)
+    setError(null)
+    setInfo(null)
+    try {
+      const layer = await getGiiPaymentLayer(true)
+      await deleteAmmAttachment(layer, target.row.objectId, Number(target.att.id), GII_VIEW_EDIT_PAGAMENTI_URL)
+      const updated = await reload()
+      syncPracticeSummary(updated)
+      setInputKey(k => k + 1)
+      dispatchGiiPaymentsChanged(practiceGlobalId)
+    } catch (e: any) {
+      setError(e?.message || String(e))
+    } finally {
+      setBusy(false)
+      setDeleteDocumentTarget(null)
+    }
+  }, [busy, canMutate, deleteDocumentTarget, practiceGlobalId, reload, syncPracticeSummary])
+
+  const deletePositionDocument = React.useCallback((row: GiiPaymentPosition, att: AmmAttachmentInfo) => {
+    if (!row?.objectId || !att?.id || !canMutate || busy) return
+    setDeleteDocumentTarget({ row, att })
+  }, [busy, canMutate])
+
+  const downloadPositionDocument = React.useCallback(async (row: GiiPaymentPosition, att: AmmAttachmentInfo) => {
+    if (!row?.objectId || !att?.id || busy) return
+    setBusy(true)
+    setError(null)
+    try { await downloadAmmAttachmentFile(att, row.objectId, giiPaymentLayerUrl(editableAccess)) }
+    catch (e: any) { setError(e?.message || String(e)) }
+    finally { setBusy(false) }
+  }, [busy, editableAccess])
+
+  const issues = giiPaymentValidationIssues(positions, total, practiceMode)
+  const currentRateCount = giiPaymentRateCount(positions)
+  const hasUnsavedPositionChanges = practiceMode === 'PAGOPA' ? false : positions.some(row =>
+    giiPaymentDraftChanged(row.attributes || {}, drafts[row.objectId] || row.attributes || {})
+  )
+  const ratePlanInputChanged = practiceMode === 'PAGOPA' ? false : (positions.length > 0 && String(rateInput).trim() !== String(currentRateCount))
+  const hasUnsavedPaymentChanges = hasUnsavedPositionChanges || ratePlanInputChanged
+  React.useEffect(() => {
+    if (hasUnsavedPaymentChanges) props.onReadyChange?.(false)
+  }, [hasUnsavedPaymentChanges, props.onReadyChange])
+
+  const refOptions = [
+    { code: '', name: '—' }, { code: 'IUV', name: 'IUV' }, { code: 'CODICE_AVVISO', name: 'Codice avviso' },
+    { code: 'TRN', name: 'TRN' }, { code: 'CRO', name: 'CRO' }, { code: 'ALTRO', name: 'Altro' }
+  ]
+  const modeOptions = [
+    { code: '', name: '—' }, { code: 'PAGOPA', name: 'pagoPA' }, { code: 'BONIFICO', name: 'Bonifico' },
+    { code: 'BOLLETTINO', name: 'Bollettino postale' }, { code: 'ALTRO', name: 'Altro' }
+  ]
+  const fieldHeight = Math.max(24, Number(st.formFieldHeight ?? 32) || 32)
+  const inputStyle = inputStyleFrom(st, !canMutate)
+  const labelStyle: React.CSSProperties = {
+    color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 15),
+    fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3), lineHeight: 1.2
+  }
+  const paymentFieldStyle: React.CSSProperties = { display: 'grid', alignContent: 'start', minWidth: 0 }
+  const paymentActionButtonStyle = (disabled?: boolean): React.CSSProperties => ({
+    ...bozzaActionButtonStyle({ disabled }), height: fieldHeight, minHeight: fieldHeight, boxSizing: 'border-box',
+    borderRadius: Number(st.formFieldBorderRadius ?? 7), fontSize: Math.max(13, Number(st.formFieldFontSize ?? 15) - 2), lineHeight: 1
+  })
+
+  if (!practiceGlobalId) return <InfoBox kind='warn'>GlobalID della pratica non disponibile: le posizioni di pagamento non possono essere collegate.</InfoBox>
+  if (!(total > 0)) return <InfoBox>Per questa pratica non risulta alcun importo da pagare.</InfoBox>
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      {confirmPlanRateCount != null && practiceMode !== 'PAGOPA' && (
+        <PaymentPlanConfirmDialog currentCount={positions.length} rateCount={confirmPlanRateCount} saving={busy} onCancel={() => setConfirmPlanRateCount(null)} onConfirm={() => { void executePlan(confirmPlanRateCount) }} />
+      )}
+      {pendingPagoPaBatch && (
+        <ConfirmActionDialog
+          title='Sostituire gli avvisi pagoPA'
+          text={`Le ${positions.length} posizioni attuali e i relativi documenti saranno sostituiti con i ${pendingPagoPaBatch.length} avvisi appena selezionati. Il sistema ricostruirà automaticamente unica soluzione e rate.`}
+          confirmLabel='Sostituisci avvisi'
+          saving={busy}
+          onCancel={() => { setPendingPagoPaBatch(null); setInputKey(k => k + 1) }}
+          onConfirm={() => { void executePagoPaBatch(pendingPagoPaBatch) }}
+        />
+      )}
+      {deleteDocumentTarget && (
+        <ConfirmActionDialog
+          title='Eliminare il documento'
+          text={`Eliminare il documento “${deleteDocumentTarget.att.name || deleteDocumentTarget.att.id}” dalla posizione ${giiPaymentPositionLabel(deleteDocumentTarget.row.attributes)}?`}
+          confirmLabel='Elimina'
+          danger
+          saving={busy}
+          onCancel={() => setDeleteDocumentTarget(null)}
+          onConfirm={() => { void confirmDeletePositionDocument() }}
+        />
+      )}
+
+      {practiceMode === 'PAGOPA' ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'auto minmax(280px, 1fr)', gap: 10, alignItems: 'center' }}>
+          <label style={{ ...paymentActionButtonStyle(!canMutate || busy || loading), margin: 0, cursor: !canMutate || busy || loading ? 'not-allowed' : 'pointer', justifySelf: 'start' }}>
+            Carica avvisi pagoPA
+            <input
+              key={`payment-batch-${inputKey}`}
+              type='file'
+              accept='application/pdf,.pdf'
+              multiple
+              disabled={!canMutate || busy || loading}
+              style={{ display: 'none' }}
+              onChange={e => { const files = Array.from(e.currentTarget.files || []); void preparePagoPaBatch(files) }}
+            />
+          </label>
+          <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.35 }}>
+            Selezionare insieme tutti gli avvisi prodotti: uno per l’unica soluzione e, se previste, tutte le rate. Il sistema legge importi, scadenze, IUV e codici avviso e costruisce automaticamente il piano.
+            {positions.length > 0 && <><br/><strong>Configurazione corrente:</strong> {currentRateCount >= 2 ? `unica soluzione + ${currentRateCount} rate (${positions.length} avvisi)` : 'unica soluzione'}.</>}
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: `${ADMIN_COMPACT_FIELD_MAX_WIDTH}px auto minmax(280px, 1fr)`, gridTemplateRows: `auto ${fieldHeight}px`, columnGap: 10, rowGap: Number(st.formLabelMarginBottom ?? 3), alignItems: 'center' }}>
+          <span style={{ ...labelStyle, marginBottom: 0, gridColumn: '1', gridRow: '1' }}>Numero rate concesse</span>
+          <input type='number' min={0} step={1} value={rateInput} disabled={!canMutate || busy || loading} onChange={e => { rateTouchedRef.current = true; setRateInput(e.target.value) }} style={{ ...inputStyle, gridColumn: '1', gridRow: '2' }} />
+          <button type='button' disabled={!canMutate || busy || loading || !practiceMode} onClick={() => { void applyPlan() }} style={{ ...paymentActionButtonStyle(!canMutate || busy || loading || !practiceMode), gridColumn: '2', gridRow: '2' }}>{positions.length ? 'Aggiorna piano' : 'Imposta piano'}</button>
+          <div style={{ gridColumn: '3', gridRow: '2', fontSize: 12, color: '#64748b', lineHeight: 1.35, alignSelf: 'center' }}>0 = sola unica soluzione. Con 2 rate vengono create 3 posizioni: unica soluzione + rata 1/2 + rata 2/2.</div>
+        </div>
+      )}
+
+      {loading && <InfoBox>Caricamento delle posizioni di pagamento…</InfoBox>}
+      {error && <InfoBox kind='warn'>{error}</InfoBox>}
+      {info && <InfoBox kind='ok'>{info}</InfoBox>}
+      {!loading && positions.length === 0 && <InfoBox kind='warn'>{practiceMode === 'PAGOPA' ? 'Caricare gli avvisi pagoPA prima della trasmissione dell’Atto al protocollo.' : 'Configurare le posizioni di pagamento prima della trasmissione dell’Atto al protocollo.'}</InfoBox>}
+
+      {positions.map(row => {
+        const draft = drafts[row.objectId] || row.attributes || {}
+        const mode = String(pickAttrCI(draft, ['modalita_pagamento']) || '')
+        const pagoPaAuto = practiceMode === 'PAGOPA' && mode === 'PAGOPA'
+        const modeEditable = !pagoPaAuto && (practiceMode === 'MISTO' || practiceMode === 'ALTRO')
+        const fieldDisabled = !canMutate || busy || pagoPaAuto
+        return (
+          <div key={`payment-position-${row.objectId}`} style={{ border: '1px solid #dbe7f3', borderRadius: 8, background: '#fff', overflow: 'hidden' }}>
+            <div style={{ padding: '7px 10px', background: '#f5f9fd', borderBottom: '1px solid #dbe7f3', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+              <div style={{ fontWeight: 900, color: '#0f4c81' }}>{giiPaymentPositionLabel(row.attributes)}</div>
+              <div style={{ fontSize: 12, color: '#64748b' }}>{giiPaymentModeLabel(mode || pickAttrCI(row.attributes, ['modalita_pagamento']))}</div>
+            </div>
+            <div style={{ padding: 10, display: 'grid', gap: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', gap: 10, alignItems: 'end' }}>
+                <label style={paymentFieldStyle}><span style={labelStyle}>Modalità</span><select value={mode} disabled={fieldDisabled || !modeEditable} onChange={e => setDraftField(row.objectId, 'modalita_pagamento', e.target.value)} style={{ ...inputStyleFrom(st, fieldDisabled || !modeEditable), cursor: fieldDisabled || !modeEditable ? 'not-allowed' : 'pointer' }}>{modeOptions.map(opt => <option key={opt.code || 'blank'} value={opt.code}>{opt.name}</option>)}</select></label>
+                <label style={paymentFieldStyle}><span style={labelStyle}>Importo dovuto</span><input type='number' min={0} step='0.01' value={pickAttrCI(draft, ['importo_dovuto']) ?? ''} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'importo_dovuto', e.target.value)} style={inputStyleFrom(st, fieldDisabled)} /></label>
+                <label style={paymentFieldStyle}><span style={labelStyle}>Scadenza</span><input type='date' value={dateInputValue(pickAttrCI(draft, ['scadenza']))} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'scadenza', fromDateInputValue(e.target.value))} style={inputStyleFrom(st, fieldDisabled)} /></label>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 10, alignItems: 'end' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(145px, 0.65fr) minmax(200px, 1.35fr)', gap: 10, alignItems: 'end' }}>
+                  <label style={paymentFieldStyle}><span style={labelStyle}>Tipo riferimento</span><select value={String(pickAttrCI(draft, ['tipo_riferimento']) || '')} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'tipo_riferimento', e.target.value)} style={inputStyleFrom(st, fieldDisabled)}>{refOptions.map(opt => <option key={opt.code || 'blank'} value={opt.code}>{opt.name}</option>)}</select></label>
+                  <label style={paymentFieldStyle}><span style={labelStyle}>Riferimento</span><input type='text' value={String(pickAttrCI(draft, ['riferimento_pagamento']) || '')} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'riferimento_pagamento', e.target.value)} style={inputStyleFrom(st, fieldDisabled)} /></label>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(145px, 0.65fr) minmax(200px, 1.35fr)', gap: 10, alignItems: 'end' }}>
+                  <label style={paymentFieldStyle}><span style={labelStyle}>Tipo riferimento 2</span><select value={String(pickAttrCI(draft, ['tipo_riferimento_secondario']) || '')} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'tipo_riferimento_secondario', e.target.value)} style={inputStyleFrom(st, fieldDisabled)}>{refOptions.map(opt => <option key={opt.code || 'blank'} value={opt.code}>{opt.name}</option>)}</select></label>
+                  <label style={paymentFieldStyle}><span style={labelStyle}>Riferimento 2</span><input type='text' value={String(pickAttrCI(draft, ['riferimento_secondario']) || '')} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'riferimento_secondario', e.target.value)} style={inputStyleFrom(st, fieldDisabled)} /></label>
+                </div>
+              </div>
+
+              {!pagoPaAuto && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <button type='button' disabled={!canMutate || busy} onClick={() => { void savePosition(row) }} style={paymentActionButtonStyle(!canMutate || busy)}>Aggiorna</button>
+                  {(mode === 'PAGOPA' || mode === 'BOLLETTINO') && (
+                    <label style={{ ...paymentActionButtonStyle(!canMutate || busy), margin: 0, cursor: !canMutate || busy ? 'not-allowed' : 'pointer' }}>
+                      {mode === 'PAGOPA' ? 'Carica avviso pagoPA' : 'Carica bollettino'}
+                      <input key={`payment-file-${row.objectId}-${inputKey}`} type='file' accept='application/pdf,.pdf' disabled={!canMutate || busy} style={{ display: 'none' }} onChange={e => { void uploadPositionDocument(row, e.target.files?.[0] || null) }} />
+                    </label>
+                  )}
+                </div>
+              )}
+
+              {row.attachments.map(att => (
+                <div key={`payment-att-${row.objectId}-${att.id}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, border: '1px solid #e5edf7', borderRadius: 7, padding: '7px 8px' }}>
+                  <div style={{ minWidth: 0, fontSize: 12, color: '#475569', overflowWrap: 'anywhere' }}>{att.name || `Documento ${att.id}`}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button type='button' title='Scarica documento' aria-label='Scarica documento' disabled={busy} onClick={() => { void downloadPositionDocument(row, att) }} style={bozzaIconButtonStyle({ disabled: busy })}><BozzaActionIcon name='download' size={22} /></button>
+                    <button type='button' title='Elimina documento' aria-label='Elimina documento' disabled={!canMutate || busy} onClick={() => deletePositionDocument(row, att)} style={bozzaIconButtonStyle({ danger: true, disabled: !canMutate || busy })}><BozzaActionIcon name='trash' size={22} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+
+      {!loading && positions.length > 0 && hasUnsavedPaymentChanges && <InfoBox kind='warn'>Sono presenti modifiche alle posizioni non ancora registrate. Usare Aggiorna oppure applicare il nuovo piano prima di proseguire.</InfoBox>}
+      {!loading && positions.length > 0 && !hasUnsavedPaymentChanges && issues.length === 0 && <InfoBox kind='ok'>Posizioni di pagamento complete e coerenti con il totale da pagare.</InfoBox>}
+      {!loading && positions.length > 0 && !hasUnsavedPaymentChanges && issues.length > 0 && (
+        <InfoBox kind='warn'><strong>Dati di pagamento da completare.</strong><div style={{ marginTop: 4 }}>{issues.slice(0, 4).map((issue, idx) => <div key={`payment-issue-${idx}`}>• {issue}</div>)}</div>{issues.length > 4 && <div>• …e altri {issues.length - 4} controlli.</div>}</InfoBox>
+      )}
+    </div>
   )
 }
 
@@ -9860,6 +10922,8 @@ type ProtocolloFascicoloManifestItem = {
   docKey: string
   sourceAttachmentId?: number
   sourceAttachmentKind?: 'technical' | 'administrative'
+  sourceStore?: 'practice' | 'payment'
+  sourceParentOid?: number
   sourceAttachmentName?: string
   sourceAttachmentKeywords?: string
 }
@@ -10342,6 +11406,7 @@ function AllegaiaSection (props: {
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [inputKey, setInputKey] = React.useState(0)
+  const [deleteTarget, setDeleteTarget] = React.useState<AmmAttachmentInfo | null>(null)
   const loadSeqRef = React.useRef(0)
 
   React.useEffect(() => {
@@ -10352,6 +11417,7 @@ function AllegaiaSection (props: {
     setBusy(false)
     setError(null)
     setInputKey(k => k + 1)
+    setDeleteTarget(null)
     props.onSelectedAttachmentChange(null)
     props.onRotationConfirmed()
   }, [oid, props.practiceContextRevision])
@@ -10447,14 +11513,12 @@ function AllegaiaSection (props: {
     }
   }, [oid, props.canEdit, resolveAttachmentLayer, load, props.practiceContextRevision])
 
-  const remove = React.useCallback(async (att: AmmAttachmentInfo) => {
+  const confirmRemove = React.useCallback(async () => {
+    const att = deleteTarget
     const targetOid = oid
     const operationContextStamp = getGiiPracticeContextStamp()
     const isCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
     if (!targetOid || !att?.id || !props.canEdit || !isCurrent()) return
-    if (!isAdministrativeGenericAttachment(att)) { setError('Gli allegati tecnici sono consultabili ma non eliminabili dai ruoli amministrativi.'); return }
-    const ok = window.confirm(`Eliminare l'allegato "${att.name || att.id}"?`)
-    if (!ok || !isCurrent()) return
     setBusy(true)
     setError(null)
     try {
@@ -10467,8 +11531,16 @@ function AllegaiaSection (props: {
       if (isCurrent()) setError(e?.message || String(e))
     } finally {
       if (isCurrent()) setBusy(false)
+      setDeleteTarget(null)
     }
-  }, [oid, props.canEdit, resolveAttachmentLayer, load, props.practiceContextRevision])
+  }, [deleteTarget, oid, props.canEdit, resolveAttachmentLayer, load, props.practiceContextRevision])
+
+  const remove = React.useCallback((att: AmmAttachmentInfo) => {
+    const targetOid = oid
+    if (!targetOid || !att?.id || !props.canEdit) return
+    if (!isAdministrativeGenericAttachment(att)) { setError('Gli allegati tecnici sono consultabili ma non eliminabili dai ruoli amministrativi.'); return }
+    setDeleteTarget(att)
+  }, [oid, props.canEdit])
 
   const open = React.useCallback(async (att: AmmAttachmentInfo) => {
     const targetOid = oid
@@ -10537,6 +11609,18 @@ function AllegaiaSection (props: {
   }, [oid, props.canEdit, props.selectedAttachmentId, props.rotationDeg, props.onRotationConfirmed, props.practiceContextRevision, items, isRotatableAmmAttachment, buildPreview, resolveAttachmentLayer, load])
 
   return (
+    <>
+      {deleteTarget && (
+        <ConfirmActionDialog
+          title='Eliminare l’allegato'
+          text={`Eliminare l’allegato “${deleteTarget.name || deleteTarget.id}”?`}
+          confirmLabel='Elimina'
+          danger
+          saving={busy}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => { void confirmRemove() }}
+        />
+      )}
     <GiiAttachmentViewer
       oidAvailable={!!oid}
       noOidMessage='Selezionare una pratica prima di consultare o caricare gli allegati.'
@@ -10569,8 +11653,8 @@ function AllegaiaSection (props: {
       borderRadius={Number(st.formCardBorderRadius ?? 10)}
       innerHeaderColor={st.formInnerHeaderColor || '#0f4c81'}
     />
-  )
-}
+    </>
+  )}
 
 function DataSourceSelectionBridge (props: {
   widgetId: string
@@ -12148,10 +13232,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (!mode) issues.push('Pagamento: indicare la modalità di pagamento.')
       if (!hasAdminValue(pickAttrCI(current, ['pagamento_scadenza']))) issues.push('Pagamento: indicare la scadenza pagamento.')
       if (!hasAdminValue(pickAttrCI(current, ['pagamento_stato']))) issues.push('Pagamento: indicare lo stato pagamento.')
-      if (mode === 'PAGOPA' || mode === 'MISTO') {
-        if (!hasAdminValue(pickAttrCI(current, ['pagopa_iuv']))) issues.push('Pagamento: indicare l’IUV pagoPA.')
-        if (!hasAdminValue(pickAttrCI(current, ['pagopa_codice_avviso']))) issues.push('Pagamento: indicare il codice avviso pagoPA.')
-      }
       if (mode === 'BONIFICO' || mode === 'MISTO') {
         if (!hasAdminValue(pickAttrCI(current, ['bonifico_iban_snapshot']))) issues.push('Pagamento: indicare l’IBAN bonifico.')
         if (!hasAdminValue(pickAttrCI(current, ['bonifico_intestatario_snapshot']))) issues.push('Pagamento: indicare l’intestatario conto bonifico.')
@@ -12674,6 +13754,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           docKey: att.docKey,
           sourceAttachmentId: att.sourceAttachmentId,
           sourceAttachmentKind: att.sourceAttachmentKind,
+          sourceStore: att.sourceStore,
+          sourceParentOid: att.sourceParentOid,
           sourceAttachmentName: att.sourceAttachmentName,
           sourceAttachmentKeywords: att.sourceAttachmentKeywords
         }))
@@ -13201,12 +14283,25 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
 
       const paymentMode = getPaymentMode(liveAttrs, fields)
-      if (!hasAdminValue(pickAttrCI(liveAttrs, ['pagamento_scadenza']))) {
-        throw new Error('Completare la scadenza del pagamento prima della trasmissione al protocollo.')
-      }
+      const paymentPracticeGlobalId = String(pickAttrCI(liveAttrs, ['GlobalID', 'globalid']) || '').trim()
+      const paymentPositions = paymentPracticeGlobalId
+        ? await queryGiiPaymentPositions(paymentPracticeGlobalId, true, true)
+        : []
+      const usePaymentTable = paymentPositions.length > 0
       const pagoPaAttachments = attachments.filter(isGiiPagoPaAttachment)
-      if (['PAGOPA', 'MISTO'].includes(paymentMode) && !pagoPaAttachments.length) {
-        throw new Error('Caricare il bollettino pagoPA prima della trasmissione al protocollo.')
+      if (usePaymentTable) {
+        const paymentIssues = giiPaymentValidationIssues(paymentPositions, pickAttrCI(liveAttrs, ['pagamento_importo_totale']), paymentMode)
+        if (paymentIssues.length) {
+          throw new Error(`Completare le posizioni di pagamento prima della trasmissione al protocollo. ${paymentIssues[0]}`)
+        }
+      } else {
+        // Compatibilità con pratiche già avviate prima dell'introduzione di GII_PAGAMENTI.
+        if (!hasAdminValue(pickAttrCI(liveAttrs, ['pagamento_scadenza']))) {
+          throw new Error('Completare la scadenza del pagamento prima della trasmissione al protocollo.')
+        }
+        if (['PAGOPA', 'MISTO'].includes(paymentMode) && !pagoPaAttachments.length) {
+          throw new Error('Caricare il bollettino pagoPA prima della trasmissione al protocollo.')
+        }
       }
 
       const signedAtt = pickLatestGiiAttachment(attachments.filter(isSignedAttoContestazioneAttachment) as any[]) as AmmAttachmentInfo | null
@@ -13236,16 +14331,36 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         sourceAttachmentKeywords: String(signedAtt.keywords || '') || undefined
       })
 
-      for (const att of pagoPaAttachments) {
-        const emailAtt = await buildEmailAttachmentFromAmmAttachment(att, Number(oid), layerUrl)
-        rawProtocolloAttachments.push({
-          ...emailAtt,
-          index: rawProtocolloAttachments.length,
-          docKey: `pagopa:${Number(att.id)}`,
-          sourceAttachmentId: Number(att.id),
-          sourceAttachmentName: String(att.name || emailAtt.fileName || `pagopa_${Number(att.id)}.pdf`),
-          sourceAttachmentKeywords: String(att.keywords || '') || undefined
-        })
+      if (usePaymentTable) {
+        for (const position of giiPaymentActivePositions(paymentPositions)) {
+          for (const att of position.attachments.filter(item => /\.pdf$/i.test(String(item.name || '')) || String(item.contentType || '').toLowerCase().includes('pdf'))) {
+            const emailAtt = await buildEmailAttachmentFromAmmAttachment(att, position.objectId, GII_VIEW_EDIT_PAGAMENTI_URL)
+            rawProtocolloAttachments.push({
+              ...emailAtt,
+              index: rawProtocolloAttachments.length,
+              docKey: `pagamento:${String(position.globalId || position.objectId)}:${Number(att.id)}`,
+              sourceAttachmentId: Number(att.id),
+              sourceStore: 'payment',
+              sourceParentOid: position.objectId,
+              sourceAttachmentName: String(att.name || emailAtt.fileName || `pagamento_${position.objectId}_${Number(att.id)}.pdf`),
+              sourceAttachmentKeywords: String(att.keywords || '') || undefined
+            })
+          }
+        }
+      } else {
+        for (const att of pagoPaAttachments) {
+          const emailAtt = await buildEmailAttachmentFromAmmAttachment(att, Number(oid), layerUrl)
+          rawProtocolloAttachments.push({
+            ...emailAtt,
+            index: rawProtocolloAttachments.length,
+            docKey: `pagopa:${Number(att.id)}`,
+            sourceAttachmentId: Number(att.id),
+            sourceStore: 'practice',
+            sourceParentOid: Number(oid),
+            sourceAttachmentName: String(att.name || emailAtt.fileName || `pagopa_${Number(att.id)}.pdf`),
+            sourceAttachmentKeywords: String(att.keywords || '') || undefined
+          })
+        }
       }
 
       const fascicoloEmailAttachments = await buildProtocolloAttoFascicoloEmailAttachments(Number(oid), layer, layerUrl)
@@ -13273,6 +14388,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           docKey: att.docKey,
           sourceAttachmentId: att.sourceAttachmentId,
           sourceAttachmentKind: att.sourceAttachmentKind,
+          sourceStore: att.sourceStore,
+          sourceParentOid: att.sourceParentOid,
           sourceAttachmentName: att.sourceAttachmentName,
           sourceAttachmentKeywords: att.sourceAttachmentKeywords
         }))

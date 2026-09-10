@@ -45,6 +45,9 @@ export interface LayoutRow {
 }
 
 export interface Config {
+  aiReviewEnabled?: boolean
+  aiReviewEndpoint?: string
+
   // --- Snapshot schema usato dal setting
   schemaLayerUrl?: string
   schemaLayerLabel?: string
@@ -222,6 +225,8 @@ export interface Config {
 }
 
 export const defaultConfig: Config = {
+  aiReviewEnabled: false,
+  aiReviewEndpoint: '',
   schemaLayerUrl: '',
   schemaLayerLabel: '',
   schemaFields: [],

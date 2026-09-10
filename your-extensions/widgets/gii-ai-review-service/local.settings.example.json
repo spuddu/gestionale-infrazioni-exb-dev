@@ -1,0 +1,12 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AZURE_OPENAI_ENDPOINT": "https://NOME-RISORSA.openai.azure.com",
+    "AZURE_OPENAI_DEPLOYMENT": "NOME-DEPLOYMENT",
+    "AZURE_OPENAI_API_KEY": "",
+    "ARCGIS_PORTAL_URL": "https://www.arcgis.com",
+    "ARCGIS_ALLOWED_ORG_ID": ""
+  }
+}
