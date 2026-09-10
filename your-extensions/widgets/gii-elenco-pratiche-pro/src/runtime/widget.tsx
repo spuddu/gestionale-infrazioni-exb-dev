@@ -215,6 +215,8 @@ const ALLOWED_OGGETTI = new Set([
   "TRASMISSIONE ISTRUTTORIA",
   "TRASMISSIONE BOZZA DETERMINAZIONE",
   "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE",
+  "TRASMISSIONE ATTO DI ACCERTAMENTO",
+  "ATTO DI ACCERTAMENTO APPROVATO",
   "BOZZA DI DETERMINAZIONE TRASMESSA",
   "ATTESTAZIONE DI CONFORMITÀ",
   "ISTRUTTORIA AMMINISTRATIVA APPROVATA",
@@ -3378,7 +3380,7 @@ export default function Widget(props: Props) {
       return txt(cfg.oggettoBadgeColorIntegrazione || CHIP_ORANGE.background);
     if (o === "ASSEGNAZIONE ISTRUTTORIA")
       return txt(cfg.oggettoBadgeColorAssegnazione || CHIP_BLUE.background);
-    if (o === "TRASMISSIONE ISTRUTTORIA" || o === "TRASMISSIONE BOZZA DETERMINAZIONE" || o === "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE" || o === "BOZZA DI DETERMINAZIONE TRASMESSA" || o === "ATTESTAZIONE DI CONFORMITÀ")
+    if (o === "TRASMISSIONE ISTRUTTORIA" || o === "TRASMISSIONE BOZZA DETERMINAZIONE" || o === "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE" || o === "TRASMISSIONE ATTO DI ACCERTAMENTO" || o === "BOZZA DI DETERMINAZIONE TRASMESSA" || o === "ATTESTAZIONE DI CONFORMITÀ")
       return txt(cfg.oggettoBadgeColorTrasmissione || CHIP_PURPLE.background);
     if (o === "NUOVA RILEVAZIONE")
       return txt(
@@ -3401,6 +3403,8 @@ export default function Widget(props: Props) {
       return "Il colore identifica la trasmissione dell’istruttoria al ruolo successivo del procedimento.";
     if (o === "TRASMISSIONE BOZZA DETERMINAZIONE" || o === "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE")
       return "Il colore identifica la trasmissione della pratica, contenente la bozza di determinazione, al Responsabile dell’istruttoria amministrativa per la verifica.";
+    if (o === "TRASMISSIONE ATTO DI ACCERTAMENTO")
+      return "Il colore identifica la trasmissione dell’Atto di accertamento al Responsabile dell’istruttoria amministrativa per la verifica.";
     if (o === "ATTESTAZIONE DI CONFORMITÀ")
       return "Il colore identifica l’apposizione del visto di conformità da parte del Istruttore amministrativo e la trasmissione della pratica al Responsabile dell’istruttoria amministrativa.";
     if (o === "ISTRUTTORIA AMMINISTRATIVA APPROVATA")
@@ -3595,6 +3599,17 @@ export default function Widget(props: Props) {
     const stato = String(pickField(d, "determinazione_stato") ?? "")
       .trim()
       .toUpperCase();
+
+    // Dopo l'adozione della Determinazione, eventuali record prodotti dalle
+    // versioni precedenti possono ancora contenere TRASMESSA_RIA. Numero e data
+    // registrati prevalgono: il ciclo dell'Atto non usa più determinazione_stato.
+    const hasValue = (v: any) =>
+      v !== null && v !== undefined && String(v).trim() !== "" && String(v).trim() !== "0";
+    const determinazioneGiaAdottata =
+      hasValue(pickField(d, "determinazione_numero")) &&
+      hasValue(pickField(d, "determinazione_data"));
+    if (determinazioneGiaAdottata) return false;
+
     if (stato === "TRASMESSA_RIA" || stato === "BOZZA_TRASMESSA_RIA") return true;
 
     // Fallback necessario per le viste elenco che non espongono determinazione_stato:
@@ -3623,17 +3638,27 @@ export default function Widget(props: Props) {
   const isIaAwaitingRetakeFromRia = (d: any): boolean => {
     if (!d) return false;
 
-    // Dopo l'adozione della determinazione può aprirsi il successivo ciclo
-    // dell'Atto di contestazione. In quel ciclo determinazione_numero/data restano
-    // valorizzati, ma il rientro RIA -> IA richiede comunque una nuova presa in
-    // carico. Non trattare quindi la determinazione adottata come chiusura finale
-    // finché determinazione_stato identifica il workflow operativo dell'Atto.
-    const determinazioneStato = String(pickField(d, "determinazione_stato") ?? "")
-      .trim()
-      .toUpperCase();
+    // Dopo l'adozione della Determinazione il ciclo dell'Atto è distinto e
+    // determinazione_stato resta ADOTTATA. Per capire se siamo nel rientro RIA→IA
+    // dell'Atto usiamo quindi il log e i timestamp RIA successivi alla registrazione
+    // della Determinazione, non più stati temporanei della Determinazione.
+    const log = getLogForRecord(d);
+    const logRole = normalizeWorkflowRole(log?.ruolo);
+    const logDest = normalizeWorkflowRole(log?.ruoloDest);
+    const detRegisteredAt = parseToMs(pickField(d, "determinazione_registrata_il"));
+    const riaTimeline = [
+      parseToMs(pickField(d, "dt_esito_RIA")),
+      parseToMs(pickField(d, "dt_stato_RIA")),
+    ].filter((v): v is number => v !== null);
+    const riaLatestAt = riaTimeline.length ? Math.max(...riaTimeline) : null;
+    const logIdentificaCicloAtto =
+      isDeterminazioneAdottata(d) &&
+      log?.dt != null &&
+      (detRegisteredAt === null || log.dt > detRegisteredAt) &&
+      ((logRole === "IA" && logDest === "RIA") || (logRole === "RIA" && logDest === "IA"));
     const attoContestazioneWorkflowAttivo =
       isDeterminazioneAdottata(d) &&
-      ["BOZZA", "TRASMESSA_RIA", "VALIDATA_RIA", "TRASMESSA_FIRMA_DA"].includes(determinazioneStato);
+      (logIdentificaCicloAtto || (detRegisteredAt !== null && riaLatestAt !== null && riaLatestAt > detRegisteredAt));
     if (isDeterminazioneAdottata(d) && !attoContestazioneWorkflowAttivo) return false;
 
     // esito/stato_RIA = Integrazione è ambiguo: RIA ha due percorsi
@@ -3642,7 +3667,6 @@ export default function Widget(props: Props) {
     // dell'area di provenienza). La destinazione reale non è deducibile dal
     // solo record: va letta dal LOG, che registra esplicitamente il
     // destinatario di ogni trasmissione chiusa.
-    const log = getLogForRecord(d);
     const riaSentToIa =
       normalizeWorkflowRole(log?.ruolo) === "RIA" &&
       normalizeWorkflowRole(log?.ruoloDest) === "IA";
@@ -4220,6 +4244,37 @@ export default function Widget(props: Props) {
       } else {
         label = "ISTRUTTORIA TECNICA RESPINTA";
       }
+    } else if (
+      evento === "ISTRUTTORIA_TRASMESSA" &&
+      normalizeWorkflowRole(log.ruolo) === "RIA" &&
+      normalizeWorkflowRole(log.ruoloDest) === "IA" &&
+      (() => {
+        const hasValue = (v: any) =>
+          v !== null && v !== undefined && String(v).trim() !== "" && String(v).trim() !== "0";
+        return (
+          hasValue(pickField(d, "determinazione_numero")) &&
+          hasValue(pickField(d, "determinazione_data")) &&
+          hasValue(pickField(d, "accertamento_numero"))
+        );
+      })() &&
+      !transmissionAnswersIntegration(log)
+    ) {
+      label = "ATTO DI ACCERTAMENTO APPROVATO";
+    } else if (
+      evento === "ISTRUTTORIA_TRASMESSA" &&
+      normalizeWorkflowRole(log.ruolo) === "IA" &&
+      normalizeWorkflowRole(log.ruoloDest) === "RIA" &&
+      (() => {
+        const hasValue = (v: any) =>
+          v !== null && v !== undefined && String(v).trim() !== "" && String(v).trim() !== "0";
+        return (
+          hasValue(pickField(d, "determinazione_numero")) &&
+          hasValue(pickField(d, "determinazione_data"))
+        );
+      })() &&
+      !transmissionAnswersIntegration(log)
+    ) {
+      label = "TRASMISSIONE ATTO DI ACCERTAMENTO";
     } else if (
       evento === "ISTRUTTORIA_TRASMESSA" &&
       transmissionAnswersIntegration(log)

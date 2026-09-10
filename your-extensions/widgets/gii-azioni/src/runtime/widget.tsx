@@ -2792,6 +2792,7 @@ function ActionsPanel (props: {
     const dst = String(ruoloDest || '').trim().toUpperCase()
 
     if (ev === 'NUOVA_ASSEGNAZIONE') return 'NUOVA_ASSEGNAZIONE'
+    if (ev === 'ISTRUTTORIA_TRASMESSA' && src === 'RIA' && dst === 'IA' && riaAttoContestazioneDaVerificare) return 'ATTO_ACCERTAMENTO_APPROVATO'
     if (ev === 'ATTESTAZIONE_CONFORMITA') return 'ATTESTAZIONE_CONFORMITA_IA'
     if (ev === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'PROPOSTA_CONTESTAZIONE_APPROVATA'
     if (ev === 'RAPPORTO_APPROVATO') return 'RAPPORTO_APPROVATO'
@@ -2813,6 +2814,7 @@ function ActionsPanel (props: {
     if (st === 'NUOVA_ASSEGNAZIONE') return 'Nuova assegnazione'
     if (st === 'ATTESTAZIONE_CONFORMITA_IA') return 'Attestazione di conformità apposta'
     if (st === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'Istruttoria amministrativa approvata'
+    if (st === 'ATTO_ACCERTAMENTO_APPROVATO') return 'Atto di accertamento approvato'
     if (st === 'RICHIESTA_INTEGRAZIONE') return 'Integrazione richiesta'
     if (st === 'INTEGRAZIONE_TRASMESSA') return 'Integrazione trasmessa'
     if (st === 'RAPPORTO_APPROVATO') return 'Pratica approvata'
@@ -2829,6 +2831,7 @@ function ActionsPanel (props: {
     if (st === 'NUOVA_ASSEGNAZIONE') return `Pratica n. ${n} da prendere in carico.`
     if (st === 'ATTESTAZIONE_CONFORMITA_IA') return `Attestazione di conformità sulla pratica n. ${n} da prendere in carico.`
     if (st === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return `Istruttoria amministrativa della pratica n. ${n} approvata dal Responsabile dell’istruttoria amministrativa. Pratica da prendere in carico per protocollazione e predisposizione della bozza di determinazione.`
+    if (st === 'ATTO_ACCERTAMENTO_APPROVATO') return `Atto di accertamento della pratica n. ${n} approvato dal Responsabile dell’istruttoria amministrativa. Pratica da prendere in carico per i passaggi successivi.`
     if (st === 'RICHIESTA_INTEGRAZIONE') return `Integrazione n. ${n} da prendere in carico.`
     if (st === 'INTEGRAZIONE_TRASMESSA') return `Integrazione n. ${n} da prendere in carico.`
     if (st === 'RAPPORTO_APPROVATO') return `Pratica approvata n. ${n} da prendere in carico.`
@@ -2841,6 +2844,8 @@ function ActionsPanel (props: {
     const ev = String(evento || '').trim().toUpperCase()
     const src = String(ruoloMittente || '').trim().toUpperCase()
     const dst = String(ruoloDest || '').trim().toUpperCase()
+
+    if (subtipo === 'ATTO_ACCERTAMENTO_APPROVATO') return 'Atto di accertamento approvato'
 
     if (ev === 'ISTRUTTORIA_TRASMESSA') {
       if ((src === 'IT' || src === 'TR') && dst === 'CS') return 'Rilevazione trasmessa'
@@ -2861,6 +2866,8 @@ function ActionsPanel (props: {
     const src = String(ruoloMittente || '').trim().toUpperCase()
     const dst = String(ruoloDest || '').trim().toUpperCase()
     const n = String(numeroRapporto || '').trim() || '—'
+
+    if (subtipo === 'ATTO_ACCERTAMENTO_APPROVATO') return `Atto di accertamento della pratica n. ${n} approvato dal Responsabile dell’istruttoria amministrativa. Pratica da prendere in carico per i passaggi successivi.`
 
     if (ev === 'ISTRUTTORIA_TRASMESSA') {
       if ((src === 'IT' || src === 'TR') && dst === 'CS') return `Rilevazione n. ${n} da prendere in carico.`
@@ -3261,9 +3268,6 @@ function ActionsPanel (props: {
     !isEmptyValue(pickAttrCI(data, ['determinazione_numero', 'DETERMINAZIONE_NUMERO'])) &&
     !isEmptyValue(pickAttrCI(data, ['determinazione_data', 'DETERMINAZIONE_DATA']))
   const determinazioneAdottataCorrente = determinazioneStatoCorrente === 'ADOTTATA' || determinazioneRegistrataCorrente
-  const attoContestazioneWorkflowAttivo = determinazioneRegistrataCorrente &&
-    !isEmptyValue(pickAttrCI(data, ['accertamento_numero', 'ACCERTAMENTO_NUMERO'])) &&
-    ['BOZZA', 'TRASMESSA_RIA', 'VALIDATA_RIA', 'TRASMESSA_FIRMA_DA'].includes(determinazioneStatoCorrente)
 
   const parseIaRetakeMs = (v: any): number | null => {
     if (v == null || v === '') return null
@@ -3274,10 +3278,25 @@ function ActionsPanel (props: {
     return Number.isFinite(t) ? t : null
   }
 
-  const iaRiaReturnTimes = [
+  const determinazioneRegistrataIlMs = parseIaRetakeMs(pickAttrCI(data, ['determinazione_registrata_il', 'DETERMINAZIONE_REGISTRATA_IL']))
+  const riaWorkflowTimes = [
     parseIaRetakeMs(pickAttrCI(data, ['dt_esito_RIA', 'DT_ESITO_RIA'])),
     parseIaRetakeMs(pickAttrCI(data, ['dt_stato_RIA', 'DT_STATO_RIA']))
   ].filter((v): v is number => v !== null)
+  const riaLatestWorkflowMs = riaWorkflowTimes.length ? Math.max(...riaWorkflowTimes) : null
+  const giiAttoDest = String(pickAttrCI(data, ['GII_a', 'gii_a']) || '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
+  const giiAttoFrom = String(pickAttrCI(data, ['GII_da', 'gii_da']) || '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
+  const giiAttoTrasm = toNumOrNull(pickAttrCI(data, ['GII_trasm', 'gii_trasm']))
+  const attoRouteFallback = determinazioneRegistrataIlMs === null && giiAttoTrasm === 1 &&
+    (giiAttoDest === 'RIA' || (giiAttoFrom === 'RIA' && giiAttoDest === 'IA'))
+  const attoContestazioneWorkflowAttivo = determinazioneRegistrataCorrente &&
+    !isEmptyValue(pickAttrCI(data, ['accertamento_numero', 'ACCERTAMENTO_NUMERO'])) &&
+    (
+      (determinazioneRegistrataIlMs !== null && riaLatestWorkflowMs !== null && riaLatestWorkflowMs > determinazioneRegistrataIlMs) ||
+      attoRouteFallback
+    )
+
+  const iaRiaReturnTimes = riaWorkflowTimes
   const iaLastRiaReturnMs = iaRiaReturnTimes.length ? Math.max(...iaRiaReturnTimes) : null
   const iaLastPresaMs = parseIaRetakeMs(pickAttrCI(data, ['dt_presa_in_carico_IA', 'DT_PRESA_IN_CARICO_IA']))
   const iaRiaReturnEsito = toNumOrNull(pickAttrCI(data, ['esito_RIA', 'ESITO_RIA']))
@@ -3319,7 +3338,8 @@ function ActionsPanel (props: {
     )
   const riaAttoContestazioneDaVerificare = role === 'RIA' &&
     determinazioneRegistrataCorrente &&
-    determinazioneStatoCorrente === 'TRASMESSA_RIA' &&
+    attoContestazioneWorkflowAttivo &&
+    riaOperationalNodeForBozza &&
     roleEsitoNum !== ESITO_APPROVATA
   const iaAttestazioneOperativa = role === 'IA' && roleEsitoNum === ESITO_APPROVATA && (
     !determinazioneStatoCorrente ||
@@ -5322,7 +5342,11 @@ function ActionsPanel (props: {
           // codificato e non consente stati intermedi non previsti dallo schema.
           if (pending === 'INTEGRAZIONE_IA' && ruoloDest === 'IA') {
             const fDeterminaStato = getSchemaFieldNameCI(schemaFields, 'determinazione_stato')
-            if (fDeterminaStato) upd[fDeterminaStato] = 'BOZZA'
+            if (fDeterminaStato) {
+              // Il rimando dell'Atto riapre il solo ciclo IA↔RIA dell'Atto:
+              // la Determinazione già adottata non torna mai in BOZZA.
+              upd[fDeterminaStato] = riaAttoContestazioneDaVerificare ? 'ADOTTATA' : 'BOZZA'
+            }
           }
         } catch {}
       }
@@ -5485,7 +5509,9 @@ function ActionsPanel (props: {
       if (role === 'RIA' && esito === ESITO_APPROVATA && riaAttoContestazioneDaVerificare) {
         const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
         const fDetStato = getSchemaFieldNameCI(schemaFields, 'determinazione_stato')
-        if (fDetStato) upd[fDetStato] = 'VALIDATA_RIA'
+        // L'approvazione riguarda l'Atto di accertamento, non riapre né modifica
+        // il ciclo ormai concluso della Determinazione.
+        if (fDetStato) upd[fDetStato] = 'ADOTTATA'
       }
 
       if (role === 'RIA' && esito === ESITO_APPROVATA && riaBozzaDeterminazioneDaVerificare) {
@@ -5624,7 +5650,9 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
                       : 'ISTRUTTORIA_TRASMESSA',
                     ruoloDestinatario: ruoloDest,
                     utenteDestinatario: resolveDestUser(ruoloDest),
-                    noteChiusura: noteTrim,
+                    noteChiusura: noteTrim || (riaAttoContestazioneDaVerificare
+                      ? 'Atto di accertamento approvato dal Responsabile dell’istruttoria amministrativa e restituito all’Istruttore amministrativo.'
+                      : ''),
                     fase: role
                   })
         : null
@@ -5639,9 +5667,11 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
           : []
         const successText = isIaAttestazioneConformita
           ? 'Attestazione di conformità apposta.'
-          : riaStaApprovandoPropostaContestazione
-            ? 'Istruttoria amministrativa approvata e restituita all’Istruttore amministrativo.'
-            : `Esito salvato: ${label}.`
+          : riaAttoContestazioneDaVerificare
+            ? 'Atto di accertamento approvato e restituito all’Istruttore amministrativo.'
+            : riaStaApprovandoPropostaContestazione
+              ? 'Istruttoria amministrativa approvata e restituita all’Istruttore amministrativo.'
+              : `Esito salvato: ${label}.`
         await saveWithWorkflowLog(upd, successText, { ...logOpts, informativeActivities })
       } else {
         await runApplyEdits(upd, `Esito salvato: ${label}.`)

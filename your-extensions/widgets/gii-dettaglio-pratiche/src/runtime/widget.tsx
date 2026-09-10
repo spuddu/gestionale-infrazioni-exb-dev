@@ -2618,6 +2618,7 @@ const EVENTO_LABELS: Record<string, string> = {
   CREAZIONE: 'Creazione rilevazione',
   ISTRUTTORIA_TRASMESSA: 'Istruttoria trasmessa',
   PROPOSTA_CONTESTAZIONE_APPROVATA: 'Istruttoria amministrativa approvata',
+  BOZZA_DETERMINAZIONE_TRASMESSA: 'Bozza di determinazione trasmessa',
   INTEGRAZIONE_TRASMESSA: 'Integrazione trasmessa',
   INTEGRAZIONE: 'Richiesta integrazione',
   RAPPORTO_APPROVATO: 'Rapporto approvato',
@@ -2645,10 +2646,11 @@ function formatEvento (code: string): string {
   return EVENTO_LABELS[code] || formatEventoFallback(code)
 }
 
-function formatCycleTitleEvento (c: CicloRecord, cycleLabelNumber: number): string {
+function formatCycleTitleEvento (c: CicloRecord, cycleLabelNumber: number, practiceData?: any): string {
   const apertura = String(c?.evento_apertura || '').trim().toUpperCase()
   const chiusura = String(c?.evento_chiusura || '').trim().toUpperCase()
   const ruolo = normalizeRuoloCod(c?.ruolo_competente)
+  const ruoloDest = normalizeRuoloCod(c?.ruolo_destinatario)
 
   if (
     cycleLabelNumber === 1 &&
@@ -2657,6 +2659,21 @@ function formatCycleTitleEvento (c: CicloRecord, cycleLabelNumber: number): stri
     (ruolo === 'TR' || ruolo === 'IT')
   ) {
     return 'Nuova rilevazione trasmessa'
+  }
+
+  // Dopo la registrazione della determinazione, i nuovi cicli IA↔RIA riguardano
+  // l'Atto di accertamento. Non presentarli più come una generica istruttoria.
+  // Usiamo la data di chiusura del singolo ciclo, così i cicli amministrativi
+  // precedenti all'adozione restano correttamente descritti nel loro contesto storico.
+  if (chiusura === 'ISTRUTTORIA_TRASMESSA' && ((ruolo === 'IA' && ruoloDest === 'RIA') || (ruolo === 'RIA' && ruoloDest === 'IA'))) {
+    const note = String(c?.note_chiusura || '').trim().toUpperCase()
+    const attoEsplicito = note.includes('ATTO DI CONTESTAZIONE') || note.includes('ATTO DI ACCERTAMENTO')
+    const detRegistrataIl = dateMsOrNull(pickAttrCI(practiceData || {}, ['determinazione_registrata_il', 'DETERMINAZIONE_REGISTRATA_IL']))
+    const cicloChiusoIl = dateMsOrNull(c?.dt_chiusura)
+    const dopoAdozione = detRegistrataIl != null && cicloChiusoIl != null && cicloChiusoIl >= detRegistrataIl
+    if (attoEsplicito || dopoAdozione) {
+      return ruolo === 'RIA' ? 'Atto di accertamento approvato' : 'Atto di accertamento trasmesso'
+    }
   }
 
   return formatEvento(c.evento_chiusura || c.evento_apertura)
@@ -3129,7 +3146,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
           resolveIterPersonName(c.utente_destinatario, utentiMap) ||
           findIterRecipientNameByRole(c.ruolo_destinatario, c.area, c.settore, utentiMap)
         const noteChiusuraLabel = cleanIterNoteForDisplay(c.note_chiusura)
-        const cycleActionLabel = formatCycleTitleEvento(c, cycleLabelNumber)
+        const cycleActionLabel = formatCycleTitleEvento(c, cycleLabelNumber, props.data)
 
         const campiList = parseModifiedFieldNames(c.campi_modificati)
           .map(campo => ({ raw: campo, alias: getFieldAliasForIter(campo, props.aliasMap) }))

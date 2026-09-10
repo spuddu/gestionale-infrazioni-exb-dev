@@ -35,7 +35,8 @@ export const GII_ATTACHMENT_KEYWORDS = {
   attoContestazione: 'GII_ATTO_CONTESTAZIONE_PDF',
   approvedBozzaReference: 'GII_BOZZA_APPROVATA_RIA_REFERENCE',
   protocolloFascicoloPdf: 'GII_PROTOCOLLO_FASCICOLO_PDF',
-  protocolloFascicoloManifest: 'GII_PROTOCOLLO_FASCICOLO_MANIFEST'
+  protocolloFascicoloManifest: 'GII_PROTOCOLLO_FASCICOLO_MANIFEST',
+  protocolloAttoManifest: 'GII_PROTOCOLLO_ATTO_MANIFEST'
 } as const
 
 function normalizeGiiAttachmentText (value?: string): string {
@@ -56,7 +57,8 @@ export function getGiiAttachmentKind (item: GiiAttachmentViewerItem | null | und
   const nameKey = normalizeGiiAttachmentText((item as any)?.name)
   if (
     attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.approvedBozzaReference) ||
-    attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.protocolloFascicoloManifest)
+    attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.protocolloFascicoloManifest) ||
+    attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.protocolloAttoManifest)
   ) {
     return 'internal-reference'
   }
@@ -118,6 +120,10 @@ export function isGiiProtocolloFascicoloPdfAttachment (item: GiiAttachmentViewer
 
 export function isGiiProtocolloFascicoloManifestAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
   return !!item && attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.protocolloFascicoloManifest)
+}
+
+export function isGiiProtocolloAttoManifestAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
+  return !!item && attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.protocolloAttoManifest)
 }
 
 export function giiAttachmentKeywordValue (item: GiiAttachmentViewerItem | null | undefined, key: string): string {
@@ -706,8 +712,8 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
           {props.noOidMessage || 'Selezionare una pratica prima di consultare o caricare gli allegati.'}
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, flex: '1 1 auto', minHeight: 0, height: '100%', overflow: 'hidden', padding: 12 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, flex: '1 1 auto', minHeight: 0, height: '100%', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'hidden', padding: 12, boxSizing: 'border-box' }}>
             <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ fontWeight: 800, fontSize: Math.max(13, labelFontSize), color: props.innerHeaderColor || '#0f4c81' }}>Elenco allegati</div>
               {props.onUpload && (
@@ -819,7 +825,7 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
             )}
           </div>
 
-          <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12, background: '#282828', display: 'grid', gridTemplateRows: selectedCanRotate && previewUrl ? '34px minmax(0, 1fr) auto' : 'minmax(0, 1fr) auto', gap: 8, overflow: 'hidden', minHeight: 0, height: '100%' }}>
+          <div style={{ background: '#282828', display: 'grid', gridTemplateRows: selectedCanRotate && previewUrl ? '34px minmax(0, 1fr)' : 'minmax(0, 1fr)', gap: selectedCanRotate && previewUrl ? 8 : 0, overflow: 'hidden', minHeight: 0, height: '100%' }}>
             {selectedCanRotate && previewUrl && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
                 <button type='button' disabled={effectiveRotationBusy} onClick={rotateLeft} title='Ruota a sinistra' aria-label='Ruota a sinistra' style={{ width: 38, height: 34, borderRadius: 9, border: '1px solid rgba(255,255,255,0.28)', background: '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: effectiveRotationBusy ? 'not-allowed' : 'pointer', opacity: effectiveRotationBusy ? 0.55 : 1, fontSize: 24, fontWeight: 800, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}>↺</button>
@@ -839,12 +845,12 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
                 const pdfPreview = isPdfAttachment(selected) || !!selected.previewUrl || String(previewUrl || '').toLowerCase().includes('.pdf') || /^blob:/i.test(previewUrl)
                 if (pdfPreview) {
                   return (
-                    <div style={{ width: '100%', height: '100%', minHeight: 0, borderRadius: 6, overflow: 'hidden' }}>
+                    <div style={{ width: '100%', height: '100%', minHeight: 0, overflow: 'hidden' }}>
                       <AnteprimaPdfViewer
                         url={previewUrl}
                         fileName={selected.name || 'allegato.pdf'}
-                        title='Anteprima allegato'
-                        subtitle={selected.name || ''}
+                        title={selected.name || 'allegato.pdf'}
+                        subtitle={undefined}
                         loading={false}
                         error={null}
                         emptyText='Anteprima PDF non disponibile.'
@@ -858,11 +864,6 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
                 <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima PDF non disponibile per questo allegato. Se il file originale non è PDF o immagine, deve essere presente un PDF di anteprima associato.</div>
               )}
             </div>
-            {selected && (
-              <div style={{ fontSize: Math.max(11, labelFontSize - 1), color: 'rgba(255,255,255,0.78)', textAlign: 'center', wordBreak: 'break-word', maxHeight: 36, overflow: 'hidden' }}>
-                {selected.name || `Allegato #${selected.id}`}{formatBytes(selected.size) ? ` • ${formatBytes(selected.size)}` : ''}
-              </div>
-            )}
           </div>
         </div>
       )}

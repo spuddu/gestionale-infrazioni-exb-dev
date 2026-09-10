@@ -1227,6 +1227,34 @@ function alertDestRoleCode (alert: GiiAlertItem | null | undefined): string {
   ).trim().toUpperCase().replace(/[\s-]+/g, '_')
 }
 
+function alertIsAttoAccertamentoApprovedReturn (alert: GiiAlertItem | null | undefined): boolean {
+  if (!alert) return false
+  const subtype = alertSubtypeCode(alert)
+  if (subtype === 'ATTO_ACCERTAMENTO_APPROVATO') return true
+
+  // Compatibilità con attività create prima della specializzazione del ciclo Atto:
+  // erano salvate come NUOVA_ASSEGNAZIONE / ISTRUTTORIA_TRASMESSA. Dopo
+  // l'arricchimento con il record della pratica possiamo distinguerle senza
+  // modificare né inventare stati del Feature Layer.
+  if (alertOriginEventCode(alert) !== 'ISTRUTTORIA_TRASMESSA') return false
+  if (alertDestRoleCode(alert) !== 'IA') return false
+  if (alertSenderRoleCode(alert) !== 'RIA') return false
+
+  const detNumero = String(alertPracticeRawValue(alert, ['determinazione_numero', 'DETERMINAZIONE_NUMERO']) ?? '').trim()
+  const detData = alertPracticeRawValue(alert, ['determinazione_data', 'DETERMINAZIONE_DATA'])
+  const accNumero = String(alertPracticeRawValue(alert, ['accertamento_numero', 'ACCERTAMENTO_NUMERO']) ?? '').trim()
+  if (!detNumero || detData == null || detData === '' || !accNumero) return false
+
+  const detRegistrataIl = asAlertDateMs(alertPracticeRawValue(alert, ['determinazione_registrata_il', 'DETERMINAZIONE_REGISTRATA_IL']))
+  const activityAt = asAlertDateMs(firstNonEmptyAlertRawValue(alert, ['data_attivazione', 'creato_il', 'aggiornato_il']))
+  if (detRegistrataIl != null && activityAt != null) return activityAt >= detRegistrataIl
+
+  // Per record legacy privi del timestamp di registrazione, la presenza di una
+  // determinazione adottata e dell'Atto numerato è sufficiente nel passaggio RIA→IA.
+  const detStato = String(alertPracticeRawValue(alert, ['determinazione_stato', 'DETERMINAZIONE_STATO']) ?? '').trim().toUpperCase()
+  return detStato === 'ADOTTATA'
+}
+
 function alertRawTitleText (alert: GiiAlertItem | null | undefined): string {
   return String(firstNonEmptyAlertRawValue(alert, ['titolo', 'title']) || alert?.title || '').trim()
 }
@@ -1241,6 +1269,7 @@ function alertDisplayTitle (alert: GiiAlertItem): string {
   if (alertIsNewRilevazione(alert)) return 'Nuova rilevazione ricevuta'
   if (event === 'ISTRUTTORIA_TRASMESSA' && destRole === 'CS' && alertIsItOrigin(alert)) return 'Nuova rilevazione ricevuta'
   if (subtype === 'ATTESTAZIONE_CONFORMITA_IA' || event === 'ATTESTAZIONE_CONFORMITA') return 'Attestazione di conformità apposta'
+  if (alertIsAttoAccertamentoApprovedReturn(alert)) return 'Atto di accertamento approvato'
   if (subtype === 'PROPOSTA_CONTESTAZIONE_APPROVATA' || event === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'Proposta di contestazione approvata'
   if (alertIsNewAssignmentReceived(alert)) return 'Nuova istruttoria assegnata'
   if (subtype === 'RILEVAZIONE_RESPINTA' || subtype === 'CS_RESPINGE_RILEVAZIONE') return 'Nuova rilevazione respinta'
@@ -1762,6 +1791,7 @@ function alertIsStandardWorkflowAlert (alert: GiiAlertItem): boolean {
 
   if (isGiiTakeChargeAlert(alert)) return true
   if (alertIsNewRilevazione(alert)) return true
+  if (alertIsAttoAccertamentoApprovedReturn(alert)) return true
   if (alertIsNewAssignmentReceived(alert)) return true
 
   if ([
@@ -1774,7 +1804,8 @@ function alertIsStandardWorkflowAlert (alert: GiiAlertItem): boolean {
     'DT_RESPINGE_RAPPORTO',
     'DT_RIMANDA_A_IT',
     'RIT_RIMANDA_A_IT',
-    'BOZZA_DETERMINAZIONE'
+    'BOZZA_DETERMINAZIONE',
+    'ATTO_ACCERTAMENTO_APPROVATO'
   ].includes(subtype)) return true
 
   if (event === 'ISTRUTTORIA_TRASMESSA' || event === 'INVIO_A_IA' || event === 'IA_TRASMETTE_BOZZA_DETERMINAZIONE') return true
@@ -2306,6 +2337,7 @@ function materializeAlertTitle (alert: GiiAlertItem): string {
   const event = alertOriginEventCode(alert)
   if (alertIsNewRilevazione(alert)) return 'Nuova rilevazione ricevuta'
   if (subtype === 'ATTESTAZIONE_CONFORMITA_IA' || event === 'ATTESTAZIONE_CONFORMITA') return 'Attestazione di conformità apposta'
+  if (alertIsAttoAccertamentoApprovedReturn(alert)) return 'Atto di accertamento approvato'
   if (subtype === 'PROPOSTA_CONTESTAZIONE_APPROVATA' || event === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'Proposta di contestazione approvata'
   if (alertIsNewAssignmentReceived(alert)) return 'Nuova istruttoria assegnata'
   const t = String(alert?.title || '').trim()

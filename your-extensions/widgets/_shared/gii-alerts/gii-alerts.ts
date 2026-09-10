@@ -646,6 +646,7 @@ function baseWorkflowRoleForAlert (roleAreaKey: string): string {
 function takeChargeTitleForMessage (label: string, row: Record<string, any>): string {
   const hay = `${label || ''} ${attr(row, ['tipo_attivita']) || ''} ${attr(row, ['sottotipo_attivita']) || ''} ${attr(row, ['titolo']) || ''} ${attr(row, ['messaggio']) || ''} ${attr(row, ['origine_evento']) || ''}`.toUpperCase()
   if (hay.includes('ATTESTAZIONE_CONFORMITA') || hay.includes('ATTESTAZIONE DI CONFORMIT')) return 'Attestazione di conformità apposta'
+  if (hay.includes('ATTO_ACCERTAMENTO_APPROVATO') || hay.includes('ATTO DI ACCERTAMENTO APPROVATO')) return 'Atto di accertamento approvato'
   if (hay.includes('PROPOSTA_CONTESTAZIONE_APPROVATA') || hay.includes('PROPOSTA DI CONTESTAZIONE APPROVATA')) return 'Proposta di contestazione approvata'
   if (hay.includes('BOZZA_DETERMINAZIONE') || hay.includes('BOZZA DETERMINAZIONE') || hay.includes('FASCICOLO ISTRUTTORIO')) return 'Fascicolo istruttorio da verificare'
   if (hay.includes('INTEGRAZ')) return 'Richiesta di integrazione ricevuta'
