@@ -5,7 +5,6 @@ import { JimuMapViewComponent, type JimuMapView } from 'jimu-arcgis'
 import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig, DEFAULT_FIELD_LAYOUTS } from '../config'
-import AiReview from './ai-review'
 import AnteprimaPanel, { clearGiiAnteprimaDocumentMemory } from '../../../_shared/gii-anteprime/anteprima-panel'
 import { NORMA3_REQ_POINT, parseNorma3Codes, computeReqPoint } from '../../../_shared/gii-anteprime/req-point'
 import GiiAttachmentViewer, { type GiiAttachmentViewerItem, filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
@@ -4708,7 +4707,7 @@ function NuovaPraticaForm (p: {
   }, [])
 
   // Layer fields con domini (caricati una volta)
-  const [npLayerFields, setNpLayerFields] = React.useState<Array<{ name: string; type: string; domain?: any; length?: number }>>([])
+  const [npLayerFields, setNpLayerFields] = React.useState<Array<{ name: string; type: string; domain?: any }>>([])
   React.useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -4719,7 +4718,7 @@ function NuovaPraticaForm (p: {
         if (typeof layer?.load === 'function') try { await layer.load() } catch {}
         const fields = (layer?.fields || []) as any[]
         if (fields.length && !cancelled) {
-          setNpLayerFields(fields.map((f: any) => ({ name: f.name, type: f.type || '', domain: f.domain || null, length: f.length })))
+          setNpLayerFields(fields.map((f: any) => ({ name: f.name, type: f.type || '', domain: f.domain || null })))
         }
       } catch {}
     })()
@@ -5270,29 +5269,6 @@ function NuovaPraticaForm (p: {
     setDraft(prev => ({ ...prev, [k]: normalizeUppercaseTextFieldValue(k, v) }))
   }
   const g = (k: string) => draft[k] ?? ''
-  const renderAiReview = () => <AiReview
-    enabled={cfg.aiReviewEnabled === true && currentProfileRole === 'IT' && !saving && !isReadOnly && !isRitAgrTecLimitedEdit && canEditFieldForCurrentProfile('descrizione_fatti')}
-    endpoint={String(cfg.aiReviewEndpoint || '')}
-    value={String(g('descrizione_fatti'))}
-    contextKey={`${mode}|${currentOid ?? 'new'}|${currentLayerUrl}|${currentUserContextKey}`}
-    maxLength={Number(npLayerFields.find(f => f.name === 'descrizione_fatti')?.length || 8000)}
-    cfg={cfg}
-    captureContext={() => {
-      const origin = captureAttachmentOperation()
-      return () => isAttachmentOperationCurrent(origin)
-    }}
-    getToken={async () => {
-      const identity = await loadEsriModule<any>('esri/identity/IdentityManager')
-      const portalUrl = String((getAppStore().getState() as any)?.portalUrl || 'https://cbsm-hub.maps.arcgis.com')
-      const credential = identity?.findCredential?.(`${portalUrl.replace(/\/$/, '')}/sharing/rest`)
-        || identity?.findCredential?.(portalUrl)
-        || identity?.findCredential?.(currentLayerUrl || cfg.motherLayerUrl)
-      if (credential?.userId && String(credential.userId).toLowerCase() !== currentUserContext.username.toLowerCase()) return ''
-      return String(credential?.token || '')
-    }}
-    onAccept={text => set('descrizione_fatti', text)}
-  />
-
   const [capOptionsByAddress, setCapOptionsByAddress] = React.useState<Record<'main' | 'dom' | 'rl', ComuneCapOption[]>>({ main: [], dom: [], rl: [] })
 
   const resetCapOptions = React.useCallback((kind: 'main' | 'dom' | 'rl') => {
@@ -7639,7 +7615,7 @@ ${e?.message || String(e)}`
         return { label: 'Gravità', el }
       }
       // Violazione — Descrizione
-      case 'descrizione_fatti': return { label: 'Descrizione dettagliata della violazione', el: <div><NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline uppercase={false} disabled={saving}/>{renderAiReview()}</div> }
+      case 'descrizione_fatti': return { label: 'Descrizione dettagliata della violazione', el: <NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline uppercase={false} disabled={saving}/> }
       case 'circostanze': return { label: 'Circostanze rilevanti', el: <NpText value={g('circostanze')} onChange={v => set('circostanze', v)} multiline uppercase={false} disabled={saving}/> }
       case 'presenza_trasgressore': {
         const presenzaPending = selectedViolazioniCount > 0 && !String(g('presenza_trasgressore') || '').trim()
@@ -8424,7 +8400,7 @@ ${e?.message || String(e)}`
           <section style={{ ...editCardStyle, minHeight: '100%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             <div style={editCardHeaderStyle}><span>Descrizione e circostanze</span></div>
             <div style={{ ...editCardBodyStyle, flex: '1 1 auto', display: 'grid', gridTemplateRows: 'auto auto auto 1fr', gap: 7, alignContent: 'start' }}>
-              <div>{textAreaField('descrizione_fatti', 'Descrizione dettagliata della violazione', formStyle.violazioneDescrizioneRows)}{renderAiReview()}</div>
+              {textAreaField('descrizione_fatti', 'Descrizione dettagliata della violazione', formStyle.violazioneDescrizioneRows)}
               {textAreaField('circostanze', 'Circostanze rilevanti', formStyle.violazioneDescrizioneRows)}
               {fieldGrid(`${formStyle.norma3GradeColumnWidth}px`, ['presenza_trasgressore'], 7)}
               <div />

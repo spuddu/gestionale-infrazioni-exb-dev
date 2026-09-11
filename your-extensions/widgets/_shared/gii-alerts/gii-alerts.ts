@@ -1251,9 +1251,9 @@ function activityAreaForUser (user?: GiiUserProfileForAlerts): string {
 function buildCurrentActivityWhere (user?: GiiUserProfileForAlerts, extraWhere?: string): string {
   const clauses: string[] = []
 
-  // La stessa tabella contiene sia attività operative di presa in carico,
-  // sia comunicazioni informative archiviabili dai destinatari.
-  clauses.push(`(tipo_attivita = 'PRESA_IN_CARICO' OR tipo_attivita = 'INFORMATIVA')`)
+  // La campanella mostra soltanto attività operative destinate all'utente:
+  // gli avanzamenti compiuti da altri ruoli restano consultabili nell'Iter.
+  clauses.push(`tipo_attivita = 'PRESA_IN_CARICO'`)
 
   if (user?.isAdmin) {
     // ADMIN vede tutto ciò che è corrente nella vista/tabella configurata.
@@ -1425,9 +1425,12 @@ function currentActivityToAlert (row: Record<string, any>): GiiAlertItem | null 
   const isInformativa = tipoAttivita === 'INFORMATIVA'
   const titoloRecord = String(attr(row, ['titolo']) || '').trim()
   const messageRecord = String(attr(row, ['messaggio']) || '').trim()
+  // Per le attività correnti il titolo viene già costruito dal workflow dal
+  // punto di vista del destinatario (es. "Istruttoria ricevuta per validazione").
+  // Non sostituirlo con il vecchio titolo generico di presa in carico.
   const title = isInformativa
     ? (titoloRecord || 'Comunicazione informativa')
-    : takeChargeTitleForMessage(titoloRecord, rowForDisplay)
+    : (titoloRecord || takeChargeTitleForMessage('', rowForDisplay))
   const message = isInformativa
     ? (messageRecord || reportCode)
     : (messageRecord || reportCode)

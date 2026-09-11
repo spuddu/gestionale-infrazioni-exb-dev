@@ -7,6 +7,69 @@ export interface FilterTab {
   label: string
 }
 
+export interface OggettoStatusDef {
+  key: string
+  label: string
+}
+
+export interface OggettoBadgeRule {
+  key: string
+  color: string
+}
+
+/**
+ * Catalogo unico degli stati/oggetti mostrati nella colonna Stato (da LOG).
+ * Il runtime usa le label; il setting salva la chiave stabile, cosi' un cambio
+ * di dicitura non fa perdere l'associazione cromatica.
+ */
+export const OGGETTO_STATUS_CATALOG: OggettoStatusDef[] = [
+  { key: 'BOZZA', label: 'BOZZA' },
+  { key: 'NUOVA_RILEVAZIONE_TRASMESSA', label: 'NUOVA RILEVAZIONE TRASMESSA' },
+  { key: 'ISTRUTTORIA_ASSEGNATA', label: 'ISTRUTTORIA ASSEGNATA' },
+  { key: 'ISTRUTTORIA_TRASMESSA_VERIFICA', label: 'ISTRUTTORIA TRASMESSA PER VERIFICA' },
+  { key: 'INTEGRAZIONE_TRASMESSA_VERIFICA', label: 'INTEGRAZIONE TRASMESSA PER VERIFICA' },
+  { key: 'ISTRUTTORIA_VERIFICATA', label: 'ISTRUTTORIA VERIFICATA' },
+  { key: 'ISTRUTTORIA_TECNICA_VALIDATA', label: 'ISTRUTTORIA TECNICA VALIDATA' },
+  { key: 'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA', label: 'INTEGRAZIONE TECNICA TRASMESSA PER VERIFICA' },
+  { key: 'ISTRUTTORIA_TECNICA_APPROVATA', label: 'ISTRUTTORIA TECNICA APPROVATA' },
+  { key: 'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA', label: 'ISTRUTTORIA AMMINISTRATIVA ASSEGNATA' },
+  { key: 'FASCICOLO_TRASMESSO_VERIFICA', label: 'FASCICOLO TRASMESSO PER VERIFICA' },
+  { key: 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA', label: 'ISTRUTTORIA AMMINISTRATIVA VALIDATA' },
+  { key: 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE', label: 'ISTRUTTORIA RIMANDATA PER INTEGRAZIONE' },
+  { key: 'FASCICOLO_RIMANDATO_INTEGRAZIONE', label: 'FASCICOLO RIMANDATO PER INTEGRAZIONE' },
+  { key: 'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO', label: 'ESITO INTEGRAZIONE TECNICA TRASMESSO' },
+  { key: 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA', label: 'ATTO DI ACCERTAMENTO TRASMESSO PER VERIFICA' },
+  { key: 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE', label: 'ATTO DI ACCERTAMENTO RIMANDATO PER INTEGRAZIONE' },
+  { key: 'ATTO_ACCERTAMENTO_APPROVATO', label: 'ATTO DI ACCERTAMENTO APPROVATO' },
+  { key: 'RILEVAZIONE_RESPINTA', label: 'RILEVAZIONE RESPINTA' },
+  { key: 'ISTRUTTORIA_TECNICA_RESPINTA', label: 'ISTRUTTORIA TECNICA RESPINTA' },
+  { key: 'SANZIONE_NOTIFICATA', label: 'SANZIONE NOTIFICATA' }
+]
+
+export const DEFAULT_OGGETTO_BADGE_RULES: OggettoBadgeRule[] = [
+  { key: 'BOZZA', color: '#6b7280' },
+  { key: 'NUOVA_RILEVAZIONE_TRASMESSA', color: '#7dd3fc' },
+  { key: 'ISTRUTTORIA_ASSEGNATA', color: '#2f6fed' },
+  { key: 'ISTRUTTORIA_TRASMESSA_VERIFICA', color: '#8b5cf6' },
+  { key: 'INTEGRAZIONE_TRASMESSA_VERIFICA', color: '#8b5cf6' },
+  { key: 'ISTRUTTORIA_VERIFICATA', color: '#8b5cf6' },
+  { key: 'ISTRUTTORIA_TECNICA_VALIDATA', color: '#8b5cf6' },
+  { key: 'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA', color: '#8b5cf6' },
+  { key: 'ISTRUTTORIA_TECNICA_APPROVATA', color: '#009246' },
+  { key: 'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA', color: '#2f6fed' },
+  { key: 'FASCICOLO_TRASMESSO_VERIFICA', color: '#8b5cf6' },
+  { key: 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA', color: '#c316d0' },
+  { key: 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE', color: '#ff6400' },
+  { key: 'FASCICOLO_RIMANDATO_INTEGRAZIONE', color: '#ff6400' },
+  { key: 'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO', color: '#8b5cf6' },
+  { key: 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA', color: '#8b5cf6' },
+  { key: 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE', color: '#ff6400' },
+  { key: 'ATTO_ACCERTAMENTO_APPROVATO', color: '#c316d0' },
+  { key: 'RILEVAZIONE_RESPINTA', color: '#dc2626' },
+  { key: 'ISTRUTTORIA_TECNICA_RESPINTA', color: '#dc2626' },
+  { key: 'SANZIONE_NOTIFICATA', color: '#5f05e6' }
+]
+
 /**
  * Colonna visualizzata nella lista.
  * `field` può essere un campo layer o un campo virtuale:
@@ -107,6 +170,7 @@ export interface Config {
   oggettoBadgeColorNotifica: string
   oggettoBadgeColorRespingimento: string
   oggettoBadgeColorNeutro: string
+  oggettoBadgeRules: OggettoBadgeRule[]
 
   // --- Messaggi
   emptyMessage: string
@@ -272,6 +336,7 @@ export const defaultConfig: IMConfig = {
   oggettoBadgeColorNotifica: '#0f766e',
   oggettoBadgeColorRespingimento: '#dc2626',
   oggettoBadgeColorNeutro: '#d0d0d0',
+  oggettoBadgeRules: DEFAULT_OGGETTO_BADGE_RULES,
 
   emptyMessage: 'Nessun record trovato (view/filtro/permessi).',
   errorNoDs: 'Configura la fonte dati del widget.',

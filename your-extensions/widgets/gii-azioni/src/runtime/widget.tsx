@@ -715,10 +715,19 @@ function classifyTipoSoggettoRobusto (raw: any, labelFromDomain: any): 'PF' | 'P
 function filterAttrsToLayerFields (attrs: Record<string, any>, layer: any) {
   const fields = (layer?.fields || []) as Array<{ name: string }>
   if (!fields.length) return attrs
-  const allow = new Set(fields.map(f => String(f.name)))
+  // Le Data View di ExB possono esporre uno schema parziale o con casing diverso
+  // rispetto al FeatureLayer reale. Risolviamo quindi i nomi contro il layer JSAPI
+  // in modo case-insensitive, così i campi di routing del ruolo successivo non
+  // vengono persi durante filter/applyEdits.
+  const byLower = new Map<string, string>()
+  fields.forEach((f: any) => {
+    const name = String(f?.name || '').trim()
+    if (name) byLower.set(name.toLowerCase(), name)
+  })
   const out: Record<string, any> = {}
   for (const k of Object.keys(attrs)) {
-    if (allow.has(k)) out[k] = attrs[k]
+    const real = byLower.get(String(k).toLowerCase())
+    if (real) out[real] = attrs[k]
   }
   return out
 }
@@ -1565,15 +1574,6 @@ type Pending = null | 'TAKE' | 'ASSEGNA_IT' | 'ASSEGNA_IA' | 'INVIA_IA' | 'RESTI
 
 type WorkflowEsitoChoice = '' | 'CONFORME' | 'DA_INTEGRARE' | 'RESPINTA'
 
-type InformativeActivityTarget = {
-  ruoloDestinatario: string
-  utenteDestinatario?: string
-  sottotipo: string
-  titolo: string
-  messaggio: string
-  priorita?: string
-}
-
 type DirectPracticeAccessGate = {
   status: 'idle' | 'checking' | 'allowed' | 'denied' | 'unavailable'
 }
@@ -1685,6 +1685,12 @@ function ActionsPanel (props: {
   // possa avviare più volte un nuovo ciclo IA.
   const [riaperturaWorkflowStarted, setRiaperturaWorkflowStarted] = React.useState(false)
   const [riaperturaWorkflowCheckLoading, setRiaperturaWorkflowCheckLoading] = React.useState(false)
+
+  // Evento che ha consegnato la pratica al ruolo corrente. Per il CS serve a
+  // distinguere la nuova rilevazione dall'istruttoria già assegnata e dai
+  // rientri successivi da integrazione, senza dedurlo dal numero del rapporto.
+  const [incomingWorkflowForUi, setIncomingWorkflowForUi] = React.useState<{ evento: string; ruolo: string } | null>(null)
+  const incomingWorkflowRequestRef = React.useRef(0)
 
   // Popup di diniego (validazione pre-trasmissione)
   const [denyPopupMessages, setDenyPopupMessages] = React.useState<string[]>([])
@@ -1867,7 +1873,7 @@ function ActionsPanel (props: {
         if (!logLayer?.queryFeatures) return
         const q = logLayer.createQuery ? logLayer.createQuery() : {}
         const marker = `Riapertura amministrativa n. ${riaperturaAmmNumero}`
-        q.where = `(${parentGlobalIdWhere('parent_globalid', parentGlobalId)}) AND ruolo_competente = 'RIA' AND evento_chiusura = 'NUOVA_ASSEGNAZIONE' AND ruolo_destinatario = 'IA' AND note_chiusura LIKE ${sqlQuote(`%${marker}%`)}`
+        q.where = `(${parentGlobalIdWhere('parent_globalid', parentGlobalId)}) AND ruolo_competente = 'RIA' AND evento_chiusura = 'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA' AND ruolo_destinatario = 'IA' AND note_chiusura LIKE ${sqlQuote(`%${marker}%`)}`
         q.outFields = [String(logLayer.objectIdField || 'OBJECTID')]
         q.returnGeometry = false
         q.num = 1
@@ -2375,6 +2381,51 @@ function ActionsPanel (props: {
     return res?.features?.[0] || null
   }
 
+  const queryLatestIncomingClosure = async (parentGlobalId: string, ruoloDestinatario: string): Promise<{ evento: string, ruolo: string } | null> => {
+    if (!parentGlobalId || !ruoloDestinatario) return null
+    try {
+      const logLayer = await getCycleLogLayer()
+      if (!logLayer?.queryFeatures) return null
+      const q = logLayer.createQuery ? logLayer.createQuery() : {}
+      q.where = `(${parentGlobalIdWhere('parent_globalid', parentGlobalId)}) AND ruolo_destinatario = ${sqlQuote(ruoloDestinatario)} AND stato_record = 'CHIUSO'`
+      q.outFields = ['evento_chiusura', 'ruolo_competente', 'dt_chiusura']
+      q.returnGeometry = false
+      q.num = 1
+      const oidField = String(logLayer.objectIdField || 'OBJECTID')
+      q.orderByFields = ['dt_chiusura DESC', `${oidField} DESC`]
+      const res = await logLayer.queryFeatures(q)
+      const a = res?.features?.[0]?.attributes || null
+      if (!a) return null
+      return {
+        evento: String(a.evento_chiusura || '').trim().toUpperCase(),
+        ruolo: String(a.ruolo_competente || '').trim().toUpperCase()
+      }
+    } catch {
+      return null
+    }
+  }
+
+  React.useEffect(() => {
+    const requestId = ++incomingWorkflowRequestRef.current
+    if (role !== 'CS' || !selectionKey || !hasSel) {
+      setIncomingWorkflowForUi(null)
+      return
+    }
+
+    void (async () => {
+      try {
+        const ctx = await getCurrentCycleContextAsync()
+        const incoming = await queryLatestIncomingClosure(String(ctx?.parentGlobalId || ''), role)
+        if (incomingWorkflowRequestRef.current !== requestId || selectionKeyRef.current !== selectionKey) return
+        setIncomingWorkflowForUi(incoming)
+      } catch {
+        if (incomingWorkflowRequestRef.current === requestId && selectionKeyRef.current === selectionKey) {
+          setIncomingWorkflowForUi(null)
+        }
+      }
+    })()
+  }, [selectionKey, role, hasSel])
+
   const getNextCycleNumber = async (parentGlobalId: string, ruoloCompetente: string): Promise<number> => {
     if (!parentGlobalId) return 1
     const logLayer = await getCycleLogLayer()
@@ -2698,10 +2749,10 @@ function ActionsPanel (props: {
     if (rr === 'TR') return 'Tecnico rilevatore'
     if (rr === 'IT') return 'Istruttore tecnico'
     if (rr === 'CS') return 'Capo Settore'
-    if (rr === 'RIT') return 'Responsabile istruttoria tecnica'
+    if (rr === 'RIT') return 'Responsabile dell’istruttoria tecnica'
     if (rr === 'DT') return 'Direttore d’Area'
     if (rr === 'IA') return 'Istruttore amministrativo'
-    if (rr === 'RIA') return 'Responsabile Istruttoria amministrativa'
+    if (rr === 'RIA') return 'Responsabile dell’istruttoria amministrativa'
     if (rr === 'DA') return 'Direttore Area AA. GG. e P.F.'
     return rr || '—'
   }
@@ -2741,24 +2792,24 @@ function ActionsPanel (props: {
   ) => {
     try {
       const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
-      const fDa = getSchemaFieldNameCI(schemaFields, 'GII_da')
-      const fA = getSchemaFieldNameCI(schemaFields, 'GII_a')
-      const fDt = getSchemaFieldNameCI(schemaFields, 'GII_dt')
-      const fTrasm = getSchemaFieldNameCI(schemaFields, 'GII_trasm')
-      const fRim = getSchemaFieldNameCI(schemaFields, 'GII_rim')
-      const fArch = getSchemaFieldNameCI(schemaFields, 'GII_arch')
+      const fDa = getSchemaFieldNameCI(schemaFields, 'GII_da') || realFieldName('GII_da') || 'GII_da'
+      const fA = getSchemaFieldNameCI(schemaFields, 'GII_a') || realFieldName('GII_a') || 'GII_a'
+      const fDt = getSchemaFieldNameCI(schemaFields, 'GII_dt') || realFieldName('GII_dt') || 'GII_dt'
+      const fTrasm = getSchemaFieldNameCI(schemaFields, 'GII_trasm') || realFieldName('GII_trasm') || 'GII_trasm'
+      const fRim = getSchemaFieldNameCI(schemaFields, 'GII_rim') || realFieldName('GII_rim') || 'GII_rim'
+      const fArch = getSchemaFieldNameCI(schemaFields, 'GII_arch') || realFieldName('GII_arch') || 'GII_arch'
 
       const ctx = getCurrentCycleContext()
       const destMeta = getRoutingMetaForRole(ruoloDest, opts)
       const mittente = makeGiiActorLabel(role, ctx.username, { area: ctx.area, settore: ctx.settore })
       const destinatario = String(opts?.externalDestLabel || '').trim() || makeGiiActorLabel(ruoloDest, opts?.destUsername || resolveDestUser(ruoloDest), destMeta)
 
-      if (fDa) upd[fDa] = mittente
-      if (fA) upd[fA] = destinatario
-      if (fDt) upd[fDt] = Date.now()
-      if (fTrasm) upd[fTrasm] = mode === 'TRASMISSIONE' ? 1 : 0
-      if (fRim) upd[fRim] = mode === 'INTEGRAZIONE' ? 1 : 0
-      if (fArch) upd[fArch] = 0
+      upd[fDa] = mittente
+      upd[fA] = destinatario
+      upd[fDt] = Date.now()
+      upd[fTrasm] = mode === 'TRASMISSIONE' ? 1 : 0
+      upd[fRim] = mode === 'INTEGRAZIONE' ? 1 : 0
+      upd[fArch] = 0
     } catch {}
   }
 
@@ -2789,98 +2840,142 @@ function ActionsPanel (props: {
   const activitySubTypeFromEvent = (evento: string, ruoloMittente: string, ruoloDest: string, opts?: { technicalIntegration?: boolean }): string => {
     const ev = String(evento || '').trim().toUpperCase()
     const src = String(ruoloMittente || '').trim().toUpperCase()
-    const dst = String(ruoloDest || '').trim().toUpperCase()
-
-    if (ev === 'NUOVA_ASSEGNAZIONE') return 'NUOVA_ASSEGNAZIONE'
-    if (ev === 'ISTRUTTORIA_TRASMESSA' && src === 'RIA' && dst === 'IA' && riaAttoContestazioneDaVerificare) return 'ATTO_ACCERTAMENTO_APPROVATO'
-    if (ev === 'ATTESTAZIONE_CONFORMITA') return 'ATTESTAZIONE_CONFORMITA_IA'
-    if (ev === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'PROPOSTA_CONTESTAZIONE_APPROVATA'
-    if (ev === 'RAPPORTO_APPROVATO') return 'RAPPORTO_APPROVATO'
-    if (ev === 'INTEGRAZIONE_RICHIESTA') return 'RICHIESTA_INTEGRAZIONE'
-    if (ev === 'INTEGRAZIONE_TRASMESSA') return 'INTEGRAZIONE_TRASMESSA'
-    if (ev === 'INVIO_A_IA') return 'NUOVA_ASSEGNAZIONE'
-    if (ev === 'ISTRUTTORIA_TRASMESSA') return 'NUOVA_ASSEGNAZIONE'
     if (ev === 'RESPINTA') {
-      if (src === 'DT') return 'ISTRUTTORIA_TECNICA_RESPINTA'
-      return 'RILEVAZIONE_RESPINTA'
+      const csHasAssignedIt = String(pickAttrCI(data, ['it_assegnato_username', 'IT_ASSEGNATO_USERNAME', 'it_assegnato_da', 'IT_ASSEGNATO_DA']) || '').trim() !== '' ||
+        !isEmptyValue(pickAttrCI(data, ['dt_assegnazione_it', 'DT_ASSEGNAZIONE_IT']))
+      return src === 'CS' && !csHasAssignedIt ? 'RILEVAZIONE_RESPINTA' : 'ISTRUTTORIA_TECNICA_RESPINTA'
     }
-    return 'NUOVA_ASSEGNAZIONE'
+    return ev || 'ISTRUTTORIA_ASSEGNATA'
   }
 
   const activityTitleForSubtype = (subtipo: string): string => {
     const st = String(subtipo || '').trim().toUpperCase()
-    if (st === 'NUOVO_RAPPORTO') return 'Nuova rilevazione'
-    if (st === 'RAPPORTO_UFFICIO') return 'Rilevazione'
-    if (st === 'NUOVA_ASSEGNAZIONE') return 'Nuova assegnazione'
-    if (st === 'ATTESTAZIONE_CONFORMITA_IA') return 'Attestazione di conformità apposta'
-    if (st === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'Istruttoria amministrativa approvata'
-    if (st === 'ATTO_ACCERTAMENTO_APPROVATO') return 'Atto di accertamento approvato'
-    if (st === 'RICHIESTA_INTEGRAZIONE') return 'Integrazione richiesta'
-    if (st === 'INTEGRAZIONE_TRASMESSA') return 'Integrazione trasmessa'
-    if (st === 'RAPPORTO_APPROVATO') return 'Pratica approvata'
-    if (st === 'RILEVAZIONE_RESPINTA') return 'Rilevazione respinta'
-    if (st === 'ISTRUTTORIA_TECNICA_RESPINTA') return 'Istruttoria tecnica respinta'
-    return 'Attività da prendere in carico'
+    const labels: Record<string, string> = {
+      NUOVO_RAPPORTO: 'Nuova rilevazione',
+      RAPPORTO_UFFICIO: 'Rilevazione',
+      NUOVA_RILEVAZIONE_TRASMESSA: 'Nuova rilevazione trasmessa',
+      ISTRUTTORIA_ASSEGNATA: 'Istruttoria assegnata',
+      ISTRUTTORIA_TRASMESSA_VERIFICA: 'Istruttoria trasmessa per verifica',
+      INTEGRAZIONE_TRASMESSA_VERIFICA: 'Integrazione trasmessa per verifica',
+      ISTRUTTORIA_VERIFICATA: 'Istruttoria verificata',
+      ISTRUTTORIA_TECNICA_VALIDATA: 'Istruttoria tecnica validata',
+      INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA: 'Integrazione tecnica trasmessa per verifica',
+      ISTRUTTORIA_TECNICA_APPROVATA: 'Istruttoria tecnica approvata',
+      ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA: 'Istruttoria amministrativa assegnata',
+      FASCICOLO_TRASMESSO_VERIFICA: 'Fascicolo trasmesso per verifica',
+      ISTRUTTORIA_AMMINISTRATIVA_VALIDATA: 'Istruttoria amministrativa validata',
+      ISTRUTTORIA_RIMANDATA_INTEGRAZIONE: 'Istruttoria rimandata per integrazione',
+      FASCICOLO_RIMANDATO_INTEGRAZIONE: 'Fascicolo rimandato per integrazione',
+      ESITO_INTEGRAZIONE_TECNICA_TRASMESSO: 'Esito integrazione tecnica trasmesso',
+      ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA: 'Atto di accertamento trasmesso per verifica',
+      ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE: 'Atto di accertamento rimandato per integrazione',
+      ATTO_ACCERTAMENTO_APPROVATO: 'Atto di accertamento approvato',
+      RILEVAZIONE_RESPINTA: 'Rilevazione respinta',
+      ISTRUTTORIA_TECNICA_RESPINTA: 'Istruttoria tecnica respinta'
+    }
+    return labels[st] || 'Attività da prendere in carico'
   }
 
   const activityMessageForSubtype = (subtipo: string, numeroRapporto: string): string => {
     const st = String(subtipo || '').trim().toUpperCase()
     const n = String(numeroRapporto || '').trim() || '—'
-    if (st === 'NUOVO_RAPPORTO') return `Rilevazione n. ${n} da prendere in carico.`
-    if (st === 'RAPPORTO_UFFICIO') return `Rilevazione n. ${n} da prendere in carico.`
-    if (st === 'NUOVA_ASSEGNAZIONE') return `Pratica n. ${n} da prendere in carico.`
-    if (st === 'ATTESTAZIONE_CONFORMITA_IA') return `Attestazione di conformità sulla pratica n. ${n} da prendere in carico.`
-    if (st === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return `Istruttoria amministrativa della pratica n. ${n} approvata dal Responsabile dell’istruttoria amministrativa. Pratica da prendere in carico per protocollazione e predisposizione della bozza di determinazione.`
-    if (st === 'ATTO_ACCERTAMENTO_APPROVATO') return `Atto di accertamento della pratica n. ${n} approvato dal Responsabile dell’istruttoria amministrativa. Pratica da prendere in carico per i passaggi successivi.`
-    if (st === 'RICHIESTA_INTEGRAZIONE') return `Integrazione n. ${n} da prendere in carico.`
-    if (st === 'INTEGRAZIONE_TRASMESSA') return `Integrazione n. ${n} da prendere in carico.`
-    if (st === 'RAPPORTO_APPROVATO') return `Pratica approvata n. ${n} da prendere in carico.`
+    if (st === 'NUOVO_RAPPORTO' || st === 'RAPPORTO_UFFICIO' || st === 'NUOVA_RILEVAZIONE_TRASMESSA') return `Rilevazione n. ${n} da prendere in carico.`
+    if (st === 'ISTRUTTORIA_ASSEGNATA' || st === 'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA') return `Pratica n. ${n} assegnata e da prendere in carico.`
+    if (st === 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE') return `Istruttoria n. ${n} rimandata per integrazione e da prendere in carico.`
+    if (st === 'FASCICOLO_RIMANDATO_INTEGRAZIONE') return `Fascicolo della pratica n. ${n} rimandato per integrazione e da prendere in carico.`
+    if (st === 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE') return `Atto di accertamento della pratica n. ${n} rimandato per integrazione e da prendere in carico.`
     if (st === 'RILEVAZIONE_RESPINTA') return `Rilevazione respinta sulla pratica n. ${n}.`
     if (st === 'ISTRUTTORIA_TECNICA_RESPINTA') return `Istruttoria tecnica respinta sulla pratica n. ${n}.`
     return `Pratica n. ${n} da prendere in carico.`
   }
 
-  const activityTitleForEvent = (subtipo: string, evento: string, ruoloMittente: string, ruoloDest: string): string => {
-    const ev = String(evento || '').trim().toUpperCase()
-    const src = String(ruoloMittente || '').trim().toUpperCase()
-    const dst = String(ruoloDest || '').trim().toUpperCase()
-
-    if (subtipo === 'ATTO_ACCERTAMENTO_APPROVATO') return 'Atto di accertamento approvato'
-
-    if (ev === 'ISTRUTTORIA_TRASMESSA') {
-      if ((src === 'IT' || src === 'TR') && dst === 'CS') return 'Rilevazione trasmessa'
-      if (src === 'CS' && dst === 'RIT') return praticaLabel === 'Rapporto tecnico' ? 'Rapporto tecnico trasmesso' : 'Rilevazione approvata'
-      if (src === 'RIT' && dst === 'DT') return 'Istruttoria tecnica approvata'
-      if (src === 'IA' && dst === 'RIA') return 'Istruttoria amministrativa trasmessa'
-    }
-
-    if (ev === 'PROPOSTA_CONTESTAZIONE_APPROVATA' && src === 'RIA' && dst === 'IA') return 'Istruttoria amministrativa approvata'
-    if (ev === 'ATTESTAZIONE_CONFORMITA' && src === 'IA' && dst === 'RIA') return 'Attestazione di conformità apposta'
-    if (ev === 'INVIO_A_IA') return 'Istruttoria amministrativa trasmessa'
-
-    return activityTitleForSubtype(subtipo)
+  const hasPendingIntegrationRequestForRole = (targetRoleRaw: string): boolean => {
+    const targetRole = String(targetRoleRaw || '').trim().toUpperCase()
+    if (!targetRole || !data) return false
+    const stateOnly = usesStateOnlyWorkflow(targetRole)
+    const value = toNumOrNull(pickAttrCI(
+      data,
+      stateOnly
+        ? [`stato_${targetRole}`, `STATO_${targetRole}`]
+        : [`esito_${targetRole}`, `ESITO_${targetRole}`]
+    ))
+    return value === (stateOnly ? STATO_INTEGRAZIONE : ESITO_INTEGRAZIONE)
   }
 
-  const activityMessageForEvent = (subtipo: string, evento: string, ruoloMittente: string, ruoloDest: string, numeroRapporto: string): string => {
-    const ev = String(evento || '').trim().toUpperCase()
-    const src = String(ruoloMittente || '').trim().toUpperCase()
-    const dst = String(ruoloDest || '').trim().toUpperCase()
-    const n = String(numeroRapporto || '').trim() || '—'
+  // Le attività correnti/allarmi descrivono il passaggio dal punto di vista
+  // del destinatario. L'evento di log, invece, resta l'azione compiuta dal
+  // mittente (es. ISTRUTTORIA_VERIFICATA).
+  const activityTitleForEvent = (subtipo: string, evento: string, ruoloMittente: string, ruoloDestRaw: string): string => {
+    const ev = String(evento || subtipo || '').trim().toUpperCase()
+    const dest = normalizeActivityDestRole(ruoloDestRaw)
 
-    if (subtipo === 'ATTO_ACCERTAMENTO_APPROVATO') return `Atto di accertamento della pratica n. ${n} approvato dal Responsabile dell’istruttoria amministrativa. Pratica da prendere in carico per i passaggi successivi.`
+    if (ev === 'NUOVA_RILEVAZIONE_TRASMESSA' && dest === 'CS') return 'Nuova rilevazione ricevuta'
+    if (ev === 'ISTRUTTORIA_ASSEGNATA' && dest === 'IT') return 'Nuova istruttoria assegnata'
+    if (ev === 'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA' && dest === 'IA') return 'Nuova istruttoria amministrativa assegnata'
+    if (ev === 'ISTRUTTORIA_TRASMESSA_VERIFICA' && dest === 'CS') return 'Istruttoria ricevuta per verifica'
+    if (ev === 'INTEGRAZIONE_TRASMESSA_VERIFICA' && dest === 'CS') return 'Integrazione ricevuta per verifica'
 
-    if (ev === 'ISTRUTTORIA_TRASMESSA') {
-      if ((src === 'IT' || src === 'TR') && dst === 'CS') return `Rilevazione n. ${n} da prendere in carico.`
-      if (src === 'CS' && dst === 'RIT') return `Istruttoria tecnica n. ${n} da prendere in carico.`
-      if (src === 'RIT' && dst === 'DT') return `Rapporto tecnico n. ${n} da prendere in carico.`
-      if (src === 'IA' && dst === 'RIA') return `Istruttoria amministrativa n. ${n} da prendere in carico.`
+    if (ev === 'ISTRUTTORIA_VERIFICATA' && dest === 'RIT') {
+      return hasPendingIntegrationRequestForRole('RIT')
+        ? 'Integrazione ricevuta per validazione'
+        : 'Istruttoria ricevuta per validazione'
     }
 
-    if (ev === 'PROPOSTA_CONTESTAZIONE_APPROVATA' && src === 'RIA' && dst === 'IA') return `Il Responsabile dell’istruttoria amministrativa ha approvato l’istruttoria amministrativa della pratica n. ${n}. La pratica può essere presa in carico per protocollazione del fascicolo e predisposizione della bozza di determinazione.`
-    if (ev === 'ATTESTAZIONE_CONFORMITA' && src === 'IA' && dst === 'RIA') return `L’Istruttore amministrativo ha apposto il visto di conformità sulla pratica n. ${n}.`
-    if (ev === 'INVIO_A_IA') return `Istruttoria amministrativa n. ${n} da prendere in carico.`
+    if (ev === 'ISTRUTTORIA_TECNICA_VALIDATA' && dest === 'DT') {
+      return hasPendingIntegrationRequestForRole('DT')
+        ? 'Integrazione tecnica ricevuta per approvazione'
+        : 'Istruttoria tecnica ricevuta per approvazione'
+    }
+    if (ev === 'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA' && dest === 'DT') return 'Integrazione tecnica ricevuta per approvazione'
 
-    return activityMessageForSubtype(subtipo, n)
+    if (ev === 'ISTRUTTORIA_TECNICA_APPROVATA' && dest === 'RIA') {
+      return hasPendingIntegrationRequestForRole('RIA')
+        ? 'Esito integrazione tecnica ricevuto'
+        : 'Istruttoria tecnica ricevuta'
+    }
+
+    if (ev === 'FASCICOLO_TRASMESSO_VERIFICA' && dest === 'RIA') return 'Fascicolo ricevuto per verifica'
+    if (ev === 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE') return 'Istruttoria ricevuta per integrazione'
+    if (ev === 'FASCICOLO_RIMANDATO_INTEGRAZIONE' && dest === 'IA') return 'Fascicolo ricevuto per integrazione'
+    if (ev === 'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO' && dest === 'IA') return 'Esito integrazione tecnica ricevuto'
+    if (ev === 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA' && dest === 'RIA') return 'Atto di accertamento ricevuto per verifica'
+    if (ev === 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE' && dest === 'IA') return 'Atto di accertamento ricevuto per integrazione'
+
+    return activityTitleForSubtype(subtipo || evento)
+  }
+
+  const activityMessageForEvent = (subtipo: string, evento: string, ruoloMittente: string, ruoloDestRaw: string, numeroRapporto: string): string => {
+    const ev = String(evento || subtipo || '').trim().toUpperCase()
+    const dest = normalizeActivityDestRole(ruoloDestRaw)
+    const n = String(numeroRapporto || '').trim() || '—'
+
+    if (ev === 'NUOVA_RILEVAZIONE_TRASMESSA' && dest === 'CS') return `Rilevazione n. ${n} ricevuta e da prendere in carico.`
+    if (ev === 'ISTRUTTORIA_TRASMESSA_VERIFICA' && dest === 'CS') return `Istruttoria della pratica n. ${n} ricevuta per verifica.`
+    if (ev === 'INTEGRAZIONE_TRASMESSA_VERIFICA' && dest === 'CS') return `Integrazione della pratica n. ${n} ricevuta per verifica.`
+    if (ev === 'ISTRUTTORIA_VERIFICATA' && dest === 'RIT') {
+      return hasPendingIntegrationRequestForRole('RIT')
+        ? `Integrazione della pratica n. ${n} ricevuta per validazione.`
+        : `Istruttoria della pratica n. ${n} ricevuta per validazione.`
+    }
+    if ((ev === 'ISTRUTTORIA_TECNICA_VALIDATA' || ev === 'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA') && dest === 'DT') {
+      const isIntegration = ev === 'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA' || hasPendingIntegrationRequestForRole('DT')
+      return isIntegration
+        ? `Integrazione tecnica della pratica n. ${n} ricevuta per approvazione.`
+        : `Istruttoria tecnica della pratica n. ${n} ricevuta per approvazione.`
+    }
+    if (ev === 'ISTRUTTORIA_TECNICA_APPROVATA' && dest === 'RIA') {
+      return hasPendingIntegrationRequestForRole('RIA')
+        ? `Esito dell’integrazione tecnica della pratica n. ${n} ricevuto.`
+        : `Istruttoria tecnica della pratica n. ${n} ricevuta e da prendere in carico.`
+    }
+    if (ev === 'FASCICOLO_TRASMESSO_VERIFICA' && dest === 'RIA') return `Fascicolo della pratica n. ${n} ricevuto per verifica.`
+    if (ev === 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE') return `Istruttoria della pratica n. ${n} ricevuta per integrazione.`
+    if (ev === 'FASCICOLO_RIMANDATO_INTEGRAZIONE' && dest === 'IA') return `Fascicolo della pratica n. ${n} ricevuto per integrazione.`
+    if (ev === 'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO' && dest === 'IA') return `Esito dell’integrazione tecnica della pratica n. ${n} ricevuto.`
+    if (ev === 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA' && dest === 'RIA') return `Atto di accertamento della pratica n. ${n} ricevuto per verifica.`
+    if (ev === 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE' && dest === 'IA') return `Atto di accertamento della pratica n. ${n} ricevuto per integrazione.`
+
+    return activityMessageForSubtype(subtipo || evento, numeroRapporto)
   }
 
   const normalizeActivityDestRole = (r: string): string => {
@@ -3000,7 +3095,7 @@ function ActionsPanel (props: {
     try {
       const layer = await getAttivitaLayer()
       const numeroRapporto = shortReportNumberForActivity(overrideAttrs)
-      const destMeta = getRoutingMetaForRole(ruoloDest, { technicalIntegration: logOpts?.eventoChiusura === 'INTEGRAZIONE_RICHIESTA' && ruoloDest === 'RIT' && role === 'RIA' })
+      const destMeta = getRoutingMetaForRole(ruoloDest, { technicalIntegration: logOpts?.eventoChiusura === 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE' && ruoloDest === 'RIT' && role === 'RIA' })
       const areaDest = normalizeAreaLabel(destMeta.area || (ruoloDest === 'DA' || ruoloDest === 'RIA' || ruoloDest === 'IA' ? 'AMM' : ''))
       // Manteniamo il settore di provenienza nel record dell'attività corrente.
       // La visibilità area-level per RIT/DT viene gestita dalla query degli allarmi,
@@ -3062,60 +3157,6 @@ function ActionsPanel (props: {
   }
 
 
-  const upsertInformativeActivityForDest = async (
-    info: InformativeActivityTarget,
-    overrideAttrs?: Record<string, any>
-  ) => {
-    const ruoloDest = normalizeActivityDestRole(String(info?.ruoloDestinatario || ''))
-    if (!ruoloDest) return
-    const parentGlobalId = await getActivityParentGlobalId()
-    if (!parentGlobalId) {
-      console.warn('[GII_ATTIVITA_CORRENTI] Creazione informativa saltata: GlobalID pratica non disponibile.', { oid, ruoloDest, sottotipo: info?.sottotipo })
-      return
-    }
-
-    try {
-      const layer = await getAttivitaLayer()
-      const now = Date.now()
-      const numeroRapporto = shortReportNumberForActivity(overrideAttrs)
-      const destMeta = getRoutingMetaForRole(ruoloDest)
-      const areaDest = normalizeAreaLabel(destMeta.area || (ruoloDest === 'DA' || ruoloDest === 'RIA' || ruoloDest === 'IA' ? 'AMM' : ''))
-      const settoreDest = normalizeSettoreCod(destMeta.settore || '')
-      const destUsername = String(info?.utenteDestinatario || resolveDestUser(ruoloDest) || '').trim()
-      // Le informative devono restare archiviabili per singolo destinatario/evento:
-      // la chiave include il timestamp e non sostituisce eventuali informative precedenti.
-      const key = `${parentGlobalId}|INFORMATIVA|${String(info.sottotipo || 'INFO').trim().toUpperCase()}|${ruoloDest}|${areaDest}|${settoreDest}|${destUsername}|${now}`
-
-      const attrs: Record<string, any> = {
-        chiave_attivita: key,
-        parent_globalid: parentGlobalId,
-        parent_objectid: oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null,
-        numero_rapporto: numeroRapporto,
-        tipo_attivita: 'INFORMATIVA',
-        sottotipo_attivita: String(info.sottotipo || 'INFO').trim().toUpperCase(),
-        titolo: String(info.titolo || 'Comunicazione informativa').trim(),
-        messaggio: String(info.messaggio || '').trim(),
-        destinatario_ruolo: ruoloDest,
-        destinatario_area: areaDest || null,
-        destinatario_settore: settoreDest || null,
-        destinatario_ufficio_id: null,
-        destinatario_ufficio_zona: null,
-        destinatario_username: destUsername || null,
-        origine_evento: String(info.sottotipo || 'INFO').trim().toUpperCase(),
-        priorita: String(info.priorita || 'INFO').trim().toUpperCase(),
-        data_attivazione: now,
-        creato_il: now,
-        creato_da: String((window as any).__giiUserRole?.username || ''),
-        aggiornato_il: now,
-        aggiornato_da: String((window as any).__giiUserRole?.username || '')
-      }
-
-      await layer.applyEdits({ addFeatures: [{ attributes: attrs }] })
-      try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { source: 'gii-azioni-upsert-informativa', key, oid, ts: now } })) } catch {}
-    } catch (e) {
-      console.warn('[GII_ATTIVITA_CORRENTI] Errore creazione informativa:', e)
-    }
-  }
 
   const deleteCurrentActivityForCurrentRole = async () => {
     if (!hasSel || oid == null) return
@@ -4137,7 +4178,7 @@ function ActionsPanel (props: {
   const getRoleLabelForMenu = (destRole: string, opts?: { technicalIntegration?: boolean }): string => {
     const dest = String(destRole || '').trim().toUpperCase()
     if (!dest) return ''
-    if (dest === 'RIA') return 'Responsabile Istruttoria amministrativa'
+    if (dest === 'RIA') return 'Responsabile dell’istruttoria amministrativa'
     if (dest === 'IA') return 'Istruttore amministrativo'
     if (dest === 'DA') return 'Direttore Area AA. GG. e P.F.'
 
@@ -4145,7 +4186,7 @@ function ActionsPanel (props: {
     const areaCode = normalizeAreaLabel(meta.area || getPracticeAreaForRouting())
     const areaName = areaNameForRoleLabel(areaCode)
 
-    if (dest === 'RIT') return 'Responsabile istruttoria tecnica'
+    if (dest === 'RIT') return 'Responsabile dell’istruttoria tecnica'
     if (dest === 'IT') return 'Istruttore tecnico'
     if (dest === 'DT') return areaName ? `Direttore dell’Area ${areaName}` : 'Direttore dell’Area Tecnica'
     if (dest === 'CS') return 'Capo Settore'
@@ -4159,54 +4200,81 @@ function ActionsPanel (props: {
     return getRoleLabelForMenu(dest)
   }
 
+  const getRoleRecipientPhrase = (destRole: string, opts?: { technicalIntegration?: boolean, forward?: boolean }): string => {
+    const label = opts?.forward ? getRoleLabelForForward(destRole) : getRoleLabelForMenu(destRole, opts)
+    if (!label) return ''
+    return /^Istruttore\b/i.test(label) ? `all’${label}` : `al ${label}`
+  }
+
   const fwdDestLabel = getRoleLabelForForward(fwdDest)
   const currentIntegrationRequesterLabel = currentIntegrationRequester
     ? getRoleLabelForForward(currentIntegrationRequester)
     : ''
 
-  const approvaBtnLabel =
-    role === 'IT' ? `Trasmetti ${praticaLabel === 'Rapporto tecnico' ? 'rapporto tecnico' : 'rilevazione'} al ${getRoleLabelForMenu('CS')}` :
-    role === 'CS' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
-    role === 'RIT' ? 'Approva istruttoria tecnica' :
-    role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
-    role === 'RIA' && riaAttoContestazioneDaVerificare ? 'Approva Atto di contestazione' :
-    role === 'RIA' && riaBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
-    role === 'RIA' && riaStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
-    role === 'RIA' ? 'Approva istruttoria amministrativa' :
-    role === 'IA' ? 'Apponi attestazione di conformità' :
-    'Approva'
+  const itAssignedByCsForUi = String(pickAttrCI(data, ['it_assegnato_da', 'IT_ASSEGNATO_DA']) || '').trim() !== '' ||
+    !isEmptyValue(pickAttrCI(data, ['dt_assegnazione_it', 'DT_ASSEGNAZIONE_IT']))
+  const isInitialItTransmissionForUi = role === 'IT' && !itAssignedByCsForUi && !numeroRapportoTecnicoCorrente
+  const isIntegrationResponseForUi = Boolean(currentIntegrationRequesterLabel)
+  const incomingWorkflowEventForUi = String(incomingWorkflowForUi?.evento || '').trim().toUpperCase()
+  const isCsIntegrationVerificationForUi = role === 'CS' && incomingWorkflowEventForUi === 'INTEGRAZIONE_TRASMESSA_VERIFICA'
+  const isCsInitialRilevazioneForUi = role === 'CS' && (
+    incomingWorkflowEventForUi === 'NUOVA_RILEVAZIONE_TRASMESSA' ||
+    (!incomingWorkflowEventForUi && !hasTiAnyEvidence)
+  )
+  const contextualPositiveActionLabel = isIntegrationResponseForUi
+    ? (role === 'IT'
+        ? 'Trasmetti integrazione per verifica'
+        : role === 'RIT'
+          ? 'Trasmetti integrazione tecnica per verifica'
+          : `Trasmetti ${getRoleRecipientPhrase(currentIntegrationRequester, { forward: true })}`)
+    : role === 'IT'
+      ? (isInitialItTransmissionForUi ? 'Trasmetti nuova rilevazione' : 'Trasmetti istruttoria per verifica')
+      : role === 'CS'
+        ? 'Esito positivo'
+        : role === 'RIT'
+          ? 'Valida istruttoria tecnica'
+          : role === 'DT'
+            ? 'Approva istruttoria tecnica'
+            : role === 'RIA' && riaAttoContestazioneDaVerificare
+              ? 'Approva Atto di accertamento'
+              : role === 'RIA'
+                ? 'Valida istruttoria amministrativa'
+                : role === 'IA'
+                  ? 'Apponi visto di conformità'
+                  : 'Approva'
 
-  const approvaDoneLabel = currentIntegrationRequesterLabel
-    ? `Trasmessa al ${currentIntegrationRequesterLabel}`
-    : role === 'IT' ? `${praticaLabel === 'Rapporto tecnico' ? 'Rapporto tecnico' : 'Rilevazione'} trasmessa al ${getRoleLabelForMenu('CS')}` :
-    role === 'CS' ? (praticaLabel === 'Rapporto tecnico' ? `Integrazione validata e trasmessa al ${getRoleLabelForMenu('RIT')}` : `Rilevazione approvata e trasmessa al ${getRoleLabelForMenu('RIT')}`) :
-    role === 'RIT' ? `Istruttoria tecnica approvata e trasmessa al ${getRoleLabelForForward('DT')}` :
-    role === 'DT' ? `Rapporto tecnico di rilevazione approvato e trasmesso al ${getRoleLabelForMenu('RIA')}` :
-    role === 'RIA' && riaAttoContestazioneDaVerificare ? 'Atto di contestazione approvato' :
-    role === 'RIA' && riaBozzaDeterminazioneDaVerificare ? 'Istruttoria amministrativa approvata' :
-    role === 'RIA' && riaStaApprovandoPropostaContestazione ? 'Istruttoria amministrativa approvata' :
-    role === 'RIA' ? 'Istruttoria amministrativa approvata' :
-    role === 'IA' ? 'Attestazione di conformità apposta' :
-    'Approvata'
+  const approvaBtnLabel = contextualPositiveActionLabel
 
-  const approvaConfirmLabel = currentIntegrationRequesterLabel
-    ? `Trasmetti al ${currentIntegrationRequesterLabel}`
-    : role === 'IT' ? `Trasmetti al ${getRoleLabelForMenu('CS')}` :
-    role === 'CS' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
-    role === 'RIT' ? 'Approva istruttoria tecnica' :
-    role === 'DT' ? 'Approva rapporto tecnico' :
-    role === 'RIA' && riaAttoContestazioneDaVerificare ? 'Approva Atto di contestazione' :
-    role === 'RIA' && riaBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
-    role === 'RIA' && riaStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
-    role === 'RIA' ? 'Approva istruttoria amministrativa' :
-    role === 'IA' ? 'Apponi attestazione' :
-    'Approva'
+  const approvaDoneLabel = isIntegrationResponseForUi
+    ? (role === 'IT'
+        ? 'Integrazione trasmessa per verifica'
+        : role === 'RIT'
+          ? 'Integrazione tecnica trasmessa per verifica'
+          : 'Trasmissione completata')
+    : role === 'IT'
+      ? (isInitialItTransmissionForUi ? 'Nuova rilevazione trasmessa' : 'Istruttoria trasmessa per verifica')
+      : role === 'CS'
+        ? 'Istruttoria verificata'
+        : role === 'RIT'
+          ? 'Istruttoria tecnica validata'
+          : role === 'DT'
+            ? 'Istruttoria tecnica approvata'
+            : role === 'RIA' && riaAttoContestazioneDaVerificare
+              ? 'Atto di accertamento approvato'
+              : role === 'RIA'
+                ? 'Istruttoria amministrativa validata'
+                : role === 'IA'
+                  ? 'Visto di conformità apposto'
+                  : 'Operazione completata'
+
+  const approvaConfirmLabel = contextualPositiveActionLabel
+
 
   const getRiTecnicoTargetLabel = (): string => {
     const areaPratica = normalizeAreaLabel(pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
     const areaName = areaNameForRoleLabel(areaPratica)
-    if ((areaPratica === 'AGR' || areaPratica === 'TEC') && areaName) return `Responsabile istruttoria tecnica dell’Area ${areaName}`
-    return 'Responsabile istruttoria tecnica'
+    if ((areaPratica === 'AGR' || areaPratica === 'TEC') && areaName) return `Responsabile dell’istruttoria tecnica dell’Area ${areaName}`
+    return 'Responsabile dell’istruttoria tecnica'
   }
 
   const formatRimandoRoleLabel = (destRole: string): string => {
@@ -4218,8 +4286,8 @@ function ActionsPanel (props: {
 
   const rimandoGenericDest = getPrevRoleForIntegration()
   const rimandoGenericTargetLabel = formatRimandoRoleLabel(rimandoGenericDest)
-  const rimandoGenericButtonLabel = rimandoGenericTargetLabel ? `Rimanda al ${rimandoGenericTargetLabel}` : 'Rimanda'
-  const rimandoIaButtonLabel = `Rimanda al ${getRoleLabelForMenu('IA')}`
+  const rimandoGenericButtonLabel = rimandoGenericDest ? `Rimanda ${getRoleRecipientPhrase(rimandoGenericDest)}` : 'Rimanda'
+  const rimandoIaButtonLabel = `Rimanda ${getRoleRecipientPhrase('IA')}`
   const rimandoTecnicaTargetLabel = getRiTecnicoTargetLabel()
   const rimandoTecnicaButtonLabel = `Rimanda al ${rimandoTecnicaTargetLabel}`
   const pendingRimandoTargetLabel = role === 'RIA' && pending === 'INTEGRAZIONE_IA'
@@ -4314,31 +4382,36 @@ function ActionsPanel (props: {
     items: WorkflowMenuItem[]
   }
 
-  const approvaMenuLabel = currentIntegrationRequesterLabel
-    ? `Trasmetti al ${currentIntegrationRequesterLabel}`
-    : role === 'IT' ? `Trasmetti ${praticaLabel === 'Rapporto tecnico' ? 'rapporto tecnico' : 'rilevazione'} al ${getRoleLabelForMenu('CS')}` :
-    role === 'CS' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
-    role === 'RIT' ? 'Approva istruttoria tecnica' :
-    role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
-    role === 'RIA' && riaAttoContestazioneDaVerificare ? 'Approva Atto di contestazione' :
-    role === 'RIA' && riaBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
-    role === 'RIA' && riaStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
-    role === 'RIA' ? 'Approva istruttoria amministrativa' :
-    role === 'IA' ? 'Apponi attestazione di conformità' :
-    approvaBtnLabel
+  const approvaMenuLabel = contextualPositiveActionLabel
 
-  const approvaMenuDesc = currentIntegrationRequesterLabel
-    ? `Invia la risposta al ${currentIntegrationRequesterLabel}.`
-    : role === 'IT' ? `${praticaLabel === 'Rapporto tecnico' ? 'Invia il rapporto tecnico' : 'Invia la rilevazione'} al ${getRoleLabelForMenu('CS')}.` :
-    role === 'CS' ? (praticaLabel === 'Rapporto tecnico' ? `Valida l’integrazione e trasmette il rapporto tecnico al ${getRoleLabelForMenu('RIT')}.` : `Approva la rilevazione e la trasmette al ${getRoleLabelForMenu('RIT')}.`) :
-    role === 'RIT' ? `Approva l’istruttoria tecnica e la trasmette al ${getRoleLabelForForward('DT')}.` :
-    role === 'DT' ? `Approva il Rapporto tecnico di rilevazione e lo trasmette al ${getRoleLabelForMenu('RIA')}.` :
-    role === 'RIA' && riaAttoContestazioneDaVerificare ? 'Approva l’Atto e restituisce la pratica all’Istruttore amministrativo per la trasmissione al Direttore.' :
-    role === 'RIA' && riaBozzaDeterminazioneDaVerificare ? 'Approva l’istruttoria amministrativa e restituisce la pratica all’Istruttore amministrativo per la protocollazione e la trasmissione al Direttore.' :
-    role === 'RIA' && riaStaApprovandoPropostaContestazione ? 'Approva l’istruttoria amministrativa e restituisce la pratica all’Istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.' :
-    role === 'IA' ? 'Appone il visto di conformità. La pratica resta all’Istruttore amministrativo per la predisposizione della bozza di determinazione e la successiva trasmissione del fascicolo al Responsabile.' :
-    fwdDestLabel ? `Invia la pratica al ${fwdDestLabel}.` :
-    'Avanza la pratica al passaggio successivo.'
+  const approvaMenuDesc = isIntegrationResponseForUi
+    ? (role === 'IT'
+        ? `Trasmette l’integrazione ${getRoleRecipientPhrase('CS')} per la verifica.`
+        : role === 'RIT'
+          ? `Trasmette l’integrazione tecnica ${getRoleRecipientPhrase('DT', { forward: true })} per la verifica.`
+          : currentIntegrationRequester
+            ? `Trasmette la pratica ${getRoleRecipientPhrase(currentIntegrationRequester, { forward: true })}.`
+            : 'Trasmette la pratica al passaggio successivo.')
+    : role === 'IT'
+      ? (isInitialItTransmissionForUi
+          ? `Trasmette la nuova rilevazione ${getRoleRecipientPhrase('CS')}.`
+          : `Trasmette l’istruttoria ${getRoleRecipientPhrase('CS')} per la verifica.`)
+      : role === 'CS'
+        ? `Registra l’esito positivo della verifica dell’istruttoria e inoltra la pratica ${getRoleRecipientPhrase('RIT')}.`
+        : role === 'RIT'
+          ? `Valida l’istruttoria tecnica e inoltra la pratica ${getRoleRecipientPhrase('DT', { forward: true })}.`
+          : role === 'DT'
+            ? `Approva l’istruttoria tecnica e inoltra la pratica ${getRoleRecipientPhrase('RIA')}.`
+            : role === 'RIA' && riaAttoContestazioneDaVerificare
+              ? 'Approva l’Atto di accertamento e restituisce la pratica all’Istruttore amministrativo per i passaggi successivi.'
+              : role === 'RIA'
+                ? 'Valida l’istruttoria amministrativa e restituisce la pratica all’Istruttore amministrativo per i passaggi successivi.'
+                : role === 'IA'
+                  ? 'Appone il visto di conformità. La pratica resta all’Istruttore amministrativo per la predisposizione degli elaborati successivi.'
+                  : fwdDestLabel
+                    ? `Invia la pratica ${getRoleRecipientPhrase(fwdDest, { forward: true })}.`
+                    : 'Avanza la pratica al passaggio successivo.'
+
 
   const rimandoTecnicaMenuDesc = 'Rimando all’istruttoria tecnica.'
 
@@ -4352,7 +4425,7 @@ function ActionsPanel (props: {
       items: [
         {
           key: 'ASSEGNA_IT',
-          label: `Assegna al ${getRoleLabelForMenu('IT')}`,
+          label: `Assegna ${getRoleRecipientPhrase('IT')}`,
           desc: 'Assegna la pratica all’Istruttore tecnico.',
           enabled: canStartAssegnaTi,
           visible: role === 'CS',
@@ -4363,7 +4436,7 @@ function ActionsPanel (props: {
           key: 'ASSEGNA_IA',
           label: riaperturaWorkflowCandidate
             ? 'Avvia nuova istruttoria amministrativa'
-            : `Assegna al ${getRoleLabelForMenu('IA')}`,
+            : `Assegna ${getRoleRecipientPhrase('IA')}`,
           desc: riaperturaWorkflowDaCompletare
             ? 'Completare e salvare tutti i dati della scheda Riapertura prima di avviare il nuovo ciclo.'
             : riaperturaWorkflowCheckLoading
@@ -4378,8 +4451,8 @@ function ActionsPanel (props: {
         },
         {
           key: 'INVIA_IA',
-          label: `Trasmetti al ${getRoleLabelForMenu('IA')}`,
-          desc: 'Invia la pratica all’Istruttore amministrativo già assegnato.',
+          label: 'Trasmetti esito integrazione tecnica',
+          desc: 'Trasmette all’Istruttore amministrativo l’esito dell’integrazione tecnica rientrata dalla fase tecnica.',
           enabled: canStartInviaIa,
           visible: role === 'RIA' && isRientroTecnicoDaDt,
           color: buttonColors.approva,
@@ -4420,7 +4493,7 @@ function ActionsPanel (props: {
         {
           key: 'INTEGRAZIONE',
           label: rimandoGenericButtonLabel,
-          desc: rimandoGenericTargetLabel ? `${praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà rimandato' : 'La rilevazione verrà rimandata'} al ${rimandoGenericTargetLabel}.` : 'Rimando per integrazione.',
+          desc: rimandoGenericDest ? `L’istruttoria verrà rimandata ${getRoleRecipientPhrase(rimandoGenericDest)} per integrazione.` : 'Rimando per integrazione.',
           enabled: canStartIntegrazione,
           visible: role !== 'IT' && role !== 'RIA' && !iaRimandoRiaInibitoDopoEmailDirettore,
           color: buttonColors.integrazione,
@@ -4442,8 +4515,12 @@ function ActionsPanel (props: {
         },
         {
           key: 'RESPINGI',
-          label: 'Respingi',
-          desc: 'Respinge la pratica.',
+          label: role === 'CS'
+            ? (isCsInitialRilevazioneForUi ? 'Respingi rilevazione' : 'Respingi istruttoria')
+            : 'Respingi istruttoria tecnica',
+          desc: role === 'CS'
+            ? (isCsInitialRilevazioneForUi ? 'Respinge la rilevazione.' : 'Respinge l’istruttoria.')
+            : 'Respinge l’istruttoria tecnica.',
           enabled: canStartRespingi,
           visible: role !== 'RIA' && role !== 'IT' && role !== 'DA',
           color: buttonColors.respingi,
@@ -4795,84 +4872,18 @@ function ActionsPanel (props: {
     }
   }
 
-  const buildTechnicalChainInformativeActivities = (kind: 'DT_APPROVA' | 'DT_RESPINGE' | 'DT_RIMANDA_IT' | 'RIT_RIMANDA_IT' | 'CS_APPROVA' | 'CS_RESPINGE', _overrideAttrs?: Record<string, any>): InformativeActivityTarget[] => {
-    const tiUser = resolveDestUser('IT')
-    const hasTiDest = !!String(tiUser || '').trim()
-    const out: InformativeActivityTarget[] = []
-    const add = (ruoloDestinatario: string, titolo: string, messaggio: string, sottotipo: string, utenteDestinatario?: string) => {
-      out.push({ ruoloDestinatario, utenteDestinatario, titolo, messaggio, sottotipo, priorita: 'INFO' })
-    }
-    const addTiIfPresent = (titolo: string, messaggio: string, sottotipo: string) => {
-      // Il IT va avvisato solo quando esiste davvero un IT assegnato alla pratica
-      // (origine IT oppure rilevazione già assegnata a IT). Per le rilevazioni TR
-      // non va creato un avviso generico rivolto a tutti i IT del settore.
-      if (hasTiDest) add('IT', titolo, messaggio, sottotipo, tiUser)
-    }
-
-    if (kind === 'DT_APPROVA') {
-      const titolo = 'Rapporto tecnico approvato'
-      const messaggio = 'Trasmesso all’Area Amministrativa.'
-      add('RIT', titolo, messaggio, 'DT_APPROVA_RAPPORTO')
-      add('CS', titolo, messaggio, 'DT_APPROVA_RAPPORTO')
-      addTiIfPresent(titolo, messaggio, 'DT_APPROVA_RAPPORTO')
-    }
-
-    if (kind === 'DT_RESPINGE') {
-      const titolo = 'Rapporto tecnico respinto'
-      const messaggio = 'Esito registrato.'
-      add('RIT', titolo, messaggio, 'DT_RESPINGE_RAPPORTO')
-      add('CS', titolo, messaggio, 'DT_RESPINGE_RAPPORTO')
-      addTiIfPresent(titolo, messaggio, 'DT_RESPINGE_RAPPORTO')
-    }
-
-    if (kind === 'DT_RIMANDA_IT') {
-      const titolo = 'Rimando all’Istruttore tecnico'
-      const messaggio = 'Richieste integrazioni o rettifiche.'
-      add('RIT', titolo, messaggio, 'DT_RIMANDA_A_IT')
-      add('CS', titolo, messaggio, 'DT_RIMANDA_A_IT')
-    }
-
-    if (kind === 'RIT_RIMANDA_IT') {
-      const titolo = 'Rimando all’Istruttore tecnico'
-      const messaggio = 'Richieste integrazioni o rettifiche.'
-      add('CS', titolo, messaggio, 'RIT_RIMANDA_A_IT')
-    }
-
-    if (kind === 'CS_APPROVA') {
-      const titolo = praticaLabel === 'Rapporto tecnico' ? 'Integrazione validata' : 'Rilevazione approvata'
-      const messaggio = 'Trasmessa al Responsabile istruttoria tecnica.'
-      addTiIfPresent(titolo, messaggio, 'CS_APPROVA_RILEVAZIONE')
-    }
-
-    if (kind === 'CS_RESPINGE') {
-      const titolo = 'Rilevazione respinta'
-      const messaggio = 'Esito registrato.'
-      addTiIfPresent(titolo, messaggio, 'CS_RESPINGE_RILEVAZIONE')
-    }
-
-    return out
-  }
 
   const saveWithWorkflowLog = async (
     attributesIn: Record<string, any>,
     okText: string,
-    logOpts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string, informativeActivities?: InformativeActivityTarget[], skipCurrentActivity?: boolean }
+    logOpts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string, skipCurrentActivity?: boolean }
   ) => {
     const operationContextStamp = getGiiPracticeContextStamp()
     const operationContextIsCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
-    const resolvedLogOpts = {
-      ...logOpts,
-      informativeActivities: (logOpts?.informativeActivities || []).map((info) => ({ ...info }))
-    }
+    const resolvedLogOpts = { ...logOpts }
     if (resolvedLogOpts.ruoloDestinatario && !String(resolvedLogOpts.utenteDestinatario || '').trim()) {
       resolvedLogOpts.utenteDestinatario = await resolveDestUserAsync(resolvedLogOpts.ruoloDestinatario)
     }
-    for (const info of resolvedLogOpts.informativeActivities || []) {
-      if (info?.ruoloDestinatario && !String(info.utenteDestinatario || '').trim()) {
-        info.utenteDestinatario = await resolveDestUserAsync(info.ruoloDestinatario)
-      }
-    }
-
     if (!operationContextIsCurrent()) return
 
     // Le azioni di workflow possono lasciare il rapporto visibile nella scheda corrente
@@ -4894,9 +4905,6 @@ function ActionsPanel (props: {
       await closeCycleLog({ ...resolvedLogOpts, auditOldMap: auditDelta.oldMap, auditNewMap: auditDelta.newMap })
       await deleteCurrentActivityForCurrentRole()
       if (resolvedLogOpts?.ruoloDestinatario && !resolvedLogOpts.skipCurrentActivity) await upsertCurrentActivityForDest(resolvedLogOpts, attributesIn)
-      for (const info of (resolvedLogOpts?.informativeActivities || [])) {
-        await upsertInformativeActivityForDest(info, attributesIn)
-      }
       if (operationContextIsCurrent()) await refreshAfterWorkflowSave('azioni-post-log')
     } finally {
       if (operationContextIsCurrent()) setLoading(false)
@@ -5124,7 +5132,7 @@ function ActionsPanel (props: {
 
       addGiiRoutingFields(upd, 'IT', 'TRASMISSIONE', { destUsername: tiSelected })
 
-      await saveWithWorkflowLog(upd, `Istruttore tecnico assegnato: ${tiName}.`, { eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'IT', utenteDestinatario: tiSelected, noteChiusura: `Assegna Istruttore tecnico: ${tiName} (${tiSelected})`, fase: role })
+      await saveWithWorkflowLog(upd, `Istruttore tecnico assegnato: ${tiName}.`, { eventoChiusura: 'ISTRUTTORIA_ASSEGNATA', ruoloDestinatario: 'IT', utenteDestinatario: tiSelected, noteChiusura: `Assegna Istruttore tecnico: ${tiName} (${tiSelected})`, fase: role })
 
       setPending(null)
       setConfirmAttempted(false)
@@ -5229,7 +5237,7 @@ function ActionsPanel (props: {
       const successMessage = isRiaperturaAssignment
         ? `Nuova istruttoria amministrativa avviata e assegnata a ${iaName}.`
         : `Istruttore amministrativo assegnato: ${iaName}.`
-      await saveWithWorkflowLog(upd, successMessage, { eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'IA', utenteDestinatario: iaSelected, noteChiusura: `${reopenMarker}Assegna Istruttore amministrativo: ${iaName} (${iaSelected})`, fase: role })
+      await saveWithWorkflowLog(upd, successMessage, { eventoChiusura: 'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA', ruoloDestinatario: 'IA', utenteDestinatario: iaSelected, noteChiusura: `${reopenMarker}Assegna Istruttore amministrativo: ${iaName} (${iaSelected})`, fase: role })
       if (isRiaperturaAssignment) setRiaperturaWorkflowStarted(true)
 
       setPending(null)
@@ -5278,7 +5286,7 @@ function ActionsPanel (props: {
       const noteInvioIa = noteTrim || (isRientroTecnicoDaDt
         ? 'Invio all’Istruttore amministrativo dopo rientro da integrazione tecnica.'
         : 'Invio all’Istruttore amministrativo.')
-      await saveWithWorkflowLog(upd, 'Pratica inviata all’Istruttore amministrativo.', { eventoChiusura: 'INVIO_A_IA', ruoloDestinatario: 'IA', utenteDestinatario: String(iaUserRaw || resolveDestUser('IA')), noteChiusura: noteInvioIa, fase: role })
+      await saveWithWorkflowLog(upd, 'Pratica inviata all’Istruttore amministrativo.', { eventoChiusura: 'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO', ruoloDestinatario: 'IA', utenteDestinatario: String(iaUserRaw || resolveDestUser('IA')), noteChiusura: noteInvioIa, fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -5357,12 +5365,14 @@ function ActionsPanel (props: {
 
       if (ruoloDest) {
         const successMsg = pending === 'INTEGRAZIONE' ? 'Pratica rimandata per integrazione.' : 'Integrazione richiesta salvata.'
-        const informativeActivities = role === 'DT' && ruoloDest === 'IT'
-          ? buildTechnicalChainInformativeActivities('DT_RIMANDA_IT', upd)
-          : role === 'RIT' && ruoloDest === 'IT'
-            ? buildTechnicalChainInformativeActivities('RIT_RIMANDA_IT', upd)
-            : []
-        await saveWithWorkflowLog(upd, successMsg, { eventoChiusura: 'INTEGRAZIONE_RICHIESTA', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), noteChiusura: noteTrim, fase: role, informativeActivities })
+        const eventoRimando = role === 'RIA' && ruoloDest === 'IA'
+          ? (riaAttoContestazioneDaVerificare
+              ? 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE'
+              : (riaBozzaDeterminazioneDaVerificare
+                  ? 'FASCICOLO_RIMANDATO_INTEGRAZIONE'
+                  : 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE'))
+          : 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE'
+        await saveWithWorkflowLog(upd, successMsg, { eventoChiusura: eventoRimando, ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), noteChiusura: noteTrim, fase: role })
       } else {
         const successMsg = pending === 'INTEGRAZIONE' ? 'Pratica rimandata per integrazione.' : 'Integrazione richiesta salvata.'
         await runApplyEdits(upd, successMsg)
@@ -5474,8 +5484,8 @@ function ActionsPanel (props: {
         }
       }
       if (stato != null) {
-        upd[statoField] = stato
-        upd[dtStatoField] = now
+        upd[realFieldName(statoField)] = stato
+        upd[realFieldName(dtStatoField)] = now
       }
 
       if (role === 'CS' && esito === ESITO_APPROVATA) {
@@ -5535,15 +5545,19 @@ function ActionsPanel (props: {
         : ''
       if (ruoloDest) {
         try {
-          const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
-          const fStato = getSchemaFieldNameCI(schemaFields, `stato_${ruoloDest}`)
-          const fDtStato = getSchemaFieldNameCI(schemaFields, `dt_stato_${ruoloDest}`)
-          const fDtPresa = getSchemaFieldNameCI(schemaFields, `dt_presa_in_carico_${ruoloDest}`)
-          const fEsito = usesStateOnlyWorkflow(ruoloDest) ? null : getSchemaFieldNameCI(schemaFields, `esito_${ruoloDest}`)
-          const fDtEsito = usesStateOnlyWorkflow(ruoloDest) ? null : getSchemaFieldNameCI(schemaFields, `dt_esito_${ruoloDest}`)
-          if (fStato) upd[fStato] = STATO_DA_PRENDERE
-          if (fDtStato) upd[fDtStato] = now
-            if (fDtPresa) upd[fDtPresa] = null
+          // Non subordinare il passaggio al ruolo successivo allo schema della
+          // Data View corrente: alcune viste espongono solo una parte dei campi,
+          // mentre il FeatureLayer sottostante contiene regolarmente stato_RIT,
+          // stato_DT, stato_RIA, ecc. Scriviamo sempre i nomi logici e lasciamo
+          // a filterAttrsToLayerFields la risoluzione sul layer reale.
+          const fStato = realFieldName(`stato_${ruoloDest}`) || `stato_${ruoloDest}`
+          const fDtStato = realFieldName(`dt_stato_${ruoloDest}`) || `dt_stato_${ruoloDest}`
+          const fDtPresa = realFieldName(`dt_presa_in_carico_${ruoloDest}`) || `dt_presa_in_carico_${ruoloDest}`
+          const fEsito = usesStateOnlyWorkflow(ruoloDest) ? null : (realFieldName(`esito_${ruoloDest}`) || `esito_${ruoloDest}`)
+          const fDtEsito = usesStateOnlyWorkflow(ruoloDest) ? null : (realFieldName(`dt_esito_${ruoloDest}`) || `dt_esito_${ruoloDest}`)
+          upd[fStato] = STATO_DA_PRENDERE
+          upd[fDtStato] = now
+          upd[fDtPresa] = null
           const preserveDestEsito = role === 'RIA' && ruoloDest === 'IA' && esito === ESITO_APPROVATA
           if (fEsito && !preserveDestEsito) upd[fEsito] = null
           if (fDtEsito && !preserveDestEsito) upd[fDtEsito] = null
@@ -5626,53 +5640,62 @@ function ActionsPanel (props: {
         }
       }
 
-      // La risposta a integrazione è solo quella diretta al ruolo che ha chiesto
-      // l'integrazione. Non usare una scansione globale degli esiti=1, perché dopo
-      // molti avanti/indietro possono rimanere stati storici non pertinenti.
-      const wasIntegResponse = Boolean(integRequester)
+      // Con tabelle di log pulite ogni chiusura registra direttamente
+      // l'azione reale compiuta dal ruolo, senza codici generici da reinterpretare.
+      // L'ultimo evento ricevuto distingue in modo esplicito il percorso ordinario
+      // dal rientro di una pratica precedentemente rimandata per integrazione.
+      let incomingEvento = ''
+      let incomingRuolo = ''
+      try {
+        const ctx = await getCurrentCycleContextAsync()
+        const incoming = await queryLatestIncomingClosure(String(ctx?.parentGlobalId || ''), role)
+        incomingEvento = String(incoming?.evento || '').trim().toUpperCase()
+        incomingRuolo = String(incoming?.ruolo || '').trim().toUpperCase()
+      } catch {}
 
-      const logOpts = esito === ESITO_APPROVATA
-        ? (role === 'DT'
-              // DT approva il rapporto tecnico → destinatario è RIT
-              ? { eventoChiusura: 'RAPPORTO_APPROVATO', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), fase: role }
-              : isIaAttestazioneConformita
-                ? {
-                    eventoChiusura: 'ATTESTAZIONE_CONFORMITA',
-                    ruoloDestinatario: '',
-                    utenteDestinatario: '',
-                    noteChiusura: noteTrim ? `Attestazione di conformità:
-${noteTrim}` : 'Attestazione di conformità apposta.',
-                    fase: role
-                  }
-                : {
-                    eventoChiusura: ruoloDest
-                      ? (riaStaApprovandoPropostaContestazione ? 'PROPOSTA_CONTESTAZIONE_APPROVATA' : (wasIntegResponse ? 'INTEGRAZIONE_TRASMESSA' : 'ISTRUTTORIA_TRASMESSA'))
-                      : 'ISTRUTTORIA_TRASMESSA',
-                    ruoloDestinatario: ruoloDest,
-                    utenteDestinatario: resolveDestUser(ruoloDest),
-                    noteChiusura: noteTrim || (riaAttoContestazioneDaVerificare
-                      ? 'Atto di accertamento approvato dal Responsabile dell’istruttoria amministrativa e restituito all’Istruttore amministrativo.'
-                      : ''),
-                    fase: role
-                  })
+      const itAssignedByCs = String(pickAttrCI(data, ['it_assegnato_da', 'IT_ASSEGNATO_DA']) || '').trim() !== '' ||
+        !isEmptyValue(pickAttrCI(data, ['dt_assegnazione_it', 'DT_ASSEGNAZIONE_IT']))
+      const isInitialItTransmission = role === 'IT' && !incomingEvento && !itAssignedByCs && !numeroRapportoTecnicoCorrente
+      const isItIntegrationReturn = role === 'IT' && incomingEvento === 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE'
+      const isRitDirectTechnicalIntegration = role === 'RIT' &&
+        incomingEvento === 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE' &&
+        (incomingRuolo === 'DT' || incomingRuolo === 'RIA')
+
+      const eventoPositivo = role === 'IT'
+        ? (isInitialItTransmission
+            ? 'NUOVA_RILEVAZIONE_TRASMESSA'
+            : (isItIntegrationReturn ? 'INTEGRAZIONE_TRASMESSA_VERIFICA' : 'ISTRUTTORIA_TRASMESSA_VERIFICA'))
+        : role === 'CS'
+          ? 'ISTRUTTORIA_VERIFICATA'
+          : role === 'RIT'
+            ? (isRitDirectTechnicalIntegration ? 'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA' : 'ISTRUTTORIA_TECNICA_VALIDATA')
+            : role === 'DT'
+              ? 'ISTRUTTORIA_TECNICA_APPROVATA'
+              : role === 'RIA'
+                ? (riaAttoContestazioneDaVerificare ? 'ATTO_ACCERTAMENTO_APPROVATO' : 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA')
+                : ''
+
+      const logOpts = esito === ESITO_APPROVATA && !isIaAttestazioneConformita && eventoPositivo
+        ? {
+            eventoChiusura: eventoPositivo,
+            ruoloDestinatario: ruoloDest,
+            utenteDestinatario: resolveDestUser(ruoloDest),
+            noteChiusura: noteTrim || (riaAttoContestazioneDaVerificare
+              ? 'Atto di accertamento approvato dal Responsabile dell’istruttoria amministrativa e restituito all’Istruttore amministrativo.'
+              : ''),
+            fase: role
+          }
         : null
 
       if (logOpts) {
-        const informativeActivities = esito === ESITO_APPROVATA
-          ? (role === 'DT'
-              ? buildTechnicalChainInformativeActivities('DT_APPROVA', upd)
-              : role === 'CS'
-                ? buildTechnicalChainInformativeActivities('CS_APPROVA', upd)
-                : [])
-          : []
         const successText = isIaAttestazioneConformita
           ? 'Attestazione di conformità apposta.'
           : riaAttoContestazioneDaVerificare
             ? 'Atto di accertamento approvato e restituito all’Istruttore amministrativo.'
             : riaStaApprovandoPropostaContestazione
-              ? 'Istruttoria amministrativa approvata e restituita all’Istruttore amministrativo.'
+              ? 'Istruttoria amministrativa validata e restituita all’Istruttore amministrativo.'
               : `Esito salvato: ${label}.`
-        await saveWithWorkflowLog(upd, successText, { ...logOpts, informativeActivities })
+        await saveWithWorkflowLog(upd, successText, logOpts)
       } else {
         await runApplyEdits(upd, `Esito salvato: ${label}.`)
       }
@@ -5743,7 +5766,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
           } catch {}
           setPending(null)
           setConfirmAttempted(false)
-          setMsg({ kind: 'err', text: `Istruttoria amministrativa approvata, ma aggiornamento della Proposta PDF non riuscito: ${syncError?.message || String(syncError)}` })
+          setMsg({ kind: 'err', text: `Istruttoria amministrativa validata, ma aggiornamento della Proposta PDF non riuscito: ${syncError?.message || String(syncError)}` })
           return
         }
       }
@@ -5778,12 +5801,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
         upd[dtStatoField] = Date.now()
       }
 
-      const informativeActivities = role === 'DT'
-        ? buildTechnicalChainInformativeActivities('DT_RESPINGE', upd)
-        : role === 'CS'
-          ? buildTechnicalChainInformativeActivities('CS_RESPINGE', upd)
-          : []
-      await saveWithWorkflowLog(upd, 'Esito salvato: Respinta.', { eventoChiusura: 'RESPINTA', noteChiusura: finalNote, fase: role, informativeActivities })
+      await saveWithWorkflowLog(upd, 'Esito salvato: Respinta.', { eventoChiusura: 'RESPINTA', noteChiusura: finalNote, fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -5857,70 +5875,95 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
   const subjectVerbRespinta = praticaLabel === 'Rapporto tecnico' ? 'respinto' : 'respinta'
   const subjectVerbArchiviata = praticaLabel === 'Rapporto tecnico' ? 'archiviato' : 'archiviata'
 
-  const approvaPendingTitle = currentIntegrationRequesterLabel
-    ? `Trasmissione al ${currentIntegrationRequesterLabel}`
-    : role === 'IT' ? `Trasmissione ${subjectNameLower} al ${getRoleLabelForMenu('CS')}` :
-    role === 'CS' ? (praticaLabel === 'Rapporto tecnico' ? 'Validazione integrazione' : 'Approvazione rilevazione') :
-    role === 'RIT' ? 'Approvazione istruttoria tecnica' :
-    role === 'DT' ? 'Approvazione rapporto tecnico' :
-    role === 'RIA' && riaAttoContestazioneDaVerificare ? 'Approvazione Atto di contestazione' :
-    role === 'RIA' && riaBozzaDeterminazioneDaVerificare ? 'Approvazione istruttoria amministrativa' :
-    role === 'RIA' ? 'Approvazione istruttoria amministrativa' :
-    role === 'IA' ? `Trasmissione al ${getRoleLabelForMenu('RIA')}` :
-    'Avanzamento pratica'
+  const approvaPendingTitle = isIntegrationResponseForUi
+    ? (role === 'IT'
+        ? 'Trasmissione integrazione per verifica'
+        : role === 'RIT'
+          ? 'Trasmissione integrazione tecnica per verifica'
+          : 'Trasmissione pratica')
+    : role === 'IT'
+      ? (isInitialItTransmissionForUi ? 'Trasmissione nuova rilevazione' : 'Trasmissione istruttoria per verifica')
+      : role === 'CS'
+        ? 'Esito della verifica'
+        : role === 'RIT'
+          ? 'Validazione istruttoria tecnica'
+          : role === 'DT'
+            ? 'Approvazione istruttoria tecnica'
+            : role === 'RIA' && riaAttoContestazioneDaVerificare
+              ? 'Approvazione Atto di accertamento'
+              : role === 'RIA'
+                ? 'Validazione istruttoria amministrativa'
+                : role === 'IA'
+                  ? 'Apposizione visto di conformità'
+                  : 'Avanzamento pratica'
+
 
   const pendingTitle = pending === 'TAKE'
     ? ((riaBozzaDeterminazioneDaVerificare || riaAttoContestazioneDaVerificare) ? 'Presa in carico pratica' : 'Presa in carico')
     : pending === 'ASSEGNA_IT'
-      ? `Assegnazione al ${getRoleLabelForMenu('IT')}`
+      ? `Assegnazione ${getRoleRecipientPhrase('IT')}`
       : pending === 'ASSEGNA_IA'
-        ? `Assegnazione al ${getRoleLabelForMenu('IA')}`
+        ? `Assegnazione ${getRoleRecipientPhrase('IA')}`
         : pending === 'RESTITUISCI_IA'
-          ? `Restituzione al ${getRoleLabelForMenu('IA')}`
+          ? `Restituzione ${getRoleRecipientPhrase('IA')}`
           : (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA')
-          ? (pendingRimandoTargetLabel ? `Rimando al ${pendingRimandoTargetLabel}` : 'Rimando')
+          ? (pendingRimandoTargetLabel ? (pendingRimandoTargetLabel.startsWith('Istruttore') ? `Rimando all’${pendingRimandoTargetLabel}` : `Rimando al ${pendingRimandoTargetLabel}`) : 'Rimando')
           : pending === 'APPROVA'
             ? approvaPendingTitle
             : pending === 'RESPINGI'
-              ? `Respinta ${subjectNameWithArticle}`
+              ? (role === 'CS'
+                  ? (isCsInitialRilevazioneForUi ? 'Rilevazione respinta' : 'Istruttoria respinta')
+                  : 'Istruttoria tecnica respinta')
               : pending === 'ELIMINA'
                 ? `Archiviazione ${subjectNameWithArticle}`
                 : 'Conferma azione'
 
-  const approvaActionDesc = currentIntegrationRequesterLabel
-    ? `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al ${currentIntegrationRequesterLabel}.`
-    : role === 'IT' ? `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al ${getRoleLabelForMenu('CS')}.` :
-    role === 'CS' ? (praticaLabel === 'Rapporto tecnico' ? `L’integrazione verrà validata e il rapporto tecnico verrà trasmesso al ${getRoleLabelForMenu('RIT')}.` : `La rilevazione verrà approvata e trasmessa al ${getRoleLabelForMenu('RIT')}.`) :
-    role === 'RIT' ? `L’istruttoria tecnica verrà approvata e trasmessa al ${getRoleLabelForForward('DT')}.` :
-    role === 'DT' ? `Il Rapporto tecnico di rilevazione verrà approvato e trasmesso al ${getRoleLabelForMenu('RIA')}.` :
-    role === 'RIA' && riaAttoContestazioneDaVerificare ? 'L’Atto di contestazione verrà approvato e la pratica tornerà all’Istruttore amministrativo per la trasmissione al Direttore.' :
-    role === 'RIA' && riaBozzaDeterminazioneDaVerificare ? 'L’istruttoria amministrativa verrà approvata e la pratica tornerà all’Istruttore amministrativo per i passaggi successivi.' :
-    role === 'RIA' && riaStaApprovandoPropostaContestazione ? 'L’istruttoria amministrativa verrà approvata e la pratica tornerà all’Istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.' :
-    role === 'RIA' ? 'L’istruttoria amministrativa verrà approvata e la pratica verrà restituita all’Istruttore amministrativo per i passaggi successivi.' :
-    role === 'IA' ? 'Il visto di conformità verrà apposto. La pratica resterà all’Istruttore amministrativo per predisporre la bozza di determinazione e trasmettere successivamente il fascicolo al Responsabile.' :
-    `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al passaggio successivo.`
+  const approvaActionDesc = isIntegrationResponseForUi
+    ? (role === 'IT'
+        ? `L’integrazione verrà trasmessa ${getRoleRecipientPhrase('CS')} per la verifica.`
+        : role === 'RIT'
+          ? `L’integrazione tecnica verrà trasmessa ${getRoleRecipientPhrase('DT', { forward: true })} per la verifica.`
+          : 'La pratica verrà trasmessa al passaggio successivo.')
+    : role === 'IT'
+      ? (isInitialItTransmissionForUi
+          ? `La nuova rilevazione verrà trasmessa ${getRoleRecipientPhrase('CS')}.`
+          : `L’istruttoria verrà trasmessa ${getRoleRecipientPhrase('CS')} per la verifica.`)
+      : role === 'CS'
+        ? `Confermi l’esito positivo della verifica dell’istruttoria? La pratica passerà ${getRoleRecipientPhrase('RIT')}.`
+        : role === 'RIT'
+          ? `L’istruttoria tecnica verrà validata e la pratica passerà ${getRoleRecipientPhrase('DT', { forward: true })}.`
+          : role === 'DT'
+            ? `L’istruttoria tecnica verrà approvata e la pratica passerà ${getRoleRecipientPhrase('RIA')}.`
+            : role === 'RIA' && riaAttoContestazioneDaVerificare
+              ? 'L’Atto di accertamento verrà approvato e la pratica tornerà all’Istruttore amministrativo per i passaggi successivi.'
+              : role === 'RIA'
+                ? 'L’istruttoria amministrativa verrà validata e la pratica tornerà all’Istruttore amministrativo per i passaggi successivi.'
+                : role === 'IA'
+                  ? 'Il visto di conformità verrà apposto. La pratica resterà all’Istruttore amministrativo per predisporre gli elaborati successivi.'
+                  : `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al passaggio successivo.`
+
 
   const integrazioneActionDesc = pendingRimandoTargetLabel
     ? (praticaLabel === 'Rapporto tecnico'
-        ? `Il rapporto verrà rimandato al ${pendingRimandoTargetLabel}.`
-        : `La rilevazione verrà rimandata al ${pendingRimandoTargetLabel}.`)
+        ? `Il rapporto verrà rimandato ${pendingRimandoTargetLabel.startsWith('Istruttore') ? `all’${pendingRimandoTargetLabel}` : `al ${pendingRimandoTargetLabel}`}.`
+        : `L’istruttoria verrà rimandata ${pendingRimandoTargetLabel.startsWith('Istruttore') ? `all’${pendingRimandoTargetLabel}` : `al ${pendingRimandoTargetLabel}`}.`)
     : (praticaLabel === 'Rapporto tecnico'
         ? 'Il rapporto verrà rimandato per integrazione.'
         : 'La rilevazione verrà rimandata per integrazione.')
 
   const pendingTheme: Record<string, PendingTheme> = {
-    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaAttoContestazioneDaVerificare ? 'La pratica contenente la bozza dell’Atto di contestazione verrà presa in carico per la verifica.' : (riaBozzaDeterminazioneDaVerificare ? 'La pratica contenente la bozza di determinazione verrà presa in carico per la verifica.' : ((role === 'RIA' || role === 'IA') ? 'La pratica verrà presa in carico.' : (praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.'))) },
-    ASSEGNA_IT:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbAssegnata} al ${getRoleLabelForMenu('IT')} selezionato.` },
+    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaAttoContestazioneDaVerificare ? 'La pratica contenente la bozza dell’Atto di accertamento verrà presa in carico per la verifica.' : (riaBozzaDeterminazioneDaVerificare ? 'La pratica contenente la bozza di determinazione verrà presa in carico per la verifica.' : ((role === 'RIA' || role === 'IA') ? 'La pratica verrà presa in carico.' : role === 'CS' ? (isCsInitialRilevazioneForUi ? 'La nuova rilevazione verrà presa in carico.' : isCsIntegrationVerificationForUi ? 'L’integrazione verrà presa in carico per la verifica.' : 'L’istruttoria verrà presa in carico per la verifica.') : (praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.'))) },
+    ASSEGNA_IT:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbAssegnata} ${getRoleRecipientPhrase('IT')} selezionato.` },
     ASSEGNA_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaperturaWorkflowDaAvviare
-      ? `Verrà aperto il nuovo ciclo di riapertura n. ${riaperturaAmmNumero} e la pratica sarà assegnata al ${getRoleLabelForMenu('IA')} selezionato.`
-      : `La pratica verrà assegnata al ${getRoleLabelForMenu('IA')} selezionato.` },
-    INVIA_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà trasmessa all’Istruttore amministrativo.' },
-    RESTITUISCI_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `La pratica verrà restituita al ${getRoleLabelForMenu('IA')} già assegnato.` },
+      ? `Verrà aperto il nuovo ciclo di riapertura n. ${riaperturaAmmNumero} e la pratica sarà assegnata ${getRoleRecipientPhrase('IA')} selezionato.`
+      : `La pratica verrà assegnata ${getRoleRecipientPhrase('IA')} selezionato.` },
+    INVIA_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'L’esito dell’integrazione tecnica verrà trasmesso all’Istruttore amministrativo.' },
+    RESTITUISCI_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `La pratica verrà restituita ${getRoleRecipientPhrase('IA')} già assegnato.` },
     APPROVA:        { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: approvaActionDesc },
     INTEGRAZIONE:   { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: integrazioneActionDesc },
-    INTEGRAZIONE_IA: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `La pratica verrà rimandata al ${getRoleLabelForMenu('IA')} assegnato.` },
+    INTEGRAZIONE_IA: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `La pratica verrà rimandata ${getRoleRecipientPhrase('IA')} assegnato.` },
     INTEGRAZIONE_TECNICA: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `La pratica verrà rimandata al ${rimandoTecnicaTargetLabel}.` },
-    RESPINGI:       { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbRespinta}.` },
+    RESPINGI:       { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: role === 'CS' ? (isCsInitialRilevazioneForUi ? 'La rilevazione verrà respinta.' : 'L’istruttoria verrà respinta.') : `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbRespinta}.` },
     ELIMINA:        { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbArchiviata} e non sarà più visibile nell'elenco.` },
   }
   const theme = pending ? (pendingTheme[pending] ?? { icon: '●', color: '#2f6fed', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: '' }) : pendingTheme.TAKE
@@ -5958,7 +6001,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
 
     if (role === 'CS') {
       if (nextPending === 'APPROVA' || nextPending === 'INVIA_IA') {
-        return `A seguito della verifica svolta, si attesta la conformità della pratica sotto il profilo tecnico-istruttorio e se ne dispone la trasmissione al Responsabile istruttoria tecnica.`
+        return `A seguito della verifica svolta, l’istruttoria risulta completa e coerente e se ne dispone la trasmissione al Responsabile dell’istruttoria tecnica.`
       }
       if (nextPending === 'INTEGRAZIONE' || nextPending === 'INTEGRAZIONE_IA' || nextPending === 'INTEGRAZIONE_TECNICA') {
         return `A seguito della verifica svolta, si rileva la necessità di integrazioni o rettifiche tecnico-istruttorie e si dispone il rinvio all’Istruttore tecnico competente.`
@@ -5968,18 +6011,29 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
       }
     }
 
+    if (role === 'RIT') {
+      if (nextPending === 'APPROVA' || nextPending === 'INVIA_IA') {
+        return isIntegrationResponseForUi
+          ? `A seguito della valutazione di competenza, l’integrazione tecnica viene trasmessa al Direttore d’Area per la verifica.`
+          : `A seguito della valutazione di competenza, si valida l’istruttoria tecnica e se ne dispone la trasmissione al Direttore d’Area.`
+      }
+      if (nextPending === 'INTEGRAZIONE' || nextPending === 'INTEGRAZIONE_IA' || nextPending === 'INTEGRAZIONE_TECNICA') {
+        return `A seguito della valutazione di competenza, si rileva la necessità di ulteriori integrazioni o rettifiche e si dispone il rinvio all’Istruttore tecnico competente.`
+      }
+    }
+
     if (role === 'RIA') {
       if (nextPending === 'APPROVA' || nextPending === 'INVIA_IA') {
         if (riaBozzaDeterminazioneDaVerificare) {
-          return `A seguito della verifica svolta, si approva l’istruttoria amministrativa e si dispone la restituzione della pratica all’Istruttore amministrativo per la protocollazione e la trasmissione al Direttore.`
+          return `A seguito della verifica svolta, si valida l’istruttoria amministrativa e si dispone la restituzione della pratica all’Istruttore amministrativo per la protocollazione e la trasmissione al Direttore.`
         }
-        return `A seguito della verifica svolta, si approva l’istruttoria amministrativa e si dispone la restituzione della pratica all’Istruttore amministrativo per la protocollazione e il completamento della bozza di determinazione.`
+        return `A seguito della verifica svolta, si valida l’istruttoria amministrativa e si dispone la restituzione della pratica all’Istruttore amministrativo per la protocollazione e il completamento della bozza di determinazione.`
       }
       if (nextPending === 'INTEGRAZIONE_IA') {
         return `A seguito della verifica svolta, si rileva la necessità di integrazioni o rettifiche dell’istruttoria amministrativa e si dispone il rinvio all’Istruttore amministrativo.`
       }
       if (nextPending === 'INTEGRAZIONE_TECNICA') {
-        return `A seguito della verifica svolta, si rileva la necessità di chiarimenti o integrazioni sugli elementi tecnici posti a base dell’istruttoria amministrativa e si dispone il rinvio al Responsabile istruttoria tecnica dell’area di provenienza.`
+        return `A seguito della verifica svolta, si rileva la necessità di chiarimenti o integrazioni sugli elementi tecnici posti a base dell’istruttoria amministrativa e si dispone il rinvio al Responsabile dell’istruttoria tecnica dell’area di provenienza.`
       }
       if (nextPending === 'INTEGRAZIONE') {
         return `A seguito della verifica svolta, si rileva la necessità di integrazioni o rettifiche sotto il profilo istruttorio-amministrativo.`
@@ -6289,7 +6343,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
           <div>
             <div style={{ fontWeight: 800, fontSize: 18, color: actionMenuTheme.color, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, overflow: 'hidden' }}>
               <span style={{ fontSize: 20, flex: '0 0 auto' }}>{pending ? actionMenuTheme.icon : '✓'}</span>
-              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: '1 1 auto' }}>Gestisci istruttoria</span>
+              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: '1 1 auto' }}>{role === 'CS' && canStartApprova ? 'Esito della verifica' : 'Gestisci istruttoria'}</span>
             </div>
             {hasSel && oid != null && (
               <div style={{ marginTop: 5, fontSize: 15, color: '#4b5563' }}>

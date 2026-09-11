@@ -792,10 +792,10 @@ export function buildRapportoIterPlaceholders (opts: {
 
   // Le date di chiusura fase arrivano dai cicli effettivi, non da stato_*/dt_stato_*.
   // In particolare, un rimando CS→IT non è una verifica CS e non deve valorizzare la riga Verifica.
-  const iterItCompilazione = findLastChiusuraFromCicli(cicli, 'IT', ['ISTRUTTORIA_TRASMESSA', 'INTEGRAZIONE_TRASMESSA'], ['CS'])
-  const iterCsVerifica = findLastChiusuraFromCicli(cicli, 'CS', ['ISTRUTTORIA_TRASMESSA'], ['RIT']) || ''
-  const iterRitSupervisione = findLastChiusuraFromCicli(cicli, 'RIT', ['ISTRUTTORIA_TRASMESSA'], ['DT']) || (!hasIterCicli ? dateFrom(d, 'dt_stato_RIT') : '')
-  const iterDtApprovazione = findLastChiusuraFromCicli(cicli, 'DT', ['RAPPORTO_APPROVATO']) || (!hasIterCicli ? dateFrom(d, 'dt_esito_DT') : '')
+  const iterItCompilazione = findLastChiusuraFromCicli(cicli, 'IT', ['ISTRUTTORIA_TRASMESSA_VERIFICA', 'INTEGRAZIONE_TRASMESSA_VERIFICA', 'NUOVA_RILEVAZIONE_TRASMESSA'], ['CS'])
+  const iterCsVerifica = findLastChiusuraFromCicli(cicli, 'CS', ['ISTRUTTORIA_VERIFICATA'], ['RIT']) || ''
+  const iterRitSupervisione = findLastChiusuraFromCicli(cicli, 'RIT', ['ISTRUTTORIA_TECNICA_VALIDATA', 'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA'], ['DT']) || (!hasIterCicli ? dateFrom(d, 'dt_stato_RIT') : '')
+  const iterDtApprovazione = findLastChiusuraFromCicli(cicli, 'DT', ['ISTRUTTORIA_TECNICA_APPROVATA']) || (!hasIterCicli ? dateFrom(d, 'dt_esito_DT') : '')
 
   const tecnicoRilevatoreRaw = firstMeaningfulValue(pickAttrCI(d, ['tecnico_rilevatore']), pickAttrCI(d, ['TECNICO_RILEVATORE']))
   const creatoreRilevazioneRaw = firstMeaningfulValue(

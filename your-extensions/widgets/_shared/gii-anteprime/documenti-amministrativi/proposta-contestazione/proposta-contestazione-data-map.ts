@@ -84,8 +84,8 @@ async function enrichAdministrativeIterFromLog (data: any, map: Record<string, s
       const closedMatches = matches.filter(row => preferred.has(row.eventoChiusura))
       return closedMatches.length ? closedMatches[closedMatches.length - 1] : matches[matches.length - 1]
     }
-    const ia = lastForRole('IA', ['BOZZA_DETERMINAZIONE_TRASMESSA'])
-    const ria = lastForRole('RIA', ['PROPOSTA_CONTESTAZIONE_APPROVATA'])
+    const ia = lastForRole('IA', ['FASCICOLO_TRASMESSO_VERIFICA'])
+    const ria = lastForRole('RIA', ['ISTRUTTORIA_AMMINISTRATIVA_VALIDATA'])
     const out = { ...map }
 
     if (!out.amm_iter_compilazione_presa && ia) out.amm_iter_compilazione_presa = iterDateValue(ia.dtApertura)

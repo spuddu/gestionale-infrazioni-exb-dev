@@ -3,8 +3,8 @@
 import { React, jsx, Immutable, DataSourceTypes, DataSourceManager } from 'jimu-core'
 import type { AllWidgetSettingProps } from 'jimu-for-builder'
 import { DataSourceSelector } from 'jimu-ui/advanced/data-source-selector'
-import { IMConfig, defaultConfig, DEFAULT_COLUMNS } from '../config'
-import type { ColumnDef } from '../config'
+import { IMConfig, defaultConfig, DEFAULT_COLUMNS, OGGETTO_STATUS_CATALOG } from '../config'
+import type { ColumnDef, OggettoBadgeRule } from '../config'
 
 type Props = AllWidgetSettingProps<IMConfig>
 type FieldOpt = { name: string; alias: string; type?: string }
@@ -149,6 +149,132 @@ const BADGE_OGGETTO_KEYS = [
   'oggettoBadgeColorRespingimento',
   'oggettoBadgeColorNeutro'
 ] as const
+
+function legacyOggettoBadgeColorForKey (cfg: any, key: string): string {
+  const neutral = String(cfg?.oggettoBadgeColorNeutro || '#d0d0d0')
+  if (key === 'BOZZA') return String(cfg?.oggettoBadgeColorBozza || '#6b7280')
+  if (key === 'NUOVA_RILEVAZIONE_TRASMESSA') return String(cfg?.oggettoBadgeColorNuovaRilevazione || '#7dd3fc')
+  if (key === 'ISTRUTTORIA_ASSEGNATA' || key === 'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA') return String(cfg?.oggettoBadgeColorAssegnazione || '#2f6fed')
+  if (key === 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE' || key === 'FASCICOLO_RIMANDATO_INTEGRAZIONE' || key === 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE') return String(cfg?.oggettoBadgeColorIntegrazione || '#ff6400')
+  if (key === 'ISTRUTTORIA_TECNICA_APPROVATA') return String(cfg?.oggettoBadgeColorApprovazioneTecnica || cfg?.oggettoBadgeColorApprovazione || '#009246')
+  if (key === 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA' || key === 'ATTO_ACCERTAMENTO_APPROVATO') return String(cfg?.oggettoBadgeColorApprovazioneAmministrativa || cfg?.oggettoBadgeColorApprovazione || '#16a34a')
+  if (key === 'SANZIONE_NOTIFICATA') return String(cfg?.oggettoBadgeColorNotifica || cfg?.oggettoBadgeColorApprovazione || '#0f766e')
+  if (key === 'RILEVAZIONE_RESPINTA' || key === 'ISTRUTTORIA_TECNICA_RESPINTA') return String(cfg?.oggettoBadgeColorRespingimento || '#dc2626')
+  if ([
+    'ISTRUTTORIA_TRASMESSA_VERIFICA',
+    'INTEGRAZIONE_TRASMESSA_VERIFICA',
+    'ISTRUTTORIA_VERIFICATA',
+    'ISTRUTTORIA_TECNICA_VALIDATA',
+    'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA',
+    'FASCICOLO_TRASMESSO_VERIFICA',
+    'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO',
+    'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA'
+  ].includes(key)) return String(cfg?.oggettoBadgeColorTrasmissione || '#8b5cf6')
+  return neutral
+}
+
+function buildLegacyOggettoBadgeRules (cfg: any): OggettoBadgeRule[] {
+  return OGGETTO_STATUS_CATALOG.map(s => ({ key: s.key, color: legacyOggettoBadgeColorForKey(cfg, s.key) }))
+}
+
+function normalizeOggettoBadgeRules (raw: any): OggettoBadgeRule[] {
+  const arr: any[] = asJs(raw) || []
+  if (!Array.isArray(arr)) return []
+  const seen = new Set<string>()
+  const out: OggettoBadgeRule[] = []
+  for (const item of arr) {
+    const key = String(item?.key || '').trim()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push({ key, color: String(item?.color || '').trim() })
+  }
+  return out
+}
+
+function OggettoBadgeRulesManager (p: { rules: OggettoBadgeRule[]; neutralColor: string; onChange:(rules:OggettoBadgeRule[])=>void }) {
+  const rules = normalizeOggettoBadgeRules(p.rules)
+  const configuredKeys = new Set(rules.map(r => r.key))
+  const configuredCatalogCount = OGGETTO_STATUS_CATALOG.filter(s => configuredKeys.has(s.key)).length
+  const unconfigured = OGGETTO_STATUS_CATALOG.filter(s => !configuredKeys.has(s.key))
+  const unknownCount = rules.filter(r => !OGGETTO_STATUS_CATALOG.some(s => s.key === r.key)).length
+  const [adding, setAdding] = React.useState(false)
+  const [newKey, setNewKey] = React.useState('')
+  const [newColor, setNewColor] = React.useState(p.neutralColor || '#d0d0d0')
+
+  const updateRule = (index:number, patch:Partial<OggettoBadgeRule>) => {
+    p.onChange(rules.map((r, i) => i === index ? { ...r, ...patch } : r))
+  }
+  const removeRule = (index:number) => p.onChange(rules.filter((_, i) => i !== index))
+  const beginAdd = () => {
+    const first = unconfigured[0]
+    if (!first) return
+    setNewKey(first.key)
+    setNewColor(p.neutralColor || '#d0d0d0')
+    setAdding(true)
+  }
+  const confirmAdd = () => {
+    const key = String(newKey || '').trim()
+    if (!key || configuredKeys.has(key)) return
+    p.onChange([...rules, { key, color: String(newColor || p.neutralColor || '#d0d0d0') }])
+    setAdding(false)
+    setNewKey('')
+  }
+  const card: React.CSSProperties = { padding:'10px 12px', borderRadius:8, border:'1px solid rgba(255,255,255,0.10)', background:'rgba(255,255,255,0.04)', marginBottom:8 }
+  const removeBtn: React.CSSProperties = { border:'1px solid rgba(252,165,165,0.3)', background:'rgba(239,68,68,0.10)', color:'#fca5a5', borderRadius:6, cursor:'pointer', fontSize:11, padding:'5px 8px' }
+  const actionBtn: React.CSSProperties = { border:'1px solid rgba(147,197,253,0.35)', background:'rgba(59,130,246,0.10)', color:'#bfdbfe', borderRadius:7, cursor:'pointer', fontSize:11, fontWeight:600, padding:'6px 9px' }
+
+  return <div>
+    <div style={{ ...card, background:'rgba(59,130,246,0.08)', borderColor:'rgba(147,197,253,0.25)' }}>
+      <div style={{ fontSize:11.5, fontWeight:700, color:'#dbeafe' }}>Configurati: {configuredCatalogCount} di {OGGETTO_STATUS_CATALOG.length} stati</div>
+      <div style={{ ...P.hint, marginTop:4 }}>
+        {unconfigured.length ? `${unconfigured.length} stati non configurati.` : 'Tutti gli stati del catalogo sono configurati.'}
+        {unknownCount > 0 ? ` ${unknownCount} configurazioni appartengono a stati non più presenti nel catalogo.` : ''}
+      </div>
+    </div>
+
+    {rules.map((rule, index) => {
+      const known = OGGETTO_STATUS_CATALOG.some(s => s.key === rule.key)
+      return <div key={`${rule.key}_${index}`} style={card}>
+        <div style={{ display:'flex', alignItems:'flex-end', gap:7, marginBottom:8 }}>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:10, color:'#a0aec0', marginBottom:3 }}>Stato</div>
+            <select style={{ ...P.inp, cursor:'pointer' }} value={rule.key} onChange={e=>updateRule(index,{ key:e.target.value })}>
+              {!known && <option value={rule.key} style={SELECT_OPTION_STYLE}>Stato non più nel catalogo — {rule.key}</option>}
+              {OGGETTO_STATUS_CATALOG.map(s => {
+                const usedElsewhere = configuredKeys.has(s.key) && s.key !== rule.key
+                return <option key={s.key} value={s.key} disabled={usedElsewhere} style={SELECT_OPTION_STYLE}>
+                  {s.label}{usedElsewhere ? ' — già configurato' : ''}
+                </option>
+              })}
+            </select>
+          </div>
+          <button type='button' style={removeBtn} onClick={()=>removeRule(index)} title='Elimina configurazione'>Elimina</button>
+        </div>
+        <div style={{ fontSize:10, color:'#a0aec0', marginBottom:3 }}>Colore badge</div>
+        <ColInp value={String(rule.color || '')} onChange={v=>updateRule(index,{ color:v })}/>
+      </div>
+    })}
+
+    {!adding && <button type='button' onClick={beginAdd} disabled={!unconfigured.length}
+      style={{ ...actionBtn, width:'100%', opacity:unconfigured.length ? 1 : 0.5, cursor:unconfigured.length ? 'pointer' : 'default' }}>
+      ＋ Aggiungi stato
+    </button>}
+
+    {adding && <div style={{ ...card, borderColor:'rgba(147,197,253,0.35)', background:'rgba(59,130,246,0.08)' }}>
+      <div style={{ fontSize:11, fontWeight:700, color:'#bfdbfe', marginBottom:7 }}>Nuova configurazione</div>
+      <div style={{ fontSize:10, color:'#a0aec0', marginBottom:3 }}>Stato</div>
+      <select style={{ ...P.inp, cursor:'pointer', marginBottom:8 }} value={newKey} onChange={e=>setNewKey(e.target.value)}>
+        {unconfigured.map(s => <option key={s.key} value={s.key} style={SELECT_OPTION_STYLE}>{s.label}</option>)}
+      </select>
+      <div style={{ fontSize:10, color:'#a0aec0', marginBottom:3 }}>Colore badge</div>
+      <ColInp value={newColor} onChange={setNewColor}/>
+      <div style={{ display:'flex', gap:6, marginTop:9 }}>
+        <button type='button' style={{ ...actionBtn, flex:1 }} onClick={confirmAdd}>Aggiungi</button>
+        <button type='button' style={{ ...actionBtn, flex:1, background:'rgba(255,255,255,0.05)', borderColor:'rgba(255,255,255,0.12)', color:'#d1d5db' }} onClick={()=>setAdding(false)}>Annulla</button>
+      </div>
+    </div>}
+  </div>
+}
 function FieldSel(p: { value:string; fields:FieldOpt[]; onChange:(v:string)=>void; placeholder?:string; virtual?:boolean }) {
   if(!p.fields.length) return <Inp value={p.value} onChange={p.onChange} placeholder={p.placeholder||'nome campo'}/>
   return (
@@ -352,6 +478,10 @@ export default function Setting(props: Props) {
       BADGE_OGGETTO_KEYS.forEach(k => { patch[k] = (cfg as any)[k] })
     }
 
+    if (raw.oggettoBadgeRules === undefined) {
+      patch.oggettoBadgeRules = buildLegacyOggettoBadgeRules(cfg)
+    }
+
     if (!Object.keys(patch).length) return
     props.onSettingChange({ id: props.id, config: toConfig(patch) })
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -367,6 +497,10 @@ export default function Setting(props: Props) {
     return DEFAULT_COLUMNS.map(c=>({...c}))
   })()
   const columnFieldOptions = mergeLayerFieldOptions(fields, cfgJs, columns)
+  const rawCfgJs = asJs<Record<string, any>>(cfgImm) || {}
+  const oggettoBadgeRules = rawCfgJs.oggettoBadgeRules === undefined
+    ? buildLegacyOggettoBadgeRules(cfgJs)
+    : normalizeOggettoBadgeRules(rawCfgJs.oggettoBadgeRules)
 
   return (
     <div style={P.wrap}>
@@ -430,7 +564,7 @@ export default function Setting(props: Props) {
         </div>
       </div>}
 
-      <Acc id='badgeOggetto' label='▌ Badge oggetto' open={isOpen('badgeOggetto')} onToggle={()=>toggle('badgeOggetto')}/>
+      <Acc id='badgeOggetto' label='▌ Badge stato' open={isOpen('badgeOggetto')} onToggle={()=>toggle('badgeOggetto')}/>
       {isOpen('badgeOggetto') && <div>
         <Check value={cfg.oggettoBadgeEnabled !== false} onChange={v=>updateBadgeOggetto('oggettoBadgeEnabled',v)} label='Mostra badge colorato in testa alla riga'/>
         <div style={P.row3}>
@@ -439,27 +573,19 @@ export default function Setting(props: Props) {
           <div><label style={P.lbl}>Opacità</label><NumInp value={cfg.oggettoBadgeOpacity} onChange={n=>updateBadgeOggetto('oggettoBadgeOpacity',n)} min={0} max={1} step={0.05}/></div>
         </div>
         <div style={P.hint}>Il rientro testo viene applicato anche all’intestazione della prima colonna, così celle e header restano allineati.</div>
-        <div style={P.grp}>Colori per oggetto</div>
-        {([
-          { name:'Bozza', field:'oggettoBadgeColorBozza' },
-          { name:'Nuova rilevazione', field:'oggettoBadgeColorNuovaRilevazione' },
-          { name:'Assegnazione istruttoria', field:'oggettoBadgeColorAssegnazione' },
-          { name:'Trasmissione istruttoria', field:'oggettoBadgeColorTrasmissione' },
-          { name:'Richiesta / trasmissione integrazione', field:'oggettoBadgeColorIntegrazione' },
-          { name:'Approvazione istruttoria tecnica', field:'oggettoBadgeColorApprovazioneTecnica' },
-          { name:'Approvazione sanzione / istruttoria amministrativa', field:'oggettoBadgeColorApprovazioneAmministrativa' },
-          { name:'Notifica / chiusura procedimento sanzionatorio', field:'oggettoBadgeColorNotifica' },
-          { name:'Respingimento', field:'oggettoBadgeColorRespingimento' },
-          { name:'Neutro / non classificato', field:'oggettoBadgeColorNeutro' }
-        ] as const).map(({ name, field }) => (
-          <div key={field} style={{ marginBottom:10 }}>
-            <div style={{ fontSize:11, fontWeight:600, color:'#d1d5db', marginBottom:5, display:'flex', alignItems:'center', gap:8 }}>
-              <span style={{ display:'inline-block', width:16, height:12, borderRadius:3, background:String((cfg as any)[field] || '#d0d0d0'), border:'1px solid rgba(255,255,255,0.25)' }}/>
-              {name}
-            </div>
-            <ColInp value={String((cfg as any)[field] || '')} onChange={v=>updateBadgeOggetto(field,v)}/>
-          </div>
-        ))}
+        <div style={P.grp}>Colori per stato</div>
+        <div style={{ ...P.hint, marginBottom:9 }}>
+          Ogni stato della colonna Stato ha una regola colore indipendente. Se in futuro il catalogo viene esteso, il nuovo stato comparirà qui come non configurato e potrà essere aggiunto senza modificare la logica dei colori.
+        </div>
+        <OggettoBadgeRulesManager
+          rules={oggettoBadgeRules}
+          neutralColor={String(cfg.oggettoBadgeColorNeutro || '#d0d0d0')}
+          onChange={rules=>update('oggettoBadgeRules',rules)}
+        />
+        <div style={{ marginTop:12 }}>
+          <div style={{ fontSize:10, color:'#a0aec0', marginBottom:3 }}>Fallback neutro per stato non classificato</div>
+          <ColInp value={String(cfg.oggettoBadgeColorNeutro || '')} onChange={v=>updateBadgeOggetto('oggettoBadgeColorNeutro',v)}/>
+        </div>
       </div>}
 
       <Acc id='chip' label='🔴 Chip stato' open={isOpen('chip')} onToggle={()=>toggle('chip')}/>

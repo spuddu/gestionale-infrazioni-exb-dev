@@ -12730,19 +12730,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       utente_operatore: username,
       stato_record: 'CHIUSO',
       evento_apertura: 'PRESA_IN_CARICO',
-      evento_chiusura: 'BOZZA_DETERMINAZIONE_TRASMESSA',
+      evento_chiusura: 'FASCICOLO_TRASMESSO_VERIFICA',
       dt_chiusura: now,
       area: 'AMM',
       settore: 'CR',
       fase: roleForLog,
       ruolo_destinatario: 'RIA',
       utente_destinatario: destUsername,
-      note_chiusura: 'Bozza PDF della determinazione trasmessa al Responsabile dell’istruttoria amministrativa per la verifica.',
+      note_chiusura: 'Fascicolo trasmesso al Responsabile dell’istruttoria amministrativa per la verifica.',
       num_campi_modificati: num,
       campi_modificati: num > 0 ? Object.keys(delta.oldMap).join(', ') : '',
       valori_prima_json: num > 0 ? JSON.stringify(delta.oldMap) : '',
       valori_dopo_json: num > 0 ? JSON.stringify(delta.newMap) : '',
-      riepilogo_ciclo: 'Bozza determinazione trasmessa al Responsabile dell’istruttoria amministrativa.'
+      riepilogo_ciclo: 'Fascicolo trasmesso al Responsabile dell’istruttoria amministrativa per la verifica.'
     }
 
     try {
@@ -12810,19 +12810,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       utente_operatore: username,
       stato_record: 'CHIUSO',
       evento_apertura: 'PRESA_IN_CARICO',
-      evento_chiusura: 'ISTRUTTORIA_TRASMESSA',
+      evento_chiusura: 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA',
       dt_chiusura: now,
       area: 'AMM',
       settore: 'CR',
       fase: roleForLog,
       ruolo_destinatario: 'RIA',
       utente_destinatario: destUsername,
-      note_chiusura: 'Atto di contestazione trasmesso al Responsabile dell’istruttoria amministrativa per l’approvazione.',
+      note_chiusura: 'Atto di accertamento trasmesso al Responsabile dell’istruttoria amministrativa per la verifica.',
       num_campi_modificati: num,
       campi_modificati: num > 0 ? Object.keys(delta.oldMap).join(', ') : '',
       valori_prima_json: num > 0 ? JSON.stringify(delta.oldMap) : '',
       valori_dopo_json: num > 0 ? JSON.stringify(delta.newMap) : '',
-      riepilogo_ciclo: 'Atto di contestazione trasmesso al Responsabile dell’istruttoria amministrativa.'
+      riepilogo_ciclo: 'Atto di accertamento trasmesso al Responsabile dell’istruttoria amministrativa per la verifica.'
     }
 
     try {
@@ -12926,15 +12926,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const numeroRapporto = getReportCode(merged, oidNumber)
       const destUsername = await loadUniqueAmmRoleUsername('RIA', 'AMM')
       const mittente = String(profile.fullName || profile.username || 'Istruttore amministrativo').trim()
-      const key = `${parentGlobalId}|PRESA_IN_CARICO|BOZZA_DETERMINAZIONE|RIA|AMM||${destUsername}`
+      const key = `${parentGlobalId}|PRESA_IN_CARICO|FASCICOLO_TRASMESSO_VERIFICA|RIA|AMM||${destUsername}`
       const attrs: Record<string, any> = {
         chiave_attivita: key,
         parent_globalid: parentGlobalId,
         parent_objectid: oidNumber,
         numero_rapporto: numeroRapporto,
         tipo_attivita: 'PRESA_IN_CARICO',
-        sottotipo_attivita: 'BOZZA_DETERMINAZIONE',
-        titolo: 'Fascicolo istruttorio da verificare',
+        sottotipo_attivita: 'FASCICOLO_TRASMESSO_VERIFICA',
+        titolo: 'Fascicolo da verificare',
         messaggio: `Fascicolo istruttorio della pratica n. ${numeroRapporto || '—'} da prendere in carico per la verifica.\nMittente: ${mittente}`,
         destinatario_ruolo: 'RIA',
         destinatario_area: 'AMM',
@@ -12942,7 +12942,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         destinatario_ufficio_id: null,
         destinatario_ufficio_zona: null,
         destinatario_username: destUsername || null,
-        origine_evento: 'IA_TRASMETTE_BOZZA_DETERMINAZIONE',
+        origine_evento: 'FASCICOLO_TRASMESSO_VERIFICA',
         priorita: 'INFO',
         data_attivazione: now,
         creato_il: now,
@@ -12998,23 +12998,23 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const numeroRapporto = getReportCode(merged, oidNumber)
       const destUsername = await loadUniqueAmmRoleUsername('RIA', 'AMM')
       const mittente = String(profile.fullName || profile.username || 'Istruttore amministrativo').trim()
-      const key = `${parentGlobalId}|PRESA_IN_CARICO|ATTO_CONTESTAZIONE|RIA|AMM||${destUsername}`
+      const key = `${parentGlobalId}|PRESA_IN_CARICO|ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA|RIA|AMM||${destUsername}`
       const attrs: Record<string, any> = {
         chiave_attivita: key,
         parent_globalid: parentGlobalId,
         parent_objectid: oidNumber,
         numero_rapporto: numeroRapporto,
         tipo_attivita: 'PRESA_IN_CARICO',
-        sottotipo_attivita: 'ATTO_CONTESTAZIONE',
-        titolo: 'Atto di contestazione da verificare',
-        messaggio: `Atto di contestazione della pratica n. ${numeroRapporto || '—'} da prendere in carico per la verifica.\nMittente: ${mittente}`,
+        sottotipo_attivita: 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA',
+        titolo: 'Atto di accertamento da verificare',
+        messaggio: `Atto di accertamento della pratica n. ${numeroRapporto || '—'} da prendere in carico per la verifica.\nMittente: ${mittente}`,
         destinatario_ruolo: 'RIA',
         destinatario_area: 'AMM',
         destinatario_settore: 'CR',
         destinatario_ufficio_id: null,
         destinatario_ufficio_zona: null,
         destinatario_username: destUsername || null,
-        origine_evento: 'IA_TRASMETTE_ATTO_CONTESTAZIONE',
+        origine_evento: 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA',
         priorita: 'INFO',
         data_attivazione: now,
         creato_il: now,
@@ -13658,7 +13658,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       try {
         sessionStorage.setItem('GII_AFTER_WORKFLOW_NAV', JSON.stringify(stampGiiPracticePayload({
           oid: Number(oid),
-          source: 'BOZZA_DETERMINAZIONE_TRASMESSA',
+          source: 'FASCICOLO_TRASMESSO_VERIFICA',
           targetRoleTab: 'attesa_altri',
           ts: Date.now()
         }, operationContextStamp)))

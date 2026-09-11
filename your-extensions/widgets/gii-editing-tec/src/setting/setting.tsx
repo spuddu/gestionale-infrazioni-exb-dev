@@ -453,13 +453,6 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       </SectionBox>
     </>}
 
-    <Acc id='ai-review' label='7. Assistente revisione redazionale' open={isOpen('ai-review')} onToggle={()=>toggle('ai-review')}/>
-    {isOpen('ai-review') && <SectionBox title='Revisione della descrizione dei fatti'>
-      <Toggle k='aiReviewEnabled' label='Abilita Revisione redazionale'/>
-      <Text k='aiReviewEndpoint' label='Endpoint servizio AI CBSM' placeholder='https://nome-servizio.azurewebsites.net/review'/>
-      <div style={P.hint}>Disponibile all’IT quando la descrizione è modificabile. La proposta richiede accettazione esplicita. Configurare entrambe le istanze: nuova pratica e modifica pratica. Inserire solo l’indirizzo HTTPS del servizio CBSM; le credenziali del modello sono gestite sul server.</div>
-    </SectionBox>}
-
     <div style={{marginTop:26, borderTop:'1px solid rgba(255,255,255,0.12)', paddingTop:16}}>
       <button type='button' onClick={()=>{ if(window.confirm('Ripristinare TUTTE le impostazioni predefinite del widget?')) props.onSettingChange({ id:props.id, config:defaultConfig as any }) }} style={P.dangerBtn}>↺ Ripristina tutti i predefiniti</button>
     </div>

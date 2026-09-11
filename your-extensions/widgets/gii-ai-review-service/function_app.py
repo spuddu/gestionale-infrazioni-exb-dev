@@ -1,161 +1,100 @@
+"""Azure Functions Python v2. Compatibile con il componente AI di widgets_120."""
 import json
-import os
+import logging
 import re
-import urllib.parse
-import urllib.request
-from collections import Counter
-from typing import List
-
+import time
+import uuid
 import azure.functions as func
-from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-from openai import OpenAI
-from pydantic import BaseModel, Field
+from review_logic import MAX_TEXT, review_text, utf16_length
+from service import Settings, ServiceError, Limits, authenticate, make_complete, fail, remaining
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
+limits = Limits()
 
 
-class ModelReview(BaseModel):
-    revised_text: str = Field(description="Testo revisionato. Se la revisione non è sicura, restituisci il testo originale invariato.")
-    factual_changes_detected: bool
-    factual_changes: List[str]
-    ambiguities: List[str]
+def reply(payload, status=200, origin=None, request_id=None, preflight=False):
+    headers = {'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'}
+    if request_id:
+        headers['X-Request-Id'] = request_id
+    if origin:
+        headers.update({'Access-Control-Allow-Origin': origin, 'Vary': 'Origin'})
+    if preflight:
+        headers.update({'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Authorization, Content-Type'})
+    return func.HttpResponse('' if status == 204 else json.dumps(payload, ensure_ascii=False),
+                             status_code=status, mimetype='application/json', charset='utf-8', headers=headers)
 
 
-SYSTEM_PROMPT = """Sei un assistente di revisione redazionale per un procedimento amministrativo del Consorzio di Bonifica della Sardegna Meridionale.
-Il tuo compito è migliorare ESCLUSIVAMENTE grammatica, sintassi, punteggiatura, chiarezza e stile tecnico-amministrativo del testo fornito dall'Istruttore tecnico.
-
-VINCOLI ASSOLUTI:
-- Non aggiungere fatti, circostanze, cause, conseguenze o interpretazioni non presenti nel testo originale.
-- Non eliminare fatti o circostanze presenti nel testo originale.
-- Non modificare soggetti, nomi, date, orari, luoghi, numeri, superfici, quantità, importi, unità di misura, matricole, codici, numeri di articolo, opere, attrezzature o modalità operative.
-- Non trasformare un'ipotesi in una certezza e non dedurre ciò che il tecnico non ha scritto.
-- Se una frase è ambigua, mantieni il contenuto sostanziale e segnala l'ambiguità senza inventare una soluzione.
-- Puoi riordinare le frasi solo quando ciò non altera sequenza, nesso causale o significato dei fatti.
-- Non inserire formule giuridiche, qualificazioni normative o violazioni ulteriori.
-- Mantieni la lingua italiana e uno stile sobrio, chiaro e tecnico-amministrativo.
-
-CONTROLLO:
-Confronta il testo originale e quello revisionato. Se rilevi anche solo una possibile variazione sostanziale, imposta factual_changes_detected=true, descrivila in factual_changes e restituisci in revised_text il testo originale invariato.
-Se il testo originale contiene ambiguità che non puoi risolvere senza interpretare, riportale in ambiguities.
-"""
-
-
-def _json_response(payload, status=200):
-    return func.HttpResponse(
-        json.dumps(payload, ensure_ascii=False),
-        status_code=status,
-        mimetype="application/json",
-        charset="utf-8",
-    )
-
-
-def _validate_arcgis_token(token: str):
-    portal = os.getenv("ARCGIS_PORTAL_URL", "https://www.arcgis.com").rstrip("/")
-    qs = urllib.parse.urlencode({"f": "json", "token": token})
-    url = f"{portal}/sharing/rest/community/self?{qs}"
-    req = urllib.request.Request(url, headers={"User-Agent": "CBSM-GII-AI-Review/1.0"})
+def handle_review(req, settings=None, auth=authenticate, complete_factory=make_complete, limiter=None):
+    request_id = str(uuid.uuid4())
+    start = time.monotonic()
+    allowed_origin = None
+    status = 500
+    deadline = None
+    limiter = limits if limiter is None else limiter
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        settings = Settings.from_env() if settings is None else settings
+        deadline = start + settings.timeout
+        origin = req.headers.get('Origin', '')
+        if origin not in settings.origins:
+            fail(403, 'ORIGIN', 'Origine non autorizzata.')
+        allowed_origin = origin
+        if req.method == 'OPTIONS':
+            if req.headers.get('Access-Control-Request-Method', '') != 'POST':
+                fail(405, 'METHOD', 'Metodo non consentito.')
+            status = 204
+            return reply(None, status, origin, request_id, preflight=True)
+        if req.method != 'POST':
+            fail(405, 'METHOD', 'Metodo non consentito.')
+        match = re.fullmatch(r'Bearer ([^\s]+)', req.headers.get('Authorization', ''), re.I)
+        token = match[1] if match else ''
+        if not token or len(token) > 8192:
+            fail(401, 'TOKEN', 'Sessione ArcGIS richiesta.')
+        if not re.match(r'application/json(?:\s*;|$)', req.headers.get('Content-Type', ''), re.I):
+            fail(415, 'CONTENT_TYPE', 'Formato richiesta non supportato.')
+        body = req.get_body()
+        if len(body) > 50000:
+            fail(413, 'SIZE', 'Testo troppo lungo.')
+        try:
+            payload = json.loads(body)
+        except (ValueError, UnicodeError):
+            fail(400, 'JSON', 'Richiesta non valida.')
+        if not isinstance(payload, dict) or set(payload) != {'testo'} or not isinstance(payload['testo'], str):
+            fail(400, 'TEXT', f'Inserire un testo da 1 a {MAX_TEXT} caratteri.')
+        original = payload['testo']
+        try:
+            valid_text = bool(original.strip()) and utf16_length(original) <= MAX_TEXT
+        except UnicodeError:
+            valid_text = False
+        if not valid_text:
+            fail(400, 'TEXT', f'Inserire un testo da 1 a {MAX_TEXT} caratteri.')
+        with limiter.slot(settings.max_concurrent):
+            username = auth(settings, token, origin, deadline)
+            remaining(deadline)
+            with limiter.user(username, settings.max_per_hour):
+                result = review_text(original, complete_factory(settings, deadline))
+                remaining(deadline)
+        status = 200
+        return reply({**result, 'request_id': request_id}, status, origin, request_id)
+    except ServiceError as exc:
+        status = exc.status
+        return reply({'error': exc.code, 'message': exc.message, 'request_id': request_id}, status, allowed_origin, request_id)
     except Exception:
-        return None
-    if data.get("error") or not data.get("username"):
-        return None
-    allowed_org = os.getenv("ARCGIS_ALLOWED_ORG_ID", "").strip()
-    if allowed_org and str(data.get("orgId") or "").strip() != allowed_org:
-        return None
-    return {"username": str(data.get("username")), "orgId": str(data.get("orgId") or "")}
+        status = 504 if deadline is not None and time.monotonic() >= deadline else 502
+        return reply({'error': 'SERVICE', 'message': 'Revisione non disponibile. Il testo originale è stato mantenuto.', 'request_id': request_id}, status, allowed_origin, request_id)
+    finally:
+        # Nessun testo, token, nominativo o eccezione del provider nei log applicativi.
+        logging.info('gii_ai_review request_id=%s status=%s duration_ms=%s', request_id, status, round((time.monotonic() - start) * 1000))
 
 
-def _extract_protected_tokens(text: str):
-    patterns = [
-        r"\b(?:Art\.?|art\.?)\s*\d+(?:\.\d+)?\b",
-        r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b",
-        r"\b\d{1,2}:\d{2}(?::\d{2})?\b",
-        r"\b\d+(?:[.,]\d+){2}\b",
-        r"\b[A-Za-zÀ-ÖØ-öø-ÿ]*\d+[A-Za-z0-9._/-]*\b",
-        r"\b\d+(?:[.,]\d+)?\s*(?:ha\.a\.ca|ha|mq|m²|m3|m³|€|euro|mm|cm|m|km|l/s)\b",
-    ]
-    out = []
-    for pattern in patterns:
-        out.extend(m.group(0).strip().lower() for m in re.finditer(pattern, text, flags=re.IGNORECASE))
-    return Counter(out)
+@app.route(route='review', methods=['POST', 'OPTIONS'])
+def review(req: func.HttpRequest) -> func.HttpResponse:
+    return handle_review(req)
 
 
-def _protected_token_differences(original: str, revised: str):
-    a = _extract_protected_tokens(original)
-    b = _extract_protected_tokens(revised)
-    diffs = []
-    for token in sorted(set(a) | set(b)):
-        if a[token] != b[token]:
-            diffs.append(f"{token}: originale {a[token]}, revisionato {b[token]}")
-    return diffs
-
-
-def _openai_client():
-    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip().rstrip("/")
-    if not endpoint:
-        raise RuntimeError("AZURE_OPENAI_ENDPOINT non configurato")
-    if not endpoint.endswith("/openai/v1"):
-        endpoint = f"{endpoint}/openai/v1"
-    api_key = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
-    if api_key:
-        return OpenAI(base_url=f"{endpoint}/", api_key=api_key)
-    token_provider = get_bearer_token_provider(DefaultAzureCredential(), "https://ai.azure.com/.default")
-    return OpenAI(base_url=f"{endpoint}/", api_key=token_provider)
-
-
-@app.route(route="revise-facts", methods=["POST"])
-def revise_facts(req: func.HttpRequest) -> func.HttpResponse:
-    auth = req.headers.get("Authorization", "")
-    token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
-    if not token or not _validate_arcgis_token(token):
-        return _json_response({"error": "Autenticazione ArcGIS non valida."}, 401)
-
+@app.route(route='health', methods=['GET'])
+def health(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        body = req.get_json()
+        Settings.from_env()
     except Exception:
-        return _json_response({"error": "Payload JSON non valido."}, 400)
-
-    text = str((body or {}).get("text") or "").strip()
-    if not text:
-        return _json_response({"error": "Testo da revisionare mancante."}, 400)
-    if len(text) > 12000:
-        return _json_response({"error": "Testo troppo lungo per la revisione redazionale."}, 413)
-
-    deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "").strip()
-    if not deployment:
-        return _json_response({"error": "AZURE_OPENAI_DEPLOYMENT non configurato."}, 500)
-
-    try:
-        client = _openai_client()
-        result = client.responses.parse(
-            model=deployment,
-            input=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"TESTO ORIGINALE:\n{text}"},
-            ],
-            text_format=ModelReview,
-        ).output_parsed
-        if result is None:
-            raise RuntimeError("Risposta strutturata non disponibile")
-
-        revised = str(result.revised_text or "").strip() or text
-        token_diffs = _protected_token_differences(text, revised)
-        detected = bool(result.factual_changes_detected or token_diffs)
-        factual_changes = list(result.factual_changes or [])
-        if token_diffs:
-            factual_changes.append("Il controllo deterministico ha rilevato differenze in numeri, date, codici o unità protette.")
-        if detected:
-            revised = text
-
-        return _json_response({
-            "revisedText": revised,
-            "factualChangesDetected": detected,
-            "factualChanges": factual_changes,
-            "ambiguities": list(result.ambiguities or []),
-            "protectedTokenDifferences": token_diffs,
-        })
-    except Exception as exc:
-        # Non includere il testo sorgente nei log o nella risposta.
-        return _json_response({"error": f"Servizio di revisione non disponibile: {type(exc).__name__}."}, 502)
+        return reply({'ok': False, 'service': 'gii-ai-review', 'version': '02', 'configured': False}, 503)
+    return reply({'ok': True, 'service': 'gii-ai-review', 'version': '02', 'configured': True})

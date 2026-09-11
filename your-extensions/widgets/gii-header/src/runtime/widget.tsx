@@ -1195,7 +1195,7 @@ function alertIsNewAssignmentReceived (alert: GiiAlertItem | null | undefined): 
     ''
   ).trim().toUpperCase().replace(/[\s-]+/g, '_')
 
-  const isNewAssignment = subtype === 'NUOVA_ASSEGNAZIONE' || event === 'NUOVA_ASSEGNAZIONE' || subtype.includes('NUOVA_ASSEGNAZIONE')
+  const isNewAssignment = ['ISTRUTTORIA_ASSEGNATA', 'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA'].includes(subtype) || ['ISTRUTTORIA_ASSEGNATA', 'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA'].includes(event)
   if (!isNewAssignment) return false
 
   // Nel flusso tecnico questa casistica corrisponde alla normale assegnazione
@@ -1230,29 +1230,8 @@ function alertDestRoleCode (alert: GiiAlertItem | null | undefined): string {
 function alertIsAttoAccertamentoApprovedReturn (alert: GiiAlertItem | null | undefined): boolean {
   if (!alert) return false
   const subtype = alertSubtypeCode(alert)
-  if (subtype === 'ATTO_ACCERTAMENTO_APPROVATO') return true
-
-  // Compatibilità con attività create prima della specializzazione del ciclo Atto:
-  // erano salvate come NUOVA_ASSEGNAZIONE / ISTRUTTORIA_TRASMESSA. Dopo
-  // l'arricchimento con il record della pratica possiamo distinguerle senza
-  // modificare né inventare stati del Feature Layer.
-  if (alertOriginEventCode(alert) !== 'ISTRUTTORIA_TRASMESSA') return false
-  if (alertDestRoleCode(alert) !== 'IA') return false
-  if (alertSenderRoleCode(alert) !== 'RIA') return false
-
-  const detNumero = String(alertPracticeRawValue(alert, ['determinazione_numero', 'DETERMINAZIONE_NUMERO']) ?? '').trim()
-  const detData = alertPracticeRawValue(alert, ['determinazione_data', 'DETERMINAZIONE_DATA'])
-  const accNumero = String(alertPracticeRawValue(alert, ['accertamento_numero', 'ACCERTAMENTO_NUMERO']) ?? '').trim()
-  if (!detNumero || detData == null || detData === '' || !accNumero) return false
-
-  const detRegistrataIl = asAlertDateMs(alertPracticeRawValue(alert, ['determinazione_registrata_il', 'DETERMINAZIONE_REGISTRATA_IL']))
-  const activityAt = asAlertDateMs(firstNonEmptyAlertRawValue(alert, ['data_attivazione', 'creato_il', 'aggiornato_il']))
-  if (detRegistrataIl != null && activityAt != null) return activityAt >= detRegistrataIl
-
-  // Per record legacy privi del timestamp di registrazione, la presenza di una
-  // determinazione adottata e dell'Atto numerato è sufficiente nel passaggio RIA→IA.
-  const detStato = String(alertPracticeRawValue(alert, ['determinazione_stato', 'DETERMINAZIONE_STATO']) ?? '').trim().toUpperCase()
-  return detStato === 'ADOTTATA'
+  const event = alertOriginEventCode(alert)
+  return subtype === 'ATTO_ACCERTAMENTO_APPROVATO' || event === 'ATTO_ACCERTAMENTO_APPROVATO'
 }
 
 function alertRawTitleText (alert: GiiAlertItem | null | undefined): string {
@@ -1262,22 +1241,45 @@ function alertRawTitleText (alert: GiiAlertItem | null | undefined): string {
 function alertDisplayTitle (alert: GiiAlertItem): string {
   const subtype = alertSubtypeCode(alert)
   const event = alertOriginEventCode(alert)
-  const destRole = alertDestRoleCode(alert)
-  const rawTitle = alertRawTitleText(alert)
-  const rawTitleUpper = rawTitle.toUpperCase()
-
-  if (alertIsNewRilevazione(alert)) return 'Nuova rilevazione ricevuta'
-  if (event === 'ISTRUTTORIA_TRASMESSA' && destRole === 'CS' && alertIsItOrigin(alert)) return 'Nuova rilevazione ricevuta'
-  if (subtype === 'ATTESTAZIONE_CONFORMITA_IA' || event === 'ATTESTAZIONE_CONFORMITA') return 'Attestazione di conformità apposta'
+  const code = subtype || event
+  if (alertIsNewRilevazione(alert) || code === 'NUOVA_RILEVAZIONE_TRASMESSA') return 'Nuova rilevazione ricevuta'
   if (alertIsAttoAccertamentoApprovedReturn(alert)) return 'Atto di accertamento approvato'
-  if (subtype === 'PROPOSTA_CONTESTAZIONE_APPROVATA' || event === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'Proposta di contestazione approvata'
   if (alertIsNewAssignmentReceived(alert)) return 'Nuova istruttoria assegnata'
+
+  // Le nuove attività correnti salvano già un titolo costruito dal punto di
+  // vista del destinatario. È indispensabile conservarlo nei rientri da
+  // integrazione, dove lo stesso evento di log può produrre un allarme diverso
+  // (es. ISTRUTTORIA_VERIFICATA -> "Integrazione ricevuta per validazione").
+  const activityType = String(firstNonEmptyAlertRawValue(alert, ['tipo_attivita']) || '').trim().toUpperCase()
+  const rawActivityTitle = alertRawTitleText(alert)
+  if (activityType === 'PRESA_IN_CARICO' && rawActivityTitle && /(?:RICEVUT|ASSEGNAT)/i.test(rawActivityTitle)) {
+    return rawActivityTitle
+  }
+
+  const titles: Record<string, string> = {
+    ISTRUTTORIA_TRASMESSA_VERIFICA: 'Istruttoria ricevuta per verifica',
+    INTEGRAZIONE_TRASMESSA_VERIFICA: 'Integrazione ricevuta per verifica',
+    ISTRUTTORIA_VERIFICATA: 'Istruttoria ricevuta per validazione',
+    ISTRUTTORIA_TECNICA_VALIDATA: 'Istruttoria tecnica ricevuta per approvazione',
+    INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA: 'Integrazione tecnica ricevuta per approvazione',
+    ISTRUTTORIA_TECNICA_APPROVATA: 'Istruttoria tecnica ricevuta',
+    FASCICOLO_TRASMESSO_VERIFICA: 'Fascicolo ricevuto per verifica',
+    ISTRUTTORIA_AMMINISTRATIVA_VALIDATA: 'Istruttoria amministrativa validata',
+    ISTRUTTORIA_RIMANDATA_INTEGRAZIONE: 'Istruttoria ricevuta per integrazione',
+    FASCICOLO_RIMANDATO_INTEGRAZIONE: 'Fascicolo ricevuto per integrazione',
+    ESITO_INTEGRAZIONE_TECNICA_TRASMESSO: 'Esito integrazione tecnica ricevuto',
+    ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA: 'Atto di accertamento ricevuto per verifica',
+    ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE: 'Atto di accertamento ricevuto per integrazione',
+    RILEVAZIONE_RESPINTA: 'Nuova rilevazione respinta',
+    ISTRUTTORIA_TECNICA_RESPINTA: 'Istruttoria tecnica respinta'
+  }
+  if (titles[code]) return titles[code]
+
   if (subtype === 'RILEVAZIONE_RESPINTA' || subtype === 'CS_RESPINGE_RILEVAZIONE') return 'Nuova rilevazione respinta'
-  if (subtype === 'CS_APPROVA_RILEVAZIONE') return rawTitleUpper.includes('INTEGRAZIONE') ? 'Integrazione validata' : 'Istruttoria approvata'
-  if (subtype === 'DT_APPROVA_RAPPORTO') return 'Rapporto tecnico approvato'
-  if (subtype === 'DT_RESPINGE_RAPPORTO') return 'Rapporto tecnico respinto'
-  if (subtype === 'DT_RIMANDA_A_IT' || subtype === 'RIT_RIMANDA_A_IT') return 'Rimando all’Istruttore tecnico'
-  if (subtype === 'BOZZA_DETERMINAZIONE' || event === 'IA_TRASMETTE_BOZZA_DETERMINAZIONE') return 'Bozza determinazione da verificare'
+  if (subtype === 'CS_APPROVA_RILEVAZIONE') return 'Istruttoria ricevuta per validazione'
+  if (subtype === 'DT_APPROVA_RAPPORTO') return 'Istruttoria tecnica ricevuta'
+  if (subtype === 'DT_RESPINGE_RAPPORTO') return 'Istruttoria tecnica respinta'
+  if (subtype === 'DT_RIMANDA_A_IT' || subtype === 'RIT_RIMANDA_A_IT') return 'Istruttoria ricevuta per integrazione'
 
   return String(alert?.title || '').trim() || 'Allarme'
 }
@@ -1504,8 +1506,9 @@ function alertSenderRoleCode (alert: GiiAlertItem | null | undefined): string {
   const destRole = alertDestRoleCode(alert as any)
 
   if (alertIsNewRilevazione(alert)) return alertIsItOrigin(alert) ? 'IT' : 'TR'
-  if (subtype === 'BOZZA_DETERMINAZIONE' || event === 'IA_TRASMETTE_BOZZA_DETERMINAZIONE') return 'IA'
-  if (event === 'ISTRUTTORIA_TRASMESSA' && destRole === 'CS') return 'IT'
+  if (event === 'FASCICOLO_TRASMESSO_VERIFICA' || event === 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA') return 'IA'
+  if (event === 'NUOVA_RILEVAZIONE_TRASMESSA' && destRole === 'CS') return alertIsItOrigin(alert) ? 'IT' : 'TR'
+  if ((event === 'ISTRUTTORIA_TRASMESSA_VERIFICA' || event === 'INTEGRAZIONE_TRASMESSA_VERIFICA') && destRole === 'CS') return 'IT'
 
   if (alertIsNewAssignmentReceived(alert)) {
     if (destRole === 'IA') return 'RIA'
@@ -1524,12 +1527,11 @@ function alertSenderRoleCode (alert: GiiAlertItem | null | undefined): string {
   if (subtype.startsWith('IT_')) return 'IT'
   if (subtype.startsWith('TR_')) return 'TR'
 
-  if (event === 'INVIO_A_IA') return 'DT'
-  if (event === 'ISTRUTTORIA_TRASMESSA') {
-    if (destRole === 'RIT') return 'CS'
-    if (destRole === 'DT') return 'RIT'
-    if (destRole === 'RIA') return 'IA'
-  }
+  if (event === 'ISTRUTTORIA_VERIFICATA' && destRole === 'RIT') return 'CS'
+  if ((event === 'ISTRUTTORIA_TECNICA_VALIDATA' || event === 'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA') && destRole === 'DT') return 'RIT'
+  if (event === 'ISTRUTTORIA_TECNICA_APPROVATA' && destRole === 'RIA') return 'DT'
+  if (event === 'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO' && destRole === 'IA') return 'RIA'
+  if ((event === 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA' || event === 'ATTO_ACCERTAMENTO_APPROVATO') && destRole === 'IA') return 'RIA'
 
   return roleCodeFromGiiActor(
     alertSenderFromMessage(alert as any) ||
@@ -1794,23 +1796,34 @@ function alertIsStandardWorkflowAlert (alert: GiiAlertItem): boolean {
   if (alertIsAttoAccertamentoApprovedReturn(alert)) return true
   if (alertIsNewAssignmentReceived(alert)) return true
 
-  if ([
+  const workflowCodes = [
+    'NUOVA_RILEVAZIONE_TRASMESSA',
+    'ISTRUTTORIA_ASSEGNATA',
+    'ISTRUTTORIA_TRASMESSA_VERIFICA',
+    'INTEGRAZIONE_TRASMESSA_VERIFICA',
+    'ISTRUTTORIA_VERIFICATA',
+    'ISTRUTTORIA_TECNICA_VALIDATA',
+    'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA',
+    'ISTRUTTORIA_TECNICA_APPROVATA',
+    'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA',
+    'FASCICOLO_TRASMESSO_VERIFICA',
+    'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA',
+    'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE',
+    'FASCICOLO_RIMANDATO_INTEGRAZIONE',
+    'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO',
+    'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA',
+    'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE',
+    'ATTO_ACCERTAMENTO_APPROVATO',
     'RILEVAZIONE_RESPINTA',
+    'ISTRUTTORIA_TECNICA_RESPINTA',
     'CS_RESPINGE_RILEVAZIONE',
     'CS_APPROVA_RILEVAZIONE',
-    'RICHIESTA_INTEGRAZIONE',
-    'INTEGRAZIONE_TRASMESSA',
     'DT_APPROVA_RAPPORTO',
     'DT_RESPINGE_RAPPORTO',
     'DT_RIMANDA_A_IT',
-    'RIT_RIMANDA_A_IT',
-    'BOZZA_DETERMINAZIONE',
-    'ATTO_ACCERTAMENTO_APPROVATO'
-  ].includes(subtype)) return true
-
-  if (event === 'ISTRUTTORIA_TRASMESSA' || event === 'INVIO_A_IA' || event === 'IA_TRASMETTE_BOZZA_DETERMINAZIONE') return true
-
-  return false
+    'RIT_RIMANDA_A_IT'
+  ]
+  return workflowCodes.includes(subtype) || workflowCodes.includes(event)
 }
 
 function alertBodyLine (alert: GiiAlertItem): string {
@@ -2333,15 +2346,10 @@ function materializeAlertNumber (alert: GiiAlertItem): string {
 }
 
 function materializeAlertTitle (alert: GiiAlertItem): string {
-  const subtype = alertSubtypeCode(alert)
-  const event = alertOriginEventCode(alert)
   if (alertIsNewRilevazione(alert)) return 'Nuova rilevazione ricevuta'
-  if (subtype === 'ATTESTAZIONE_CONFORMITA_IA' || event === 'ATTESTAZIONE_CONFORMITA') return 'Attestazione di conformità apposta'
   if (alertIsAttoAccertamentoApprovedReturn(alert)) return 'Atto di accertamento approvato'
-  if (subtype === 'PROPOSTA_CONTESTAZIONE_APPROVATA' || event === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'Proposta di contestazione approvata'
   if (alertIsNewAssignmentReceived(alert)) return 'Nuova istruttoria assegnata'
-  const t = String(alert?.title || '').trim()
-  return t || 'Nuova istruttoria ricevuta'
+  return alertDisplayTitle(alert)
 }
 
 function materializeAlertMessage (alert: GiiAlertItem): string {
@@ -2566,10 +2574,23 @@ async function materializeMissingTakeChargeActivities (args: {
       const settore = materializeAlertSector(alert, args.user)
       const ufficioId = materializeAlertOfficeId(alert, args.user)
       const role = materializeAlertDestRole(args.user)
-      // La materializzazione serve per le nuove rilevazioni Survey/TR dirette al CS.
-      // Per gli altri ruoli le attività correnti devono continuare a essere generate
-      // dai widget operativi che chiudono/aprono i cicli.
-      if (role !== 'CS') continue
+      // La materializzazione serve esclusivamente al PRIMO ingresso Survey/TR → CS.
+      // Dopo un'assegnazione all'IT o qualunque avanzamento del workflow non deve
+      // ricreare la vecchia attività "Nuova rilevazione ricevuta" se, per un
+      // ritardo di sincronizzazione, l'attività corrente appena scritta non è ancora
+      // visibile nella view. In quel caso è meglio attendere il refresh reale.
+      const hasWorkflowProgress = [
+        'it_assegnato_username', 'it_assegnato_nome', 'dt_assegnazione_it',
+        'stato_IT', 'dt_stato_IT', 'stato_RIT', 'dt_stato_RIT',
+        'stato_DT', 'dt_stato_DT', 'stato_RIA', 'dt_stato_RIA',
+        'stato_IA', 'dt_stato_IA', 'determinazione_stato'
+      ].some(name => {
+        const v = materializeAlertPick(alert, [name])
+        if (v === null || v === undefined || v === '') return false
+        if (v === 0 || v === '0') return false
+        return true
+      })
+      if (role !== 'CS' || hasWorkflowProgress) continue
       const eventMs = alertEventDateMs(alert) ?? Date.now()
       const numero = materializeAlertNumber(alert)
       const key = `${materializeAlertNormGid(parentGlobalId)}|PRESA_IN_CARICO|NUOVA_RILEVAZIONE|${role}|${area}|${settore}|${ufficioId ?? ''}`

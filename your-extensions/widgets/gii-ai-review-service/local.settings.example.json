@@ -5,8 +5,13 @@
     "FUNCTIONS_WORKER_RUNTIME": "python",
     "AZURE_OPENAI_ENDPOINT": "https://NOME-RISORSA.openai.azure.com",
     "AZURE_OPENAI_DEPLOYMENT": "NOME-DEPLOYMENT",
+    "AZURE_OPENAI_VERIFY_DEPLOYMENT": "",
     "AZURE_OPENAI_API_KEY": "",
-    "ARCGIS_PORTAL_URL": "https://www.arcgis.com",
-    "ARCGIS_ALLOWED_ORG_ID": ""
-  }
+    "ARCGIS_PORTAL_URL": "https://cbsm-hub.maps.arcgis.com",
+    "ARCGIS_ALLOWED_ORG_ID": "vH5RykSdaAwiEGOJ",
+    "ARCGIS_USERS_LAYER_URL": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0",
+    "ALLOWED_ORIGINS": "https://localhost:3001,https://DOMINIO-GESTIONALE",
+    "FUNCTIONS_WORKER_PROCESS_COUNT": "1"
+  },
+  "Host": {"CORS": "https://localhost:3001,https://DOMINIO-GESTIONALE"}
 }

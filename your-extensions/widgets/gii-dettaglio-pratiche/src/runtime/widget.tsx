@@ -2616,16 +2616,26 @@ type CicloRecord = {
 
 const EVENTO_LABELS: Record<string, string> = {
   CREAZIONE: 'Creazione rilevazione',
-  ISTRUTTORIA_TRASMESSA: 'Istruttoria trasmessa',
-  PROPOSTA_CONTESTAZIONE_APPROVATA: 'Istruttoria amministrativa approvata',
-  BOZZA_DETERMINAZIONE_TRASMESSA: 'Bozza di determinazione trasmessa',
-  INTEGRAZIONE_TRASMESSA: 'Integrazione trasmessa',
-  INTEGRAZIONE: 'Richiesta integrazione',
-  RAPPORTO_APPROVATO: 'Rapporto approvato',
+  NUOVA_RILEVAZIONE_TRASMESSA: 'Nuova rilevazione trasmessa',
+  ISTRUTTORIA_ASSEGNATA: 'Istruttoria assegnata',
+  ISTRUTTORIA_TRASMESSA_VERIFICA: 'Istruttoria trasmessa per verifica',
+  INTEGRAZIONE_TRASMESSA_VERIFICA: 'Integrazione trasmessa per verifica',
+  ISTRUTTORIA_VERIFICATA: 'Istruttoria verificata',
+  ISTRUTTORIA_TECNICA_VALIDATA: 'Istruttoria tecnica validata',
+  INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA: 'Integrazione tecnica trasmessa per verifica',
+  ISTRUTTORIA_TECNICA_APPROVATA: 'Istruttoria tecnica approvata',
+  ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA: 'Istruttoria amministrativa assegnata',
+  FASCICOLO_TRASMESSO_VERIFICA: 'Fascicolo trasmesso per verifica',
+  ISTRUTTORIA_AMMINISTRATIVA_VALIDATA: 'Istruttoria amministrativa validata',
+  ISTRUTTORIA_RIMANDATA_INTEGRAZIONE: 'Istruttoria rimandata per integrazione',
+  FASCICOLO_RIMANDATO_INTEGRAZIONE: 'Fascicolo rimandato per integrazione',
+  ESITO_INTEGRAZIONE_TECNICA_TRASMESSO: 'Esito integrazione tecnica trasmesso',
+  ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA: 'Atto di accertamento trasmesso per verifica',
+  ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE: 'Atto di accertamento rimandato per integrazione',
+  ATTO_ACCERTAMENTO_APPROVATO: 'Atto di accertamento approvato',
   PRESA_IN_CARICO: 'Presa in carico',
-  ASSEGNAZIONE_IT: 'Assegnazione IT',
-  ASSEGNAZIONE_IA: 'Assegnazione Istruttore amministrativo',
   RESPINTA: 'Respinta',
+  ARCHIVIAZIONE: 'Archiviazione',
   ELIMINAZIONE: 'Eliminazione'
 }
 
@@ -2649,34 +2659,8 @@ function formatEvento (code: string): string {
 function formatCycleTitleEvento (c: CicloRecord, cycleLabelNumber: number, practiceData?: any): string {
   const apertura = String(c?.evento_apertura || '').trim().toUpperCase()
   const chiusura = String(c?.evento_chiusura || '').trim().toUpperCase()
-  const ruolo = normalizeRuoloCod(c?.ruolo_competente)
-  const ruoloDest = normalizeRuoloCod(c?.ruolo_destinatario)
-
-  if (
-    cycleLabelNumber === 1 &&
-    apertura === 'CREAZIONE' &&
-    chiusura === 'ISTRUTTORIA_TRASMESSA' &&
-    (ruolo === 'TR' || ruolo === 'IT')
-  ) {
-    return 'Nuova rilevazione trasmessa'
-  }
-
-  // Dopo la registrazione della determinazione, i nuovi cicli IA↔RIA riguardano
-  // l'Atto di accertamento. Non presentarli più come una generica istruttoria.
-  // Usiamo la data di chiusura del singolo ciclo, così i cicli amministrativi
-  // precedenti all'adozione restano correttamente descritti nel loro contesto storico.
-  if (chiusura === 'ISTRUTTORIA_TRASMESSA' && ((ruolo === 'IA' && ruoloDest === 'RIA') || (ruolo === 'RIA' && ruoloDest === 'IA'))) {
-    const note = String(c?.note_chiusura || '').trim().toUpperCase()
-    const attoEsplicito = note.includes('ATTO DI CONTESTAZIONE') || note.includes('ATTO DI ACCERTAMENTO')
-    const detRegistrataIl = dateMsOrNull(pickAttrCI(practiceData || {}, ['determinazione_registrata_il', 'DETERMINAZIONE_REGISTRATA_IL']))
-    const cicloChiusoIl = dateMsOrNull(c?.dt_chiusura)
-    const dopoAdozione = detRegistrataIl != null && cicloChiusoIl != null && cicloChiusoIl >= detRegistrataIl
-    if (attoEsplicito || dopoAdozione) {
-      return ruolo === 'RIA' ? 'Atto di accertamento approvato' : 'Atto di accertamento trasmesso'
-    }
-  }
-
-  return formatEvento(c.evento_chiusura || c.evento_apertura)
+  if (chiusura) return formatEvento(chiusura)
+  return formatEvento(apertura)
 }
 
 function cleanIterNoteForDisplay (raw: any): string {
@@ -2897,7 +2881,7 @@ function buildSyntheticCreationCycle (data: any, loggedCicli: CicloRecord[]): Ci
     stato_record: isOpenTiCreation ? 'APERTO' : 'CHIUSO',
     evento_apertura: 'CREAZIONE',
     dt_apertura: dt ?? null,
-    evento_chiusura: isOpenTiCreation ? '' : 'ISTRUTTORIA_TRASMESSA',
+    evento_chiusura: isOpenTiCreation ? '' : 'NUOVA_RILEVAZIONE_TRASMESSA',
     dt_chiusura: isOpenTiCreation ? null : (dt ?? null),
     ruolo_destinatario: isOpenTiCreation ? '' : 'CS',
     utente_destinatario: '',
