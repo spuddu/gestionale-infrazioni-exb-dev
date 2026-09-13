@@ -2670,7 +2670,7 @@ function cleanIterNoteForDisplay (raw: any): string {
   // Le assegnazioni sono già rappresentate da titolo ciclo e destinatario.
   // Nel log storico possono però contenere note automatiche tipo:
   // "Assegna Istruttore tecnico: <nominativo> (<username>)".
-  const assignmentOnly = text.match(/^\s*(Riapertura amministrativa n\.\s*\d+\.\s*)?(?:(?:Assegna|Assegnazione)\s+(?:Istruttore\s+tecnico|Tecnico\s+Istruttore\s+amministrativo)|(?:Istruttore\s+tecnico|Tecnico\s+Istruttore\s+amministrativo)\s+assegnato)\s*[:.-]/i)
+  const assignmentOnly = text.match(/^\s*(Riapertura amministrativa n\.\s*\d+\.\s*)?(?:(?:Assegna|Assegnazione)\s+(?:Istruttore\s+(?:tecnico|amministrativo)|Tecnico\s+Istruttore\s+amministrativo)|(?:Istruttore\s+(?:tecnico|amministrativo)|Tecnico\s+Istruttore\s+amministrativo)\s+assegnato)\s*[:.-]/i)
   if (assignmentOnly) {
     return String(assignmentOnly[1] || '').trim()
   }
