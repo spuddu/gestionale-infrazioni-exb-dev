@@ -890,8 +890,11 @@ function mergeCurrentAndFallbackGiiAlerts (currentActivities: GiiAlertItem[], dy
       .filter(Boolean)
   )
 
+  // Le attività di workflow devono provenire da GII_ATTIVITA_CORRENTI.
+  // L'unica eccezione operativa è il primo ingresso Survey/TR → CS, che non
+  // passa da gii-azioni e viene materializzato dall'header.
   const dynamicTakeChargeFallback = dynamic
-    .filter(a => isGiiTakeChargeAlert(a))
+    .filter(a => isGiiTakeChargeAlert(a) && alertIsNewRilevazione(a))
     .filter(a => {
       const key = alertPracticeMergeKey(a)
       return !!key && !currentKeys.has(key)
@@ -1239,47 +1242,18 @@ function alertRawTitleText (alert: GiiAlertItem | null | undefined): string {
 }
 
 function alertDisplayTitle (alert: GiiAlertItem): string {
-  const subtype = alertSubtypeCode(alert)
-  const event = alertOriginEventCode(alert)
-  const code = subtype || event
-  if (alertIsNewRilevazione(alert) || code === 'NUOVA_RILEVAZIONE_TRASMESSA') return 'Nuova rilevazione ricevuta'
-  if (alertIsAttoAccertamentoApprovedReturn(alert)) return 'Atto di accertamento approvato'
-  if (alertIsNewAssignmentReceived(alert)) return 'Nuova istruttoria assegnata'
-
-  // Le nuove attività correnti salvano già un titolo costruito dal punto di
-  // vista del destinatario. È indispensabile conservarlo nei rientri da
-  // integrazione, dove lo stesso evento di log può produrre un allarme diverso
-  // (es. ISTRUTTORIA_VERIFICATA -> "Integrazione ricevuta per validazione").
   const activityType = String(firstNonEmptyAlertRawValue(alert, ['tipo_attivita']) || '').trim().toUpperCase()
   const rawActivityTitle = alertRawTitleText(alert)
-  if (activityType === 'PRESA_IN_CARICO' && rawActivityTitle && /(?:RICEVUT|ASSEGNAT)/i.test(rawActivityTitle)) {
-    return rawActivityTitle
+
+  // Per le attività correnti il titolo salvato nel record è la fonte autorevole.
+  // Non ricostruiamo più diciture da eventi legacy o da stati della pratica.
+  if (activityType === 'PRESA_IN_CARICO') {
+    return rawActivityTitle || 'Attività da prendere in carico'
   }
 
-  const titles: Record<string, string> = {
-    ISTRUTTORIA_TRASMESSA_VERIFICA: 'Istruttoria ricevuta per verifica',
-    INTEGRAZIONE_TRASMESSA_VERIFICA: 'Integrazione ricevuta per verifica',
-    ISTRUTTORIA_VERIFICATA: 'Istruttoria ricevuta per validazione',
-    ISTRUTTORIA_TECNICA_VALIDATA: 'Istruttoria tecnica ricevuta per approvazione',
-    INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA: 'Integrazione tecnica ricevuta per approvazione',
-    ISTRUTTORIA_TECNICA_APPROVATA: 'Istruttoria tecnica ricevuta',
-    FASCICOLO_TRASMESSO_VERIFICA: 'Fascicolo ricevuto per verifica',
-    ISTRUTTORIA_AMMINISTRATIVA_VALIDATA: 'Istruttoria amministrativa validata',
-    ISTRUTTORIA_RIMANDATA_INTEGRAZIONE: 'Istruttoria ricevuta per integrazione',
-    FASCICOLO_RIMANDATO_INTEGRAZIONE: 'Fascicolo ricevuto per integrazione',
-    ESITO_INTEGRAZIONE_TECNICA_TRASMESSO: 'Esito integrazione tecnica ricevuto',
-    ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA: 'Atto di accertamento ricevuto per verifica',
-    ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE: 'Atto di accertamento ricevuto per integrazione',
-    RILEVAZIONE_RESPINTA: 'Nuova rilevazione respinta',
-    ISTRUTTORIA_TECNICA_RESPINTA: 'Istruttoria tecnica respinta'
-  }
-  if (titles[code]) return titles[code]
-
-  if (subtype === 'RILEVAZIONE_RESPINTA' || subtype === 'CS_RESPINGE_RILEVAZIONE') return 'Nuova rilevazione respinta'
-  if (subtype === 'CS_APPROVA_RILEVAZIONE') return 'Istruttoria ricevuta per validazione'
-  if (subtype === 'DT_APPROVA_RAPPORTO') return 'Istruttoria tecnica ricevuta'
-  if (subtype === 'DT_RESPINGE_RAPPORTO') return 'Istruttoria tecnica respinta'
-  if (subtype === 'DT_RIMANDA_A_IT' || subtype === 'RIT_RIMANDA_A_IT') return 'Istruttoria ricevuta per integrazione'
+  // Unica eccezione: primo ingresso Survey/TR → CS, prima della materializzazione
+  // nella tabella attività correnti.
+  if (alertIsNewRilevazione(alert)) return 'Nuova rilevazione ricevuta'
 
   return String(alert?.title || '').trim() || 'Allarme'
 }
@@ -1508,7 +1482,7 @@ function alertSenderRoleCode (alert: GiiAlertItem | null | undefined): string {
   if (alertIsNewRilevazione(alert)) return alertIsItOrigin(alert) ? 'IT' : 'TR'
   if (event === 'FASCICOLO_TRASMESSO_VERIFICA' || event === 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA') return 'IA'
   if (event === 'NUOVA_RILEVAZIONE_TRASMESSA' && destRole === 'CS') return alertIsItOrigin(alert) ? 'IT' : 'TR'
-  if ((event === 'ISTRUTTORIA_TRASMESSA_VERIFICA' || event === 'INTEGRAZIONE_TRASMESSA_VERIFICA') && destRole === 'CS') return 'IT'
+  if (event === 'ISTRUTTORIA_TRASMESSA_VERIFICA' && destRole === 'CS') return 'IT'
 
   if (alertIsNewAssignmentReceived(alert)) {
     if (destRole === 'IA') return 'RIA'
@@ -1528,9 +1502,8 @@ function alertSenderRoleCode (alert: GiiAlertItem | null | undefined): string {
   if (subtype.startsWith('TR_')) return 'TR'
 
   if (event === 'ISTRUTTORIA_VERIFICATA' && destRole === 'RIT') return 'CS'
-  if ((event === 'ISTRUTTORIA_TECNICA_VALIDATA' || event === 'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA') && destRole === 'DT') return 'RIT'
+  if (event === 'ISTRUTTORIA_TECNICA_VALIDATA' && destRole === 'DT') return 'RIT'
   if (event === 'ISTRUTTORIA_TECNICA_APPROVATA' && destRole === 'RIA') return 'DT'
-  if (event === 'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO' && destRole === 'IA') return 'RIA'
   if ((event === 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA' || event === 'ATTO_ACCERTAMENTO_APPROVATO') && destRole === 'IA') return 'RIA'
 
   return roleCodeFromGiiActor(
@@ -1800,17 +1773,15 @@ function alertIsStandardWorkflowAlert (alert: GiiAlertItem): boolean {
     'NUOVA_RILEVAZIONE_TRASMESSA',
     'ISTRUTTORIA_ASSEGNATA',
     'ISTRUTTORIA_TRASMESSA_VERIFICA',
-    'INTEGRAZIONE_TRASMESSA_VERIFICA',
     'ISTRUTTORIA_VERIFICATA',
     'ISTRUTTORIA_TECNICA_VALIDATA',
-    'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA',
     'ISTRUTTORIA_TECNICA_APPROVATA',
     'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA',
     'FASCICOLO_TRASMESSO_VERIFICA',
     'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA',
     'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE',
     'FASCICOLO_RIMANDATO_INTEGRAZIONE',
-    'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO',
+    'ESITO_INTEGRAZIONE_TRASMESSO',
     'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA',
     'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE',
     'ATTO_ACCERTAMENTO_APPROVATO',
@@ -2347,8 +2318,6 @@ function materializeAlertNumber (alert: GiiAlertItem): string {
 
 function materializeAlertTitle (alert: GiiAlertItem): string {
   if (alertIsNewRilevazione(alert)) return 'Nuova rilevazione ricevuta'
-  if (alertIsAttoAccertamentoApprovedReturn(alert)) return 'Atto di accertamento approvato'
-  if (alertIsNewAssignmentReceived(alert)) return 'Nuova istruttoria assegnata'
   return alertDisplayTitle(alert)
 }
 

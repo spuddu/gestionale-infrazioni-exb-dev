@@ -2615,21 +2615,22 @@ type CicloRecord = {
 }
 
 const EVENTO_LABELS: Record<string, string> = {
-  CREAZIONE: 'Creazione rilevazione',
+  CREAZIONE: 'Nuova rilevazione in corso',
   NUOVA_RILEVAZIONE_TRASMESSA: 'Nuova rilevazione trasmessa',
   ISTRUTTORIA_ASSEGNATA: 'Istruttoria assegnata',
   ISTRUTTORIA_TRASMESSA_VERIFICA: 'Istruttoria trasmessa per verifica',
-  INTEGRAZIONE_TRASMESSA_VERIFICA: 'Integrazione trasmessa per verifica',
+  INTEGRAZIONE_TRASMESSA_VERIFICA: 'Esito integrazione trasmesso',
   ISTRUTTORIA_VERIFICATA: 'Istruttoria verificata',
-  ISTRUTTORIA_TECNICA_VALIDATA: 'Istruttoria tecnica validata',
-  INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA: 'Integrazione tecnica trasmessa per verifica',
-  ISTRUTTORIA_TECNICA_APPROVATA: 'Istruttoria tecnica approvata',
-  ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA: 'Istruttoria amministrativa assegnata',
+  ISTRUTTORIA_TECNICA_VALIDATA: 'Istruttoria validata',
+  INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA: 'Esito integrazione trasmesso',
+  ISTRUTTORIA_TECNICA_APPROVATA: 'Istruttoria approvata',
+  ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA: 'Istruttoria assegnata',
   FASCICOLO_TRASMESSO_VERIFICA: 'Fascicolo trasmesso per verifica',
-  ISTRUTTORIA_AMMINISTRATIVA_VALIDATA: 'Istruttoria amministrativa validata',
+  ISTRUTTORIA_AMMINISTRATIVA_VALIDATA: 'Istruttoria validata',
   ISTRUTTORIA_RIMANDATA_INTEGRAZIONE: 'Istruttoria rimandata per integrazione',
   FASCICOLO_RIMANDATO_INTEGRAZIONE: 'Fascicolo rimandato per integrazione',
-  ESITO_INTEGRAZIONE_TECNICA_TRASMESSO: 'Esito integrazione tecnica trasmesso',
+  ESITO_INTEGRAZIONE_TRASMESSO: 'Esito integrazione trasmesso',
+  ESITO_INTEGRAZIONE_TECNICA_TRASMESSO: 'Esito integrazione trasmesso',
   ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA: 'Atto di accertamento trasmesso per verifica',
   ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE: 'Atto di accertamento rimandato per integrazione',
   ATTO_ACCERTAMENTO_APPROVATO: 'Atto di accertamento approvato',
@@ -2659,8 +2660,32 @@ function formatEvento (code: string): string {
 function formatCycleTitleEvento (c: CicloRecord, cycleLabelNumber: number, practiceData?: any): string {
   const apertura = String(c?.evento_apertura || '').trim().toUpperCase()
   const chiusura = String(c?.evento_chiusura || '').trim().toUpperCase()
-  if (chiusura) return formatEvento(chiusura)
-  return formatEvento(apertura)
+  const evento = chiusura || apertura
+
+  // Coerenza con gii-azioni: un IT puo' essere autore originario della
+  // rilevazione. Il suo primo invio al CS non e' ancora una trasmissione
+  // dell'istruttoria, ma la trasmissione della nuova rilevazione.
+  // Manteniamo distinti evento interno e rappresentazione dell'Iter.
+  const origine = normalizeOriginePraticaCod(pickAttrCI(practiceData, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA']))
+  const ruolo = normalizeRuoloCod(c?.ruolo_competente)
+  const destinatario = normalizeRuoloCod(c?.ruolo_destinatario)
+  // In create mode l'IT viene registrato anche nei campi it_assegnato_* e
+  // dt_assegnazione_it; quando assegnante e assegnatario coincidono non si tratta
+  // di una assegnazione del CS ma della presa in carico iniziale dell'IT creatore.
+  const itAssignee = String(pickAttrCI(practiceData, ['it_assegnato_username', 'IT_ASSEGNATO_USERNAME']) || '').trim().toLowerCase()
+  const itAssigner = String(pickAttrCI(practiceData, ['it_assegnato_da', 'IT_ASSEGNATO_DA']) || '').trim().toLowerCase()
+  const itSelfAssignmentFromCreation = origine === 'IT' && !!itAssignee && !!itAssigner && itAssignee === itAssigner
+  const itAssignedByCs = !itSelfAssignmentFromCreation && (
+    !!itAssigner || !isEmptyValue(pickAttrCI(practiceData, ['dt_assegnazione_it', 'DT_ASSEGNAZIONE_IT']))
+  )
+  const numeroRapporto = String(pickAttrCI(practiceData, ['numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO']) || '').trim()
+  const isInitialItTransmission = origine === 'IT' && ruolo === 'IT' && destinatario === 'CS' && !itAssignedByCs && !numeroRapporto
+
+  if (isInitialItTransmission && (evento === 'ISTRUTTORIA_TRASMESSA_VERIFICA' || evento === 'NUOVA_RILEVAZIONE_TRASMESSA')) {
+    return 'Nuova rilevazione trasmessa'
+  }
+
+  return formatEvento(evento)
 }
 
 function cleanIterNoteForDisplay (raw: any): string {

@@ -12701,7 +12701,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [data, findOpenAmmCycle, getLogLayer, getNextAmmCycleNumber, oid, profile.role, profile.username])
 
 
-  const closeIaBozzaDeterminazioneCycle = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>, changedFieldNames: string[]) => {
+  const closeIaBozzaDeterminazioneCycle = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>, changedFieldNames: string[], options?: { integrationReturn?: boolean }) => {
     const parentGlobalId = String(
       pickAttrCI(nextAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
       pickAttrCI(prevAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
@@ -12723,6 +12723,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const logFields = (logLayer.fields || []).map((f: any) => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
     const delta = buildAuditDeltaMaps(prevAttrs, nextAttrs, changedFieldNames)
     const num = Object.keys(delta.oldMap).length
+    const integrationReturn = options?.integrationReturn === true
+    const eventoChiusura = integrationReturn ? 'ESITO_INTEGRAZIONE_TRASMESSO' : 'FASCICOLO_TRASMESSO_VERIFICA'
+    const noteChiusura = integrationReturn
+      ? 'Esito integrazione trasmesso al Responsabile dell’istruttoria amministrativa.'
+      : 'Fascicolo trasmesso al Responsabile dell’istruttoria amministrativa per la verifica.'
     const baseAttrs: Record<string, any> = {
       parent_globalid: parentGlobalId,
       parent_objectid: oid,
@@ -12730,19 +12735,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       utente_operatore: username,
       stato_record: 'CHIUSO',
       evento_apertura: 'PRESA_IN_CARICO',
-      evento_chiusura: 'FASCICOLO_TRASMESSO_VERIFICA',
+      evento_chiusura: eventoChiusura,
       dt_chiusura: now,
       area: 'AMM',
       settore: 'CR',
       fase: roleForLog,
       ruolo_destinatario: 'RIA',
       utente_destinatario: destUsername,
-      note_chiusura: 'Fascicolo trasmesso al Responsabile dell’istruttoria amministrativa per la verifica.',
+      note_chiusura: noteChiusura,
       num_campi_modificati: num,
       campi_modificati: num > 0 ? Object.keys(delta.oldMap).join(', ') : '',
       valori_prima_json: num > 0 ? JSON.stringify(delta.oldMap) : '',
       valori_dopo_json: num > 0 ? JSON.stringify(delta.newMap) : '',
-      riepilogo_ciclo: 'Fascicolo trasmesso al Responsabile dell’istruttoria amministrativa per la verifica.'
+      riepilogo_ciclo: noteChiusura
     }
 
     try {
@@ -12781,7 +12786,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
 
 
-  const closeIaAttoContestazioneCycle = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>, changedFieldNames: string[]) => {
+  const closeIaAttoContestazioneCycle = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>, changedFieldNames: string[], options?: { integrationReturn?: boolean }) => {
     const parentGlobalId = String(
       pickAttrCI(nextAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
       pickAttrCI(prevAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
@@ -12803,6 +12808,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const logFields = (logLayer.fields || []).map((f: any) => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
     const delta = buildAuditDeltaMaps(prevAttrs, nextAttrs, changedFieldNames)
     const num = Object.keys(delta.oldMap).length
+    const integrationReturn = options?.integrationReturn === true
+    const eventoChiusura = integrationReturn ? 'ESITO_INTEGRAZIONE_TRASMESSO' : 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA'
+    const noteChiusura = integrationReturn
+      ? 'Esito integrazione trasmesso al Responsabile dell’istruttoria amministrativa.'
+      : 'Atto di accertamento trasmesso al Responsabile dell’istruttoria amministrativa per la verifica.'
     const baseAttrs: Record<string, any> = {
       parent_globalid: parentGlobalId,
       parent_objectid: oid,
@@ -12810,19 +12820,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       utente_operatore: username,
       stato_record: 'CHIUSO',
       evento_apertura: 'PRESA_IN_CARICO',
-      evento_chiusura: 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA',
+      evento_chiusura: eventoChiusura,
       dt_chiusura: now,
       area: 'AMM',
       settore: 'CR',
       fase: roleForLog,
       ruolo_destinatario: 'RIA',
       utente_destinatario: destUsername,
-      note_chiusura: 'Atto di accertamento trasmesso al Responsabile dell’istruttoria amministrativa per la verifica.',
+      note_chiusura: noteChiusura,
       num_campi_modificati: num,
       campi_modificati: num > 0 ? Object.keys(delta.oldMap).join(', ') : '',
       valori_prima_json: num > 0 ? JSON.stringify(delta.oldMap) : '',
       valori_dopo_json: num > 0 ? JSON.stringify(delta.newMap) : '',
-      riepilogo_ciclo: 'Atto di accertamento trasmesso al Responsabile dell’istruttoria amministrativa per la verifica.'
+      riepilogo_ciclo: noteChiusura
     }
 
     try {
@@ -12909,7 +12919,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [data, getAttivitaLayer, oid])
 
 
-  const createRiaBozzaDeterminazioneActivity = React.useCallback(async (overrideAttrs: Record<string, any>) => {
+  const createRiaBozzaDeterminazioneActivity = React.useCallback(async (overrideAttrs: Record<string, any>, options?: { integrationReturn?: boolean }) => {
     try {
       const layer = await getAttivitaLayer()
       if (!layer?.applyEdits) return
@@ -12926,23 +12936,26 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const numeroRapporto = getReportCode(merged, oidNumber)
       const destUsername = await loadUniqueAmmRoleUsername('RIA', 'AMM')
       const mittente = String(profile.fullName || profile.username || 'Istruttore amministrativo').trim()
-      const key = `${parentGlobalId}|PRESA_IN_CARICO|FASCICOLO_TRASMESSO_VERIFICA|RIA|AMM||${destUsername}`
+      const activityEvent = options?.integrationReturn ? 'ESITO_INTEGRAZIONE_TRASMESSO' : 'FASCICOLO_TRASMESSO_VERIFICA'
+      const key = `${parentGlobalId}|PRESA_IN_CARICO|${activityEvent}|RIA|AMM||${destUsername}`
       const attrs: Record<string, any> = {
         chiave_attivita: key,
         parent_globalid: parentGlobalId,
         parent_objectid: oidNumber,
         numero_rapporto: numeroRapporto,
         tipo_attivita: 'PRESA_IN_CARICO',
-        sottotipo_attivita: 'FASCICOLO_TRASMESSO_VERIFICA',
-        titolo: 'Fascicolo da verificare',
-        messaggio: `Fascicolo istruttorio della pratica n. ${numeroRapporto || '—'} da prendere in carico per la verifica.\nMittente: ${mittente}`,
+        sottotipo_attivita: activityEvent,
+        titolo: options?.integrationReturn ? 'Esito integrazione ricevuto' : 'Fascicolo ricevuto',
+        messaggio: options?.integrationReturn
+          ? `Esito dell’integrazione della pratica n. ${numeroRapporto || '—'} ricevuto.\nMittente: ${mittente}`
+          : `Fascicolo della pratica n. ${numeroRapporto || '—'} ricevuto.\nMittente: ${mittente}`,
         destinatario_ruolo: 'RIA',
         destinatario_area: 'AMM',
         destinatario_settore: 'CR',
         destinatario_ufficio_id: null,
         destinatario_ufficio_zona: null,
         destinatario_username: destUsername || null,
-        origine_evento: 'FASCICOLO_TRASMESSO_VERIFICA',
+        origine_evento: activityEvent,
         priorita: 'INFO',
         data_attivazione: now,
         creato_il: now,
@@ -12981,7 +12994,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }, [data, deleteCurrentAmmActivitiesForRole, getAttivitaLayer, oid, profile.fullName, profile.username])
 
-  const createRiaAttoContestazioneActivity = React.useCallback(async (overrideAttrs: Record<string, any>) => {
+  const createRiaAttoContestazioneActivity = React.useCallback(async (overrideAttrs: Record<string, any>, options?: { integrationReturn?: boolean }) => {
     try {
       const layer = await getAttivitaLayer()
       if (!layer?.applyEdits) return
@@ -12998,23 +13011,26 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const numeroRapporto = getReportCode(merged, oidNumber)
       const destUsername = await loadUniqueAmmRoleUsername('RIA', 'AMM')
       const mittente = String(profile.fullName || profile.username || 'Istruttore amministrativo').trim()
-      const key = `${parentGlobalId}|PRESA_IN_CARICO|ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA|RIA|AMM||${destUsername}`
+      const activityEvent = options?.integrationReturn ? 'ESITO_INTEGRAZIONE_TRASMESSO' : 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA'
+      const key = `${parentGlobalId}|PRESA_IN_CARICO|${activityEvent}|RIA|AMM||${destUsername}`
       const attrs: Record<string, any> = {
         chiave_attivita: key,
         parent_globalid: parentGlobalId,
         parent_objectid: oidNumber,
         numero_rapporto: numeroRapporto,
         tipo_attivita: 'PRESA_IN_CARICO',
-        sottotipo_attivita: 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA',
-        titolo: 'Atto di accertamento da verificare',
-        messaggio: `Atto di accertamento della pratica n. ${numeroRapporto || '—'} da prendere in carico per la verifica.\nMittente: ${mittente}`,
+        sottotipo_attivita: activityEvent,
+        titolo: options?.integrationReturn ? 'Esito integrazione ricevuto' : 'Atto di accertamento ricevuto',
+        messaggio: options?.integrationReturn
+          ? `Esito dell’integrazione della pratica n. ${numeroRapporto || '—'} ricevuto.\nMittente: ${mittente}`
+          : `Atto di accertamento della pratica n. ${numeroRapporto || '—'} ricevuto.\nMittente: ${mittente}`,
         destinatario_ruolo: 'RIA',
         destinatario_area: 'AMM',
         destinatario_settore: 'CR',
         destinatario_ufficio_id: null,
         destinatario_ufficio_zona: null,
         destinatario_username: destUsername || null,
-        origine_evento: 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA',
+        origine_evento: activityEvent,
         priorita: 'INFO',
         data_attivazione: now,
         creato_il: now,
@@ -13635,6 +13651,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       } catch (e) {
         console.warn('[GII_LOG_EVENTI_CICLI] Impossibile rileggere il record amministrativo prima della trasmissione bozza determinazione:', e)
       }
+      const isRiaIntegrationReturn =
+        Number(pickAttrCI(prevRecordAttrs, ['esito_RIA', 'ESITO_RIA'])) === 3 ||
+        Number(pickAttrCI(prevRecordAttrs, ['stato_RIA', 'STATO_RIA'])) === 3
 
       const cleanAttrs = filterAttrsForLayer(attrs, fields)
       if (!isGiiPracticeContextStampCurrent(operationContextStamp)) return
@@ -13652,8 +13671,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const changedFieldNames = Object.keys(cleanAttrs).filter(k => k !== idName)
       const nextRecordAttrs = { ...prevRecordAttrs, ...cleanAttrs }
       await upsertAmmCycleAudit(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
-      await closeIaBozzaDeterminazioneCycle(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
-      await createRiaBozzaDeterminazioneActivity(nextRecordAttrs)
+      await closeIaBozzaDeterminazioneCycle(prevRecordAttrs, nextRecordAttrs, changedFieldNames, { integrationReturn: isRiaIntegrationReturn })
+      await createRiaBozzaDeterminazioneActivity(nextRecordAttrs, { integrationReturn: isRiaIntegrationReturn })
       if (!isGiiPracticeContextStampCurrent(operationContextStamp)) return
       try {
         sessionStorage.setItem('GII_AFTER_WORKFLOW_NAV', JSON.stringify(stampGiiPracticePayload({
@@ -13668,7 +13687,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const next = { ...nextRecordAttrs }
       setInitialDraft(next)
       setDraft(next)
-      setDialog({ kind: 'ok', title: 'Fascicolo trasmesso', text: 'Fascicolo trasmesso per la verifica.' })
+      setDialog(isRiaIntegrationReturn
+        ? { kind: 'ok', title: 'Esito integrazione trasmesso', text: 'Esito integrazione trasmesso.' }
+        : { kind: 'ok', title: 'Fascicolo trasmesso', text: 'Fascicolo trasmesso per la verifica.' })
       try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-trasmessa' } })) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-trasmessa', ts: Date.now() } })) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-trasmessa', ts: Date.now() } })) } catch {}
@@ -14087,6 +14108,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         const current = await queryCurrentLayerAttrsByOid(layer, idName, Number(oid))
         if (current && Object.keys(current).length) liveAttrs = current
       } catch {}
+      const isRiaIntegrationReturn =
+        Number(pickAttrCI(liveAttrs, ['esito_RIA', 'ESITO_RIA'])) === 3 ||
+        Number(pickAttrCI(liveAttrs, ['stato_RIA', 'STATO_RIA'])) === 3
       if (!isDeterminazioneAdottata(liveAttrs)) throw new Error('La determinazione adottata non risulta registrata.')
       if (attoContestazioneWorkflowState(liveAttrs) !== 'BOZZA') throw new Error('L’Atto non è nella fase di predisposizione.')
 
@@ -14136,8 +14160,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const next = { ...liveAttrs, ...cleanAttrs }
       const changed = Object.keys(cleanAttrs).filter(k => k !== idName)
       await upsertAmmCycleAudit(liveAttrs, next, changed)
-      await closeIaAttoContestazioneCycle(liveAttrs, next, changed)
-      await createRiaAttoContestazioneActivity(next)
+      await closeIaAttoContestazioneCycle(liveAttrs, next, changed, { integrationReturn: isRiaIntegrationReturn })
+      await createRiaAttoContestazioneActivity(next, { integrationReturn: isRiaIntegrationReturn })
       // Un nuovo invio al RIA apre un nuovo ciclo: l'eventuale marker della
       // precedente versione pulita non deve sopravvivere alla nuova approvazione.
       setAttoCleanWordGeneratedMarker(null)
@@ -14157,7 +14181,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (!operationContextIsCurrent()) return
       setInitialDraft(next)
       setDraft(next)
-      setDialog({ kind: 'ok', title: 'Atto trasmesso', text: 'Atto trasmesso per la verifica.' })
+      setDialog(isRiaIntegrationReturn
+        ? { kind: 'ok', title: 'Esito integrazione trasmesso', text: 'Esito integrazione trasmesso.' }
+        : { kind: 'ok', title: 'Atto trasmesso', text: 'Atto trasmesso per la verifica.' })
       try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-atto-trasmesso', ts: now } })) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: Number(oid), source: 'gii-editing-amm-atto-trasmesso', ts: now } })) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { oid: Number(oid), source: 'gii-editing-amm-atto-trasmesso', ts: now } })) } catch {}

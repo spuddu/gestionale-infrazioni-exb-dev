@@ -2856,22 +2856,23 @@ function ActionsPanel (props: {
       NUOVA_RILEVAZIONE_TRASMESSA: 'Nuova rilevazione trasmessa',
       ISTRUTTORIA_ASSEGNATA: 'Istruttoria assegnata',
       ISTRUTTORIA_TRASMESSA_VERIFICA: 'Istruttoria trasmessa per verifica',
-      INTEGRAZIONE_TRASMESSA_VERIFICA: 'Integrazione trasmessa per verifica',
+      INTEGRAZIONE_TRASMESSA_VERIFICA: 'Esito integrazione trasmesso',
       ISTRUTTORIA_VERIFICATA: 'Istruttoria verificata',
-      ISTRUTTORIA_TECNICA_VALIDATA: 'Istruttoria tecnica validata',
-      INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA: 'Integrazione tecnica trasmessa per verifica',
-      ISTRUTTORIA_TECNICA_APPROVATA: 'Istruttoria tecnica approvata',
-      ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA: 'Istruttoria amministrativa assegnata',
+      ISTRUTTORIA_TECNICA_VALIDATA: 'Istruttoria validata',
+      INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA: 'Esito integrazione trasmesso',
+      ISTRUTTORIA_TECNICA_APPROVATA: 'Istruttoria approvata',
+      ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA: 'Istruttoria assegnata',
       FASCICOLO_TRASMESSO_VERIFICA: 'Fascicolo trasmesso per verifica',
-      ISTRUTTORIA_AMMINISTRATIVA_VALIDATA: 'Istruttoria amministrativa validata',
+      ISTRUTTORIA_AMMINISTRATIVA_VALIDATA: 'Istruttoria validata',
       ISTRUTTORIA_RIMANDATA_INTEGRAZIONE: 'Istruttoria rimandata per integrazione',
       FASCICOLO_RIMANDATO_INTEGRAZIONE: 'Fascicolo rimandato per integrazione',
-      ESITO_INTEGRAZIONE_TECNICA_TRASMESSO: 'Esito integrazione tecnica trasmesso',
+      ESITO_INTEGRAZIONE_TRASMESSO: 'Esito integrazione trasmesso',
+      ESITO_INTEGRAZIONE_TECNICA_TRASMESSO: 'Esito integrazione trasmesso',
       ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA: 'Atto di accertamento trasmesso per verifica',
       ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE: 'Atto di accertamento rimandato per integrazione',
       ATTO_ACCERTAMENTO_APPROVATO: 'Atto di accertamento approvato',
       RILEVAZIONE_RESPINTA: 'Rilevazione respinta',
-      ISTRUTTORIA_TECNICA_RESPINTA: 'Istruttoria tecnica respinta'
+      ISTRUTTORIA_TECNICA_RESPINTA: 'Istruttoria respinta'
     }
     return labels[st] || 'Attività da prendere in carico'
   }
@@ -2885,7 +2886,7 @@ function ActionsPanel (props: {
     if (st === 'FASCICOLO_RIMANDATO_INTEGRAZIONE') return `Fascicolo della pratica n. ${n} rimandato per integrazione e da prendere in carico.`
     if (st === 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE') return `Atto di accertamento della pratica n. ${n} rimandato per integrazione e da prendere in carico.`
     if (st === 'RILEVAZIONE_RESPINTA') return `Rilevazione respinta sulla pratica n. ${n}.`
-    if (st === 'ISTRUTTORIA_TECNICA_RESPINTA') return `Istruttoria tecnica respinta sulla pratica n. ${n}.`
+    if (st === 'ISTRUTTORIA_TECNICA_RESPINTA') return `Istruttoria respinta sulla pratica n. ${n}.`
     return `Pratica n. ${n} da prendere in carico.`
   }
 
@@ -2902,44 +2903,56 @@ function ActionsPanel (props: {
     return value === (stateOnly ? STATO_INTEGRAZIONE : ESITO_INTEGRAZIONE)
   }
 
-  // Le attività correnti/allarmi descrivono il passaggio dal punto di vista
-  // del destinatario. L'evento di log, invece, resta l'azione compiuta dal
-  // mittente (es. ISTRUTTORIA_VERIFICATA).
+  // Durante la risalita di un'integrazione l'allarme resta "Esito integrazione ricevuto"
+  // anche per i ruoli intermedi. Il ciclo termina quando raggiunge il ruolo che aveva
+  // richiesto l'integrazione; dal passaggio successivo si torna al percorso ordinario.
+  const hasPendingIntegrationRequesterAtOrAboveDest = (ruoloDestRaw: string): boolean => {
+    const dest = normalizeActivityDestRole(ruoloDestRaw)
+    const requestersByDest: Record<string, string[]> = {
+      CS: ['CS', 'RIT', 'DT', 'RIA'],
+      RIT: ['RIT', 'DT', 'RIA'],
+      DT: ['DT', 'RIA'],
+      RIA: ['RIA'],
+      IA: ['IA']
+    }
+    return (requestersByDest[dest] || []).some(hasPendingIntegrationRequestForRole)
+  }
+
+  const isIntegrationRequestEvent = (ev: string): boolean => [
+    'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE',
+    'FASCICOLO_RIMANDATO_INTEGRAZIONE',
+    'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE'
+  ].includes(ev)
+
+  const isExplicitIntegrationReturnEvent = (ev: string): boolean =>
+    ev === 'ESITO_INTEGRAZIONE_TRASMESSO'
+
+  const isOrdinaryInstructionEvent = (ev: string): boolean => [
+    'ISTRUTTORIA_ASSEGNATA',
+    'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA',
+    'ISTRUTTORIA_TRASMESSA_VERIFICA',
+    'ISTRUTTORIA_VERIFICATA',
+    'ISTRUTTORIA_TECNICA_VALIDATA',
+    'ISTRUTTORIA_TECNICA_APPROVATA'
+  ].includes(ev)
+
+  // Gli allarmi non descrivono il ruolo né suggeriscono l'azione da compiere.
+  // Distinguono soltanto il tipo di ingresso della pratica:
+  // nuova rilevazione, nuova istruttoria, richiesta di integrazione, esito integrazione.
   const activityTitleForEvent = (subtipo: string, evento: string, ruoloMittente: string, ruoloDestRaw: string): string => {
     const ev = String(evento || subtipo || '').trim().toUpperCase()
     const dest = normalizeActivityDestRole(ruoloDestRaw)
 
     if (ev === 'NUOVA_RILEVAZIONE_TRASMESSA' && dest === 'CS') return 'Nuova rilevazione ricevuta'
-    if (ev === 'ISTRUTTORIA_ASSEGNATA' && dest === 'IT') return 'Nuova istruttoria assegnata'
-    if (ev === 'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA' && dest === 'IA') return 'Nuova istruttoria amministrativa assegnata'
-    if (ev === 'ISTRUTTORIA_TRASMESSA_VERIFICA' && dest === 'CS') return 'Istruttoria ricevuta per verifica'
-    if (ev === 'INTEGRAZIONE_TRASMESSA_VERIFICA' && dest === 'CS') return 'Integrazione ricevuta per verifica'
+    if (isIntegrationRequestEvent(ev)) return 'Richiesta integrazione ricevuta'
+    if (isExplicitIntegrationReturnEvent(ev)) return 'Esito integrazione ricevuto'
+    if (isOrdinaryInstructionEvent(ev)) return 'Nuova istruttoria ricevuta'
 
-    if (ev === 'ISTRUTTORIA_VERIFICATA' && dest === 'RIT') {
-      return hasPendingIntegrationRequestForRole('RIT')
-        ? 'Integrazione ricevuta per validazione'
-        : 'Istruttoria ricevuta per validazione'
-    }
-
-    if (ev === 'ISTRUTTORIA_TECNICA_VALIDATA' && dest === 'DT') {
-      return hasPendingIntegrationRequestForRole('DT')
-        ? 'Integrazione tecnica ricevuta per approvazione'
-        : 'Istruttoria tecnica ricevuta per approvazione'
-    }
-    if (ev === 'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA' && dest === 'DT') return 'Integrazione tecnica ricevuta per approvazione'
-
-    if (ev === 'ISTRUTTORIA_TECNICA_APPROVATA' && dest === 'RIA') {
-      return hasPendingIntegrationRequestForRole('RIA')
-        ? 'Esito integrazione tecnica ricevuto'
-        : 'Istruttoria tecnica ricevuta'
-    }
-
-    if (ev === 'FASCICOLO_TRASMESSO_VERIFICA' && dest === 'RIA') return 'Fascicolo ricevuto per verifica'
-    if (ev === 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE') return 'Istruttoria ricevuta per integrazione'
-    if (ev === 'FASCICOLO_RIMANDATO_INTEGRAZIONE' && dest === 'IA') return 'Fascicolo ricevuto per integrazione'
-    if (ev === 'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO' && dest === 'IA') return 'Esito integrazione tecnica ricevuto'
-    if (ev === 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA' && dest === 'RIA') return 'Atto di accertamento ricevuto per verifica'
-    if (ev === 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE' && dest === 'IA') return 'Atto di accertamento ricevuto per integrazione'
+    // Passaggi documentali amministrativi non riconducibili a una nuova istruttoria.
+    if (ev === 'FASCICOLO_TRASMESSO_VERIFICA' && dest === 'RIA') return 'Fascicolo ricevuto'
+    if (ev === 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA' && dest === 'IA') return 'Fascicolo ricevuto'
+    if (ev === 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA' && dest === 'RIA') return 'Atto di accertamento ricevuto'
+    if (ev === 'ATTO_ACCERTAMENTO_APPROVATO' && dest === 'IA') return 'Atto di accertamento ricevuto'
 
     return activityTitleForSubtype(subtipo || evento)
   }
@@ -2949,31 +2962,15 @@ function ActionsPanel (props: {
     const dest = normalizeActivityDestRole(ruoloDestRaw)
     const n = String(numeroRapporto || '').trim() || '—'
 
-    if (ev === 'NUOVA_RILEVAZIONE_TRASMESSA' && dest === 'CS') return `Rilevazione n. ${n} ricevuta e da prendere in carico.`
-    if (ev === 'ISTRUTTORIA_TRASMESSA_VERIFICA' && dest === 'CS') return `Istruttoria della pratica n. ${n} ricevuta per verifica.`
-    if (ev === 'INTEGRAZIONE_TRASMESSA_VERIFICA' && dest === 'CS') return `Integrazione della pratica n. ${n} ricevuta per verifica.`
-    if (ev === 'ISTRUTTORIA_VERIFICATA' && dest === 'RIT') {
-      return hasPendingIntegrationRequestForRole('RIT')
-        ? `Integrazione della pratica n. ${n} ricevuta per validazione.`
-        : `Istruttoria della pratica n. ${n} ricevuta per validazione.`
-    }
-    if ((ev === 'ISTRUTTORIA_TECNICA_VALIDATA' || ev === 'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA') && dest === 'DT') {
-      const isIntegration = ev === 'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA' || hasPendingIntegrationRequestForRole('DT')
-      return isIntegration
-        ? `Integrazione tecnica della pratica n. ${n} ricevuta per approvazione.`
-        : `Istruttoria tecnica della pratica n. ${n} ricevuta per approvazione.`
-    }
-    if (ev === 'ISTRUTTORIA_TECNICA_APPROVATA' && dest === 'RIA') {
-      return hasPendingIntegrationRequestForRole('RIA')
-        ? `Esito dell’integrazione tecnica della pratica n. ${n} ricevuto.`
-        : `Istruttoria tecnica della pratica n. ${n} ricevuta e da prendere in carico.`
-    }
-    if (ev === 'FASCICOLO_TRASMESSO_VERIFICA' && dest === 'RIA') return `Fascicolo della pratica n. ${n} ricevuto per verifica.`
-    if (ev === 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE') return `Istruttoria della pratica n. ${n} ricevuta per integrazione.`
-    if (ev === 'FASCICOLO_RIMANDATO_INTEGRAZIONE' && dest === 'IA') return `Fascicolo della pratica n. ${n} ricevuto per integrazione.`
-    if (ev === 'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO' && dest === 'IA') return `Esito dell’integrazione tecnica della pratica n. ${n} ricevuto.`
-    if (ev === 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA' && dest === 'RIA') return `Atto di accertamento della pratica n. ${n} ricevuto per verifica.`
-    if (ev === 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE' && dest === 'IA') return `Atto di accertamento della pratica n. ${n} ricevuto per integrazione.`
+    if (ev === 'NUOVA_RILEVAZIONE_TRASMESSA' && dest === 'CS') return `Rilevazione n. ${n} ricevuta.`
+    if (isIntegrationRequestEvent(ev)) return `Richiesta di integrazione per la pratica n. ${n} ricevuta.`
+    if (isExplicitIntegrationReturnEvent(ev)) return `Esito dell’integrazione della pratica n. ${n} ricevuto.`
+    if (isOrdinaryInstructionEvent(ev)) return `Istruttoria della pratica n. ${n} ricevuta.`
+
+    if (ev === 'FASCICOLO_TRASMESSO_VERIFICA' && dest === 'RIA') return `Fascicolo della pratica n. ${n} ricevuto.`
+    if (ev === 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA' && dest === 'IA') return `Fascicolo della pratica n. ${n} ricevuto.`
+    if (ev === 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA' && dest === 'RIA') return `Atto di accertamento della pratica n. ${n} ricevuto.`
+    if (ev === 'ATTO_ACCERTAMENTO_APPROVATO' && dest === 'IA') return `Atto di accertamento della pratica n. ${n} ricevuto.`
 
     return activityMessageForSubtype(subtipo || evento, numeroRapporto)
   }
@@ -4211,22 +4208,32 @@ function ActionsPanel (props: {
     ? getRoleLabelForForward(currentIntegrationRequester)
     : ''
 
-  const itAssignedByCsForUi = String(pickAttrCI(data, ['it_assegnato_da', 'IT_ASSEGNATO_DA']) || '').trim() !== '' ||
-    !isEmptyValue(pickAttrCI(data, ['dt_assegnazione_it', 'DT_ASSEGNAZIONE_IT']))
-  const isInitialItTransmissionForUi = role === 'IT' && !itAssignedByCsForUi && !numeroRapportoTecnicoCorrente
-  const isIntegrationResponseForUi = Boolean(currentIntegrationRequesterLabel)
+  // In creazione diretta da IT, gii-editing-tec valorizza intenzionalmente anche
+  // it_assegnato_*, dt_assegnazione_it e it_assegnato_da con lo stesso IT creatore.
+  // Questi campi NON significano quindi, da soli, che il CS abbia assegnato la pratica.
+  // Una vera assegnazione CS -> IT e' riconoscibile perche' l'assegnante e' diverso
+  // dall'IT assegnatario (oppure, per pratiche non originate da IT, dai dati di assegnazione).
+  const itAssigneeForUi = String(pickAttrCI(data, ['it_assegnato_username', 'IT_ASSEGNATO_USERNAME']) || '').trim().toLowerCase()
+  const itAssignerForUi = String(pickAttrCI(data, ['it_assegnato_da', 'IT_ASSEGNATO_DA']) || '').trim().toLowerCase()
+  const itSelfAssignmentFromCreationForUi = origineNum === 2 && !!itAssigneeForUi && !!itAssignerForUi && itAssigneeForUi === itAssignerForUi
+  const itAssignedByCsForUi = !itSelfAssignmentFromCreationForUi && (
+    !!itAssignerForUi || !isEmptyValue(pickAttrCI(data, ['dt_assegnazione_it', 'DT_ASSEGNAZIONE_IT']))
+  )
+  const isInitialItTransmissionForUi = role === 'IT' && origineNum === 2 && !itAssignedByCsForUi && !numeroRapportoTecnicoCorrente
   const incomingWorkflowEventForUi = String(incomingWorkflowForUi?.evento || '').trim().toUpperCase()
-  const isCsIntegrationVerificationForUi = role === 'CS' && incomingWorkflowEventForUi === 'INTEGRAZIONE_TRASMESSA_VERIFICA'
+  const isCurrentRoleIntegrationRequesterForUi = hasPendingIntegrationRequestForRole(role)
+  const isIntegrationResponseForUi = Boolean(currentIntegrationRequesterLabel) || (
+    !!fwdDest &&
+    !isCurrentRoleIntegrationRequesterForUi &&
+    hasPendingIntegrationRequesterAtOrAboveDest(fwdDest)
+  )
+  const isCsIntegrationVerificationForUi = role === 'CS' && incomingWorkflowEventForUi === 'ESITO_INTEGRAZIONE_TRASMESSO'
   const isCsInitialRilevazioneForUi = role === 'CS' && (
     incomingWorkflowEventForUi === 'NUOVA_RILEVAZIONE_TRASMESSA' ||
     (!incomingWorkflowEventForUi && !hasTiAnyEvidence)
   )
   const contextualPositiveActionLabel = isIntegrationResponseForUi
-    ? (role === 'IT'
-        ? 'Trasmetti integrazione per verifica'
-        : role === 'RIT'
-          ? 'Trasmetti integrazione tecnica per verifica'
-          : `Trasmetti ${getRoleRecipientPhrase(currentIntegrationRequester, { forward: true })}`)
+    ? 'Trasmetti esito integrazione'
     : role === 'IT'
       ? (isInitialItTransmissionForUi ? 'Trasmetti nuova rilevazione' : 'Trasmetti istruttoria per verifica')
       : role === 'CS'
@@ -4246,11 +4253,7 @@ function ActionsPanel (props: {
   const approvaBtnLabel = contextualPositiveActionLabel
 
   const approvaDoneLabel = isIntegrationResponseForUi
-    ? (role === 'IT'
-        ? 'Integrazione trasmessa per verifica'
-        : role === 'RIT'
-          ? 'Integrazione tecnica trasmessa per verifica'
-          : 'Trasmissione completata')
+    ? 'Esito integrazione trasmesso'
     : role === 'IT'
       ? (isInitialItTransmissionForUi ? 'Nuova rilevazione trasmessa' : 'Istruttoria trasmessa per verifica')
       : role === 'CS'
@@ -4403,9 +4406,9 @@ function ActionsPanel (props: {
           : role === 'DT'
             ? `Approva l’istruttoria tecnica e inoltra la pratica ${getRoleRecipientPhrase('RIA')}.`
             : role === 'RIA' && riaAttoContestazioneDaVerificare
-              ? 'Approva l’Atto di accertamento e restituisce la pratica all’Istruttore amministrativo per i passaggi successivi.'
+              ? 'Approva l’Atto di accertamento e restituisce la pratica all’Istruttore amministrativo.'
               : role === 'RIA'
-                ? 'Valida l’istruttoria amministrativa e restituisce la pratica all’Istruttore amministrativo per i passaggi successivi.'
+                ? 'Valida l’istruttoria amministrativa e restituisce la pratica all’Istruttore amministrativo.'
                 : role === 'IA'
                   ? 'Appone il visto di conformità. La pratica resta all’Istruttore amministrativo per la predisposizione degli elaborati successivi.'
                   : fwdDestLabel
@@ -4562,6 +4565,38 @@ function ActionsPanel (props: {
   const integrationTargetOptions = role === 'DT'
     ? ['Occorrenza', 'Grado di gravità', ...integrationTargetOptionsBase]
     : integrationTargetOptionsBase
+
+  // Rimando DT — "Necessità di integrazione o rettifica": soltanto Occorrenza,
+  // Grado di gravità e Nota spese dipendono dalle violazioni effettivamente presenti.
+  // Tutte le altre voci (Luoghi e dati tecnici, Allegati, ecc.) restano sempre richiedibili.
+  const dtGradeApplicableArticles = [12, 27, 28, 31, 32, 33, 34, 35, 36, 37]
+  const dtOccurrenceApplicable = (() => {
+    const tipoAbuso = String(pickAttrCI(data, ['tipo_abuso', 'TIPO_ABUSO']) || '').trim().toLowerCase()
+    if (tipoAbuso === 'parziale' || tipoAbuso === 'totale') return true
+    const art15Fields = [
+      'norma15_parziale', 'NORMA15_PARZIALE',
+      'norma15_totale', 'NORMA15_TOTALE',
+      'occorrenza', 'OCCORRENZA',
+      'sup_dichiarata_art15', 'SUP_DICHIARATA_ART15',
+      'sup_irrigata_art15', 'SUP_IRRIGATA_ART15'
+    ]
+    return art15Fields.some(field => {
+      const value = pickAttrCI(data, [field])
+      return value != null && String(value).trim() !== '' && String(value).trim() !== '0'
+    })
+  })()
+  const dtGradeApplicable = dtGradeApplicableArticles.some(art => hasArtSelectedForNotaSpeseCheck(data, art))
+  const dtNotaSpeseApplicable = getSelectedNotaSpeseCasisticheCheck(data).length > 0
+
+  const isDtConditionalIntegrationTargetDisabled = (target: string): boolean => {
+    if (role !== 'DT') return false
+    if (String(integrationReason || '').trim() !== 'Necessità di integrazione o rettifica') return false
+    if (target === 'Occorrenza') return !dtOccurrenceApplicable
+    if (target === 'Grado di gravità') return !dtGradeApplicable
+    if (target === 'Nota spese') return !dtNotaSpeseApplicable
+    return false
+  }
+
   const technicalRejectReasonOptions = [
     'Insussistenza dei presupposti della violazione',
     'Accertamento non procedibile',
@@ -4570,22 +4605,43 @@ function ActionsPanel (props: {
   ]
 
   const toggleIntegrationTarget = (target: string) => {
+    if (isDtConditionalIntegrationTargetDisabled(target)) return
     setIntegrationTargets(prev => prev.includes(target) ? prev.filter(x => x !== target) : [...prev, target])
     if (confirmAttempted) setConfirmAttempted(false)
   }
 
-  const renderIntegrationTargetCheckbox = (opt: string, displayLabel?: string) => (
-    <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 4px', border: 'none', borderRadius: 4, background: 'transparent', fontSize: Math.max(14, Number(ui.statusFontSize) || 14), cursor: loading ? 'not-allowed' : 'pointer', minWidth: 0 }}>
-      <input
-        type='checkbox'
-        checked={integrationTargets.includes(opt)}
-        onChange={() => toggleIntegrationTarget(opt)}
-        disabled={loading || !hasSel || lockedByTransmit}
-        style={{ margin: 0, flex: '0 0 auto' }}
-      />
-      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayLabel || opt}</span>
-    </label>
-  )
+  const renderIntegrationTargetCheckbox = (opt: string, displayLabel?: string) => {
+    const disabledByViolation = isDtConditionalIntegrationTargetDisabled(opt)
+    const checkboxDisabled = loading || !hasSel || lockedByTransmit || disabledByViolation
+    return (
+      <label
+        key={opt}
+        title={disabledByViolation ? 'Non previsto dalle violazioni rilevate nella pratica.' : undefined}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '3px 4px',
+          border: 'none',
+          borderRadius: 4,
+          background: 'transparent',
+          fontSize: Math.max(14, Number(ui.statusFontSize) || 14),
+          cursor: checkboxDisabled ? 'not-allowed' : 'pointer',
+          minWidth: 0,
+          opacity: disabledByViolation ? 0.5 : 1
+        }}
+      >
+        <input
+          type='checkbox'
+          checked={!disabledByViolation && integrationTargets.includes(opt)}
+          onChange={() => toggleIntegrationTarget(opt)}
+          disabled={checkboxDisabled}
+          style={{ margin: 0, flex: '0 0 auto' }}
+        />
+        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayLabel || opt}</span>
+      </label>
+    )
+  }
 
   // NOTE: compare per esito conforme/non conforme, respinta e — Matrice_TI caso 1/b — anche per eliminazione (obbligatoria)
   const showNote = pending === 'APPROVA' || pending === 'INVIA_IA' || pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA' || pending === 'RESPINGI' || pending === 'ELIMINA'
@@ -5286,7 +5342,7 @@ function ActionsPanel (props: {
       const noteInvioIa = noteTrim || (isRientroTecnicoDaDt
         ? 'Invio all’Istruttore amministrativo dopo rientro da integrazione tecnica.'
         : 'Invio all’Istruttore amministrativo.')
-      await saveWithWorkflowLog(upd, 'Pratica inviata all’Istruttore amministrativo.', { eventoChiusura: 'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO', ruoloDestinatario: 'IA', utenteDestinatario: String(iaUserRaw || resolveDestUser('IA')), noteChiusura: noteInvioIa, fase: role })
+      await saveWithWorkflowLog(upd, 'Pratica inviata all’Istruttore amministrativo.', { eventoChiusura: 'ESITO_INTEGRAZIONE_TRASMESSO', ruoloDestinatario: 'IA', utenteDestinatario: String(iaUserRaw || resolveDestUser('IA')), noteChiusura: noteInvioIa, fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -5645,35 +5701,50 @@ function ActionsPanel (props: {
       // L'ultimo evento ricevuto distingue in modo esplicito il percorso ordinario
       // dal rientro di una pratica precedentemente rimandata per integrazione.
       let incomingEvento = ''
-      let incomingRuolo = ''
       try {
         const ctx = await getCurrentCycleContextAsync()
         const incoming = await queryLatestIncomingClosure(String(ctx?.parentGlobalId || ''), role)
         incomingEvento = String(incoming?.evento || '').trim().toUpperCase()
-        incomingRuolo = String(incoming?.ruolo || '').trim().toUpperCase()
       } catch {}
 
-      const itAssignedByCs = String(pickAttrCI(data, ['it_assegnato_da', 'IT_ASSEGNATO_DA']) || '').trim() !== '' ||
-        !isEmptyValue(pickAttrCI(data, ['dt_assegnazione_it', 'DT_ASSEGNAZIONE_IT']))
-      const isInitialItTransmission = role === 'IT' && !incomingEvento && !itAssignedByCs && !numeroRapportoTecnicoCorrente
+      const itAssignee = String(pickAttrCI(data, ['it_assegnato_username', 'IT_ASSEGNATO_USERNAME']) || '').trim().toLowerCase()
+      const itAssigner = String(pickAttrCI(data, ['it_assegnato_da', 'IT_ASSEGNATO_DA']) || '').trim().toLowerCase()
+      const itSelfAssignmentFromCreation = origineNum === 2 && !!itAssignee && !!itAssigner && itAssignee === itAssigner
+      const itAssignedByCs = !itSelfAssignmentFromCreation && (
+        !!itAssigner || !isEmptyValue(pickAttrCI(data, ['dt_assegnazione_it', 'DT_ASSEGNAZIONE_IT']))
+      )
       const isItIntegrationReturn = role === 'IT' && incomingEvento === 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE'
-      const isRitDirectTechnicalIntegration = role === 'RIT' &&
-        incomingEvento === 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE' &&
-        (incomingRuolo === 'DT' || incomingRuolo === 'RIA')
+      // Un IT puo' essere autore originario della rilevazione. In create mode i campi
+      // it_assegnato_* vengono inizializzati sullo stesso IT: non e' una assegnazione CS.
+      // Il primo invio IT -> CS deve quindi restare NUOVA_RILEVAZIONE_TRASMESSA.
+      // Un eventuale rientro per integrazione ha comunque precedenza.
+      const isInitialItTransmission = role === 'IT' && origineNum === 2 && !isItIntegrationReturn && !itAssignedByCs && !numeroRapportoTecnicoCorrente
+      // Regola unica per la risalita di un'integrazione: finché esiste un
+      // richiedente di integrazione a valle del destinatario, ogni passaggio in
+      // avanti registra ESITO_INTEGRAZIONE_TRASMESSO. Quando il richiedente
+      // accetta l'esito e fa ripartire il flusso ordinario, si torna all'evento
+      // positivo normale del suo livello.
+      const isForwardingIntegrationOutcome = !!ruoloDest &&
+        !hasPendingIntegrationRequestForRole(role) &&
+        hasPendingIntegrationRequesterAtOrAboveDest(ruoloDest)
 
-      const eventoPositivo = role === 'IT'
-        ? (isInitialItTransmission
-            ? 'NUOVA_RILEVAZIONE_TRASMESSA'
-            : (isItIntegrationReturn ? 'INTEGRAZIONE_TRASMESSA_VERIFICA' : 'ISTRUTTORIA_TRASMESSA_VERIFICA'))
+      const eventoOrdinarioPositivo = role === 'IT'
+        ? (isInitialItTransmission ? 'NUOVA_RILEVAZIONE_TRASMESSA' : 'ISTRUTTORIA_TRASMESSA_VERIFICA')
         : role === 'CS'
           ? 'ISTRUTTORIA_VERIFICATA'
           : role === 'RIT'
-            ? (isRitDirectTechnicalIntegration ? 'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA' : 'ISTRUTTORIA_TECNICA_VALIDATA')
+            ? 'ISTRUTTORIA_TECNICA_VALIDATA'
             : role === 'DT'
               ? 'ISTRUTTORIA_TECNICA_APPROVATA'
               : role === 'RIA'
-                ? (riaAttoContestazioneDaVerificare ? 'ATTO_ACCERTAMENTO_APPROVATO' : 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA')
+                ? (riaAttoContestazioneDaVerificare
+                    ? 'ATTO_ACCERTAMENTO_APPROVATO'
+                    : 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA')
                 : ''
+
+      const eventoPositivo = isForwardingIntegrationOutcome
+        ? 'ESITO_INTEGRAZIONE_TRASMESSO'
+        : eventoOrdinarioPositivo
 
       const logOpts = esito === ESITO_APPROVATA && !isIaAttestazioneConformita && eventoPositivo
         ? {
@@ -5692,9 +5763,11 @@ function ActionsPanel (props: {
           ? 'Attestazione di conformità apposta.'
           : riaAttoContestazioneDaVerificare
             ? 'Atto di accertamento approvato e restituito all’Istruttore amministrativo.'
-            : riaStaApprovandoPropostaContestazione
-              ? 'Istruttoria amministrativa validata e restituita all’Istruttore amministrativo.'
-              : `Esito salvato: ${label}.`
+            : isForwardingIntegrationOutcome
+              ? 'Esito integrazione trasmesso.'
+              : riaStaApprovandoPropostaContestazione
+                ? 'Istruttoria amministrativa validata e restituita all’Istruttore amministrativo.'
+                : `Esito salvato: ${label}.`
         await saveWithWorkflowLog(upd, successText, logOpts)
       } else {
         await runApplyEdits(upd, `Esito salvato: ${label}.`)
@@ -5876,11 +5949,7 @@ function ActionsPanel (props: {
   const subjectVerbArchiviata = praticaLabel === 'Rapporto tecnico' ? 'archiviato' : 'archiviata'
 
   const approvaPendingTitle = isIntegrationResponseForUi
-    ? (role === 'IT'
-        ? 'Trasmissione integrazione per verifica'
-        : role === 'RIT'
-          ? 'Trasmissione integrazione tecnica per verifica'
-          : 'Trasmissione pratica')
+    ? 'Trasmissione esito integrazione'
     : role === 'IT'
       ? (isInitialItTransmissionForUi ? 'Trasmissione nuova rilevazione' : 'Trasmissione istruttoria per verifica')
       : role === 'CS'
@@ -5935,9 +6004,9 @@ function ActionsPanel (props: {
           : role === 'DT'
             ? `L’istruttoria tecnica verrà approvata e la pratica passerà ${getRoleRecipientPhrase('RIA')}.`
             : role === 'RIA' && riaAttoContestazioneDaVerificare
-              ? 'L’Atto di accertamento verrà approvato e la pratica tornerà all’Istruttore amministrativo per i passaggi successivi.'
+              ? 'L’Atto di accertamento verrà approvato e la pratica tornerà all’Istruttore amministrativo.'
               : role === 'RIA'
-                ? 'L’istruttoria amministrativa verrà validata e la pratica tornerà all’Istruttore amministrativo per i passaggi successivi.'
+                ? 'L’istruttoria amministrativa verrà validata e la pratica tornerà all’Istruttore amministrativo.'
                 : role === 'IA'
                   ? 'Il visto di conformità verrà apposto. La pratica resterà all’Istruttore amministrativo per predisporre gli elaborati successivi.'
                   : `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al passaggio successivo.`
@@ -5952,7 +6021,7 @@ function ActionsPanel (props: {
         : 'La rilevazione verrà rimandata per integrazione.')
 
   const pendingTheme: Record<string, PendingTheme> = {
-    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaAttoContestazioneDaVerificare ? 'La pratica contenente la bozza dell’Atto di accertamento verrà presa in carico per la verifica.' : (riaBozzaDeterminazioneDaVerificare ? 'La pratica contenente la bozza di determinazione verrà presa in carico per la verifica.' : ((role === 'RIA' || role === 'IA') ? 'La pratica verrà presa in carico.' : role === 'CS' ? (isCsInitialRilevazioneForUi ? 'La nuova rilevazione verrà presa in carico.' : isCsIntegrationVerificationForUi ? 'L’integrazione verrà presa in carico per la verifica.' : 'L’istruttoria verrà presa in carico per la verifica.') : (praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.'))) },
+    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaAttoContestazioneDaVerificare ? 'La pratica contenente la bozza dell’Atto di accertamento verrà presa in carico per la verifica.' : (riaBozzaDeterminazioneDaVerificare ? 'La pratica contenente la bozza di determinazione verrà presa in carico per la verifica.' : ((role === 'RIA' || role === 'IA') ? 'La pratica verrà presa in carico.' : role === 'CS' ? (isCsInitialRilevazioneForUi ? 'La nuova rilevazione verrà presa in carico.' : isCsIntegrationVerificationForUi ? 'L’esito dell’integrazione verrà preso in carico.' : 'L’istruttoria verrà presa in carico per la verifica.') : (praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.'))) },
     ASSEGNA_IT:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbAssegnata} ${getRoleRecipientPhrase('IT')} selezionato.` },
     ASSEGNA_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaperturaWorkflowDaAvviare
       ? `Verrà aperto il nuovo ciclo di riapertura n. ${riaperturaAmmNumero} e la pratica sarà assegnata ${getRoleRecipientPhrase('IA')} selezionato.`

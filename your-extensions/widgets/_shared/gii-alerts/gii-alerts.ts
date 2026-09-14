@@ -644,13 +644,10 @@ function baseWorkflowRoleForAlert (roleAreaKey: string): string {
 }
 
 function takeChargeTitleForMessage (label: string, row: Record<string, any>): string {
-  const hay = `${label || ''} ${attr(row, ['tipo_attivita']) || ''} ${attr(row, ['sottotipo_attivita']) || ''} ${attr(row, ['titolo']) || ''} ${attr(row, ['messaggio']) || ''} ${attr(row, ['origine_evento']) || ''}`.toUpperCase()
-  if (hay.includes('ATTESTAZIONE_CONFORMITA') || hay.includes('ATTESTAZIONE DI CONFORMIT')) return 'Attestazione di conformità apposta'
-  if (hay.includes('ATTO_ACCERTAMENTO_APPROVATO') || hay.includes('ATTO DI ACCERTAMENTO APPROVATO')) return 'Atto di accertamento approvato'
-  if (hay.includes('PROPOSTA_CONTESTAZIONE_APPROVATA') || hay.includes('PROPOSTA DI CONTESTAZIONE APPROVATA')) return 'Proposta di contestazione approvata'
-  if (hay.includes('BOZZA_DETERMINAZIONE') || hay.includes('BOZZA DETERMINAZIONE') || hay.includes('FASCICOLO ISTRUTTORIO')) return 'Fascicolo istruttorio da verificare'
-  if (hay.includes('INTEGRAZ')) return 'Richiesta di integrazione ricevuta'
-  return 'Nuova istruttoria ricevuta'
+  // Nessuna ricostruzione semantica da eventi/stati legacy: per le attività
+  // correnti il titolo salvato in GII_ATTIVITA_CORRENTI è la fonte autorevole.
+  // Il primo ingresso Survey/TR → CS viene riconosciuto separatamente dall'header.
+  return String(attr(row, ['titolo']) || '').trim() || 'Attività da prendere in carico'
 }
 
 function takeChargeTextFromElencoLogic (
@@ -660,9 +657,12 @@ function takeChargeTextFromElencoLogic (
   reportCode: string
 ): { title: string, message: string } {
   const label = formatCausaleForLog(log || null, data)
+  const eventCode = String(log?.evento || '').trim().toUpperCase()
   const parentObjectId = getParentObjectId(data)
   return {
-    title: takeChargeTitleForMessage(label, data),
+    // I nuovi log hanno codici evento univoci: usarli direttamente evita che
+    // il fallback ricada nelle vecchie etichette generiche/legacy.
+    title: takeChargeTitleForMessage(eventCode || label, data),
     message: practiceDescriptionForMessage(data, parentObjectId)
   }
 }
@@ -1430,7 +1430,7 @@ function currentActivityToAlert (row: Record<string, any>): GiiAlertItem | null 
   // Non sostituirlo con il vecchio titolo generico di presa in carico.
   const title = isInformativa
     ? (titoloRecord || 'Comunicazione informativa')
-    : (titoloRecord || takeChargeTitleForMessage('', rowForDisplay))
+    : (titoloRecord || 'Attività da prendere in carico')
   const message = isInformativa
     ? (messageRecord || reportCode)
     : (messageRecord || reportCode)

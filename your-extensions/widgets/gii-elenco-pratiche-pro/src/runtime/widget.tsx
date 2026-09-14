@@ -217,17 +217,18 @@ const EVENTO_OGGETTO_LABELS: Record<string, string> = {
   NUOVA_RILEVAZIONE_TRASMESSA: 'NUOVA RILEVAZIONE TRASMESSA',
   ISTRUTTORIA_ASSEGNATA: 'ISTRUTTORIA ASSEGNATA',
   ISTRUTTORIA_TRASMESSA_VERIFICA: 'ISTRUTTORIA TRASMESSA PER VERIFICA',
-  INTEGRAZIONE_TRASMESSA_VERIFICA: 'INTEGRAZIONE TRASMESSA PER VERIFICA',
+  INTEGRAZIONE_TRASMESSA_VERIFICA: 'ESITO INTEGRAZIONE TRASMESSO',
   ISTRUTTORIA_VERIFICATA: 'ISTRUTTORIA VERIFICATA',
-  ISTRUTTORIA_TECNICA_VALIDATA: 'ISTRUTTORIA TECNICA VALIDATA',
-  INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA: 'INTEGRAZIONE TECNICA TRASMESSA PER VERIFICA',
-  ISTRUTTORIA_TECNICA_APPROVATA: 'ISTRUTTORIA TECNICA APPROVATA',
-  ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA: 'ISTRUTTORIA AMMINISTRATIVA ASSEGNATA',
+  ISTRUTTORIA_TECNICA_VALIDATA: 'ISTRUTTORIA VALIDATA',
+  INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA: 'ESITO INTEGRAZIONE TRASMESSO',
+  ISTRUTTORIA_TECNICA_APPROVATA: 'ISTRUTTORIA APPROVATA',
+  ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA: 'ISTRUTTORIA ASSEGNATA',
   FASCICOLO_TRASMESSO_VERIFICA: 'FASCICOLO TRASMESSO PER VERIFICA',
-  ISTRUTTORIA_AMMINISTRATIVA_VALIDATA: 'ISTRUTTORIA AMMINISTRATIVA VALIDATA',
+  ISTRUTTORIA_AMMINISTRATIVA_VALIDATA: 'ISTRUTTORIA VALIDATA',
   ISTRUTTORIA_RIMANDATA_INTEGRAZIONE: 'ISTRUTTORIA RIMANDATA PER INTEGRAZIONE',
   FASCICOLO_RIMANDATO_INTEGRAZIONE: 'FASCICOLO RIMANDATO PER INTEGRAZIONE',
-  ESITO_INTEGRAZIONE_TECNICA_TRASMESSO: 'ESITO INTEGRAZIONE TECNICA TRASMESSO',
+  ESITO_INTEGRAZIONE_TRASMESSO: 'ESITO INTEGRAZIONE TRASMESSO',
+  ESITO_INTEGRAZIONE_TECNICA_TRASMESSO: 'ESITO INTEGRAZIONE TRASMESSO',
   ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA: 'ATTO DI ACCERTAMENTO TRASMESSO PER VERIFICA',
   ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE: 'ATTO DI ACCERTAMENTO RIMANDATO PER INTEGRAZIONE',
   ATTO_ACCERTAMENTO_APPROVATO: 'ATTO DI ACCERTAMENTO APPROVATO',
@@ -3259,23 +3260,32 @@ export default function Widget(props: Props) {
   const getLegacyOggettoAccentColor = (statusKey: string): string => {
     if (statusKey === 'BOZZA') return txt(cfg.oggettoBadgeColorBozza || '#6b7280');
     if (statusKey === 'NUOVA_RILEVAZIONE_TRASMESSA') return txt(cfg.oggettoBadgeColorNuovaRilevazione || CHIP_CELESTE.background);
-    if (statusKey === 'ISTRUTTORIA_ASSEGNATA' || statusKey === 'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA') return txt(cfg.oggettoBadgeColorAssegnazione || CHIP_BLUE.background);
+    if (statusKey === 'ISTRUTTORIA_ASSEGNATA') return txt(cfg.oggettoBadgeColorAssegnazione || CHIP_BLUE.background);
     if (statusKey === 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE' || statusKey === 'FASCICOLO_RIMANDATO_INTEGRAZIONE' || statusKey === 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE') return txt(cfg.oggettoBadgeColorIntegrazione || CHIP_ORANGE.background);
-    if (statusKey === 'ISTRUTTORIA_TECNICA_APPROVATA') return txt(cfg.oggettoBadgeColorApprovazioneTecnica || cfg.oggettoBadgeColorApprovazione || CHIP_GREEN.background);
-    if (statusKey === 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA' || statusKey === 'ATTO_ACCERTAMENTO_APPROVATO') return txt(cfg.oggettoBadgeColorApprovazioneAmministrativa || cfg.oggettoBadgeColorApprovazione || CHIP_GREEN.background);
+    if (statusKey === 'ISTRUTTORIA_APPROVATA') return txt(cfg.oggettoBadgeColorApprovazioneTecnica || cfg.oggettoBadgeColorApprovazione || CHIP_GREEN.background);
+    if (statusKey === 'ATTO_ACCERTAMENTO_APPROVATO') return txt(cfg.oggettoBadgeColorApprovazioneAmministrativa || cfg.oggettoBadgeColorApprovazione || CHIP_GREEN.background);
     if (statusKey === 'SANZIONE_NOTIFICATA') return txt(cfg.oggettoBadgeColorNotifica || cfg.oggettoBadgeColorApprovazione || CHIP_GREEN.background);
-    if (statusKey === 'RILEVAZIONE_RESPINTA' || statusKey === 'ISTRUTTORIA_TECNICA_RESPINTA') return txt(cfg.oggettoBadgeColorRespingimento || CHIP_RED.background);
+    if (statusKey === 'RILEVAZIONE_RESPINTA' || statusKey === 'ISTRUTTORIA_RESPINTA') return txt(cfg.oggettoBadgeColorRespingimento || CHIP_RED.background);
     if ([
       'ISTRUTTORIA_TRASMESSA_VERIFICA',
-      'INTEGRAZIONE_TRASMESSA_VERIFICA',
       'ISTRUTTORIA_VERIFICATA',
-      'ISTRUTTORIA_TECNICA_VALIDATA',
-      'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA',
+      'ISTRUTTORIA_VALIDATA',
       'FASCICOLO_TRASMESSO_VERIFICA',
-      'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO',
+      'ESITO_INTEGRAZIONE_TRASMESSO',
       'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA'
     ].includes(statusKey)) return txt(cfg.oggettoBadgeColorTrasmissione || CHIP_PURPLE.background);
     return txt(cfg.oggettoBadgeColorNeutro || CHIP_NEUTRAL.borderColor || '#d0d0d0');
+  };
+
+  const badgeRuleAliasesForKey = (key: string): string[] => {
+    const aliases: Record<string, string[]> = {
+      ISTRUTTORIA_ASSEGNATA: ['ISTRUTTORIA_ASSEGNATA', 'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA'],
+      ISTRUTTORIA_VALIDATA: ['ISTRUTTORIA_VALIDATA', 'ISTRUTTORIA_TECNICA_VALIDATA', 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA'],
+      ISTRUTTORIA_APPROVATA: ['ISTRUTTORIA_APPROVATA', 'ISTRUTTORIA_TECNICA_APPROVATA'],
+      ESITO_INTEGRAZIONE_TRASMESSO: ['ESITO_INTEGRAZIONE_TRASMESSO', 'INTEGRAZIONE_TRASMESSA_VERIFICA', 'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA', 'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO'],
+      ISTRUTTORIA_RESPINTA: ['ISTRUTTORIA_RESPINTA', 'ISTRUTTORIA_TECNICA_RESPINTA']
+    };
+    return aliases[key] || [key];
   };
 
   const getOggettoAccentColor = (oggetto: string): string => {
@@ -3290,8 +3300,9 @@ export default function Widget(props: Props) {
 
     if (cfg.oggettoBadgeRules !== undefined) {
       const configuredRules: any[] = asJs(cfg.oggettoBadgeRules) || [];
+      const aliases = badgeRuleAliasesForKey(status.key);
       const configured = Array.isArray(configuredRules)
-        ? configuredRules.find((r: any) => String(r?.key || "") === status.key)
+        ? aliases.map((key) => configuredRules.find((r: any) => String(r?.key || "") === key)).find(Boolean)
         : null;
       const configuredColor = txt(configured?.color).trim();
       if (configuredColor) return configuredColor;
@@ -3306,17 +3317,17 @@ export default function Widget(props: Props) {
   const getOggettoLegendDescription = (oggetto: string): string => {
     const o = normalizeOggettoLabel(oggetto);
     if (o === 'BOZZA') return 'Rilevazione creata dall’Istruttore tecnico e non ancora trasmessa.';
-    if (o === 'NUOVA RILEVAZIONE TRASMESSA') return 'Prima trasmissione della nuova rilevazione al Capo Settore.';
-    if (o === 'ISTRUTTORIA ASSEGNATA' || o === 'ISTRUTTORIA AMMINISTRATIVA ASSEGNATA') return 'Istruttoria assegnata al soggetto che deve prenderla in carico.';
+    if (o === 'NUOVA RILEVAZIONE TRASMESSA') return 'Nuova rilevazione trasmessa al Capo Settore.';
+    if (o === 'ISTRUTTORIA ASSEGNATA') return 'Istruttoria assegnata al soggetto che deve prenderla in carico.';
     if (o === 'ISTRUTTORIA TRASMESSA PER VERIFICA') return 'Istruttoria completata dall’Istruttore tecnico e trasmessa per la verifica.';
     if (o === 'ISTRUTTORIA VERIFICATA') return 'Verifica del Capo Settore conclusa positivamente.';
-    if (o === 'ISTRUTTORIA TECNICA VALIDATA') return 'Validazione tecnica del Responsabile dell’istruttoria tecnica conclusa positivamente.';
-    if (o === 'ISTRUTTORIA TECNICA APPROVATA') return 'Istruttoria tecnica approvata dal Direttore competente.';
+    if (o === 'ISTRUTTORIA VALIDATA') return 'Validazione dell’istruttoria conclusa positivamente.';
+    if (o === 'ISTRUTTORIA APPROVATA') return 'Approvazione dell’istruttoria conclusa positivamente.';
     if (o === 'FASCICOLO TRASMESSO PER VERIFICA') return 'Fascicolo amministrativo trasmesso al Responsabile per la verifica.';
-    if (o === 'ISTRUTTORIA AMMINISTRATIVA VALIDATA') return 'Verifica del Responsabile dell’istruttoria amministrativa conclusa positivamente.';
+
     if (o === 'ISTRUTTORIA RIMANDATA PER INTEGRAZIONE') return 'Istruttoria restituita al ruolo competente per integrazione o rettifica.';
     if (o === 'FASCICOLO RIMANDATO PER INTEGRAZIONE') return 'Fascicolo restituito all’Istruttore amministrativo per integrazione o rettifica.';
-    if (o === 'ESITO INTEGRAZIONE TECNICA TRASMESSO') return 'Esito dell’integrazione tecnica ritrasmesso all’Istruttore amministrativo.';
+    if (o === 'ESITO INTEGRAZIONE TRASMESSO') return 'Esito dell’integrazione ritrasmesso al soggetto competente.';
     if (o === 'ATTO DI ACCERTAMENTO TRASMESSO PER VERIFICA') return 'Atto di accertamento trasmesso al Responsabile per la verifica.';
     if (o === 'ATTO DI ACCERTAMENTO RIMANDATO PER INTEGRAZIONE') return 'Atto di accertamento restituito per integrazione o rettifica.';
     if (o === 'ATTO DI ACCERTAMENTO APPROVATO') return 'Atto di accertamento approvato dal Responsabile dell’istruttoria amministrativa.';
@@ -3615,43 +3626,36 @@ export default function Widget(props: Props) {
   };
 
   const computeFaseIstruttoria = (d: any): "Tecnica" | "Amministrativa" => {
-    // La fase deve rappresentare il nodo operativo CORRENTE, non il punto piu' avanzato
-    // raggiunto storicamente dalla pratica. Quindi, se un rapporto gia' passato dalla
-    // fase amministrativa viene rimandato all'area tecnica, deve tornare a risultare
-    // in fase Tecnica finche' e' in carico a IT/CS/RIT/DT AGR/TEC.
+    // La fase descrive l'ambito dell'ULTIMA AZIONE PROCEDIMENTALE compiuta,
+    // non l'area del semplice destinatario della pratica.
+    //
+    // In questo modo il cambio di fase avviene solo quando il nuovo ambito
+    // inizia concretamente ad operare:
+    // - DT -> RIA: resta Tecnica (l'ultima azione e' ancora del DT);
+    // - RIA -> IA: diventa Amministrativa;
+    // - RIA -> RIT per integrazione tecnica: resta Amministrativa;
+    // - appena il RIT agisce verso IT o DT: torna Tecnica.
     const log = getLogForRecord(d);
-    const destRole = normalizeWorkflowRole(log?.ruoloDest);
-    if (destRole) {
-      const destUser = String(log?.utenteDest || "")
-        .trim()
-        .toLowerCase();
-      const destEntry = destUser ? utentiMapRef.current?.get(destUser) : null;
-      const destArea = normalizeTextCode(
-        destEntry?.areaCod ||
-          normalizeAreaCode(destEntry?.area ?? null) ||
-          log?.area ||
-          "",
-      );
+    const sourceRole = normalizeWorkflowRole(log?.ruolo);
 
-      if (
-        destRole === "IA" ||
-        destRole === "RIA" ||
-        destRole === "DA" ||
-        destArea === "AMM"
-      ) {
+    if (sourceRole) {
+      if (sourceRole === "RIA" || sourceRole === "IA" || sourceRole === "DA") {
         return "Amministrativa";
       }
       if (
-        destRole === "TR" ||
-        destRole === "IT" ||
-        destRole === "CS" ||
-        destRole === "RIT" ||
-        destRole === "DT"
+        sourceRole === "TR" ||
+        sourceRole === "IT" ||
+        sourceRole === "CS" ||
+        sourceRole === "RIT" ||
+        sourceRole === "DT"
       ) {
         return "Tecnica";
       }
     }
 
+    // Fallback solo quando il LOG non e' ancora disponibile: mantiene il
+    // comportamento corrente senza anticipare cambi di fase sulla base del
+    // destinatario dell'ultimo passaggio.
     const currentRole = normalizeWorkflowRole(computeSintetico(d)?.ruolo);
     return currentRole === "IA" ||
       currentRole === "RIA" ||
@@ -4094,14 +4098,36 @@ export default function Widget(props: Props) {
   function formatCausaleForLog(log: LogEntry | null, d: any): string {
     if (!log) return '—';
     const evento = String(log.evento || '').trim().toUpperCase();
+
+    // Correzione semantica per le rilevazioni create direttamente da IT.
+    // gii-editing-tec, in create mode, inizializza it_assegnato_username,
+    // it_assegnato_da e dt_assegnazione_it con lo stesso IT creatore: non e'
+    // una assegnazione CS -> IT. Se un vecchio record di test e' stato chiuso
+    // con ISTRUTTORIA_TRASMESSA_VERIFICA, l'Elenco deve comunque rappresentare
+    // correttamente il primo invio IT -> CS come NUOVA RILEVAZIONE TRASMESSA.
+    if (evento === 'ISTRUTTORIA_TRASMESSA_VERIFICA') {
+      const ruolo = normalizeWorkflowRole(log.ruolo);
+      const destinatario = normalizeWorkflowRole(log.ruoloDest);
+      const opRaw = pickField(d, 'origine_pratica');
+      const opText = String(opRaw ?? '').trim().toUpperCase();
+      const origineIt = Number(opRaw) === 2 || opText === 'IT';
+      const itAssignee = String(pickField(d, 'it_assegnato_username') ?? '').trim().toLowerCase();
+      const itAssigner = String(pickField(d, 'it_assegnato_da') ?? '').trim().toLowerCase();
+      const selfCreatedIt = origineIt && !!itAssignee && !!itAssigner && itAssignee === itAssigner;
+      const numeroRapporto = pickOfficialRapportoNumber(d);
+      if (ruolo === 'IT' && destinatario === 'CS' && selfCreatedIt && !numeroRapporto) {
+        return normalizeOggettoLabel('NUOVA RILEVAZIONE TRASMESSA');
+      }
+    }
+
     if (evento === 'RESPINTA') {
       const ruolo = normalizeWorkflowRole(log.ruolo);
       if (ruolo === 'CS') {
         const tiAssigned = String(pickField(d, 'it_assegnato_username') ?? '').trim();
         const tiWorkflowTouched = hasRuoloData(d, 'IT');
-        return normalizeOggettoLabel(tiAssigned || tiWorkflowTouched ? 'ISTRUTTORIA TECNICA RESPINTA' : 'RILEVAZIONE RESPINTA');
+        return normalizeOggettoLabel(tiAssigned || tiWorkflowTouched ? 'ISTRUTTORIA RESPINTA' : 'RILEVAZIONE RESPINTA');
       }
-      return normalizeOggettoLabel('ISTRUTTORIA TECNICA RESPINTA');
+      return normalizeOggettoLabel('ISTRUTTORIA RESPINTA');
     }
     return formatCausale(evento);
   }
@@ -4230,6 +4256,7 @@ export default function Widget(props: Props) {
         logEvent === "ISTRUTTORIA_TECNICA_APPROVATA" ||
         logEvent === "FASCICOLO_TRASMESSO_VERIFICA" ||
         logEvent === "ISTRUTTORIA_AMMINISTRATIVA_VALIDATA" ||
+        logEvent === "ESITO_INTEGRAZIONE_TRASMESSO" ||
         logEvent === "ESITO_INTEGRAZIONE_TECNICA_TRASMESSO" ||
         logEvent === "ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA" ||
         logEvent === "ATTO_ACCERTAMENTO_APPROVATO"

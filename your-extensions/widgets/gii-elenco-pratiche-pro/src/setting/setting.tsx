@@ -154,23 +154,32 @@ function legacyOggettoBadgeColorForKey (cfg: any, key: string): string {
   const neutral = String(cfg?.oggettoBadgeColorNeutro || '#d0d0d0')
   if (key === 'BOZZA') return String(cfg?.oggettoBadgeColorBozza || '#6b7280')
   if (key === 'NUOVA_RILEVAZIONE_TRASMESSA') return String(cfg?.oggettoBadgeColorNuovaRilevazione || '#7dd3fc')
-  if (key === 'ISTRUTTORIA_ASSEGNATA' || key === 'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA') return String(cfg?.oggettoBadgeColorAssegnazione || '#2f6fed')
+  if (key === 'ISTRUTTORIA_ASSEGNATA') return String(cfg?.oggettoBadgeColorAssegnazione || '#2f6fed')
   if (key === 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE' || key === 'FASCICOLO_RIMANDATO_INTEGRAZIONE' || key === 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE') return String(cfg?.oggettoBadgeColorIntegrazione || '#ff6400')
-  if (key === 'ISTRUTTORIA_TECNICA_APPROVATA') return String(cfg?.oggettoBadgeColorApprovazioneTecnica || cfg?.oggettoBadgeColorApprovazione || '#009246')
-  if (key === 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA' || key === 'ATTO_ACCERTAMENTO_APPROVATO') return String(cfg?.oggettoBadgeColorApprovazioneAmministrativa || cfg?.oggettoBadgeColorApprovazione || '#16a34a')
+  if (key === 'ISTRUTTORIA_APPROVATA') return String(cfg?.oggettoBadgeColorApprovazioneTecnica || cfg?.oggettoBadgeColorApprovazione || '#009246')
+  if (key === 'ATTO_ACCERTAMENTO_APPROVATO') return String(cfg?.oggettoBadgeColorApprovazioneAmministrativa || cfg?.oggettoBadgeColorApprovazione || '#16a34a')
   if (key === 'SANZIONE_NOTIFICATA') return String(cfg?.oggettoBadgeColorNotifica || cfg?.oggettoBadgeColorApprovazione || '#0f766e')
-  if (key === 'RILEVAZIONE_RESPINTA' || key === 'ISTRUTTORIA_TECNICA_RESPINTA') return String(cfg?.oggettoBadgeColorRespingimento || '#dc2626')
+  if (key === 'RILEVAZIONE_RESPINTA' || key === 'ISTRUTTORIA_RESPINTA') return String(cfg?.oggettoBadgeColorRespingimento || '#dc2626')
   if ([
     'ISTRUTTORIA_TRASMESSA_VERIFICA',
-    'INTEGRAZIONE_TRASMESSA_VERIFICA',
     'ISTRUTTORIA_VERIFICATA',
-    'ISTRUTTORIA_TECNICA_VALIDATA',
-    'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA',
+    'ISTRUTTORIA_VALIDATA',
     'FASCICOLO_TRASMESSO_VERIFICA',
-    'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO',
+    'ESITO_INTEGRAZIONE_TRASMESSO',
     'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA'
   ].includes(key)) return String(cfg?.oggettoBadgeColorTrasmissione || '#8b5cf6')
   return neutral
+}
+
+const OGGETTO_BADGE_KEY_ALIASES: Record<string, string> = {
+  ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA: 'ISTRUTTORIA_ASSEGNATA',
+  INTEGRAZIONE_TRASMESSA_VERIFICA: 'ESITO_INTEGRAZIONE_TRASMESSO',
+  INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA: 'ESITO_INTEGRAZIONE_TRASMESSO',
+  ISTRUTTORIA_TECNICA_VALIDATA: 'ISTRUTTORIA_VALIDATA',
+  ISTRUTTORIA_AMMINISTRATIVA_VALIDATA: 'ISTRUTTORIA_VALIDATA',
+  ISTRUTTORIA_TECNICA_APPROVATA: 'ISTRUTTORIA_APPROVATA',
+  ESITO_INTEGRAZIONE_TECNICA_TRASMESSO: 'ESITO_INTEGRAZIONE_TRASMESSO',
+  ISTRUTTORIA_TECNICA_RESPINTA: 'ISTRUTTORIA_RESPINTA'
 }
 
 function buildLegacyOggettoBadgeRules (cfg: any): OggettoBadgeRule[] {
@@ -183,7 +192,8 @@ function normalizeOggettoBadgeRules (raw: any): OggettoBadgeRule[] {
   const seen = new Set<string>()
   const out: OggettoBadgeRule[] = []
   for (const item of arr) {
-    const key = String(item?.key || '').trim()
+    const rawKey = String(item?.key || '').trim()
+    const key = OGGETTO_BADGE_KEY_ALIASES[rawKey] || rawKey
     if (!key || seen.has(key)) continue
     seen.add(key)
     out.push({ key, color: String(item?.color || '').trim() })
