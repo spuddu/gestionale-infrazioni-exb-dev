@@ -21,8 +21,35 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const sectionTitleColor = String(cfg.sectionTitleColor || '#1F4E79')
   const sectionTitleFontSize = Number(cfg.sectionTitleFontSize || 13)
   const accentColor = String(cfg.accentColor || '#1F4E79')
+  const titleDividerColor = String(cfg.titleDividerColor || '#1F4E79')
+  const titleDividerWidth = cfg.titleDividerWidth == null ? 2 : Number(cfg.titleDividerWidth)
   const leftPanelBackgroundColor = String(cfg.leftPanelBackgroundColor || '#ffffff')
   const contentBackgroundColor = String(cfg.contentBackgroundColor || '#ffffff')
+  const panelRadius = cfg.panelRadius == null ? 8 : Number(cfg.panelRadius)
+  const panelBorderWidth = cfg.panelBorderWidth == null ? 1 : Number(cfg.panelBorderWidth)
+  const panelBorderColor = String(cfg.panelBorderColor || '#c5d9f1')
+  const panelHeaderBackgroundColor = String(cfg.panelHeaderBackgroundColor || '#f5f9ff')
+  const separatorColor = String(cfg.separatorColor || '#dbe7f4')
+  const separatorWidth = cfg.separatorWidth == null ? 1 : Number(cfg.separatorWidth)
+  const controlRadius = cfg.controlRadius == null ? 6 : Number(cfg.controlRadius)
+  const controlBorderWidth = cfg.controlBorderWidth == null ? 1 : Number(cfg.controlBorderWidth)
+  const controlBorderColor = String(cfg.controlBorderColor || '#aac4e0')
+  const controlBackgroundColor = String(cfg.controlBackgroundColor || '#ffffff')
+  const controlHoverBackgroundColor = String(cfg.controlHoverBackgroundColor || '#eef5ff')
+  const splitterColor = String(cfg.splitterColor || '#3d77c9')
+  const splitterWidth = cfg.splitterWidth == null ? 2 : Number(cfg.splitterWidth)
+  const outerPaddingTop = cfg.outerPaddingTop == null ? 12 : Number(cfg.outerPaddingTop)
+  const outerPaddingRight = cfg.outerPaddingRight == null ? 12 : Number(cfg.outerPaddingRight)
+  const outerPaddingBottom = cfg.outerPaddingBottom == null ? 12 : Number(cfg.outerPaddingBottom)
+  const outerPaddingLeft = cfg.outerPaddingLeft == null ? 12 : Number(cfg.outerPaddingLeft)
+  const indexPaddingTop = cfg.indexPaddingTop == null ? 8 : Number(cfg.indexPaddingTop)
+  const indexPaddingRight = cfg.indexPaddingRight == null ? 8 : Number(cfg.indexPaddingRight)
+  const indexPaddingBottom = cfg.indexPaddingBottom == null ? 8 : Number(cfg.indexPaddingBottom)
+  const indexPaddingLeft = cfg.indexPaddingLeft == null ? 8 : Number(cfg.indexPaddingLeft)
+  const articlePaddingTop = cfg.articlePaddingTop == null ? 12 : Number(cfg.articlePaddingTop)
+  const articlePaddingRight = cfg.articlePaddingRight == null ? 12 : Number(cfg.articlePaddingRight)
+  const articlePaddingBottom = cfg.articlePaddingBottom == null ? 12 : Number(cfg.articlePaddingBottom)
+  const articlePaddingLeft = cfg.articlePaddingLeft == null ? 12 : Number(cfg.articlePaddingLeft)
   const leftColumnWidthPct = Number(cfg.leftColumnWidthPct || 28)
   const rightColumnWidthPct = Number(cfg.rightColumnWidthPct || 72)
   const regolamentoArticoliUrl = String(cfg.regolamentoArticoliUrl || '')
@@ -47,6 +74,15 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
 
         <label style={lbl}>Dimensione titolo (px)</label>
         <input style={inp} type='number' min={10} max={36} step={1} value={titleFontSize} onChange={(e) => set('titleFontSize', Number(e.target.value || 15))} />
+
+        <label style={lbl}>Colore separatore sotto il titolo</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={titleDividerColor} onChange={(e) => set('titleDividerColor', e.target.value)} aria-label='Colore separatore titolo' />
+          <input style={inp} value={titleDividerColor} onChange={(e) => set('titleDividerColor', e.target.value)} />
+        </div>
+
+        <label style={lbl}>Spessore separatore titolo (px)</label>
+        <input style={inp} type='number' min={0} max={8} step={1} value={titleDividerWidth} onChange={(e) => set('titleDividerWidth', Number(e.target.value || 0))} />
       </div>
 
       <div style={section}>
@@ -99,6 +135,119 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         </div>
       </div>
 
+
+      <div style={section}>
+        <div style={sectionTitle}>Schede e pannelli</div>
+
+        <label style={lbl}>Radius schede (px)</label>
+        <input style={inp} type='number' min={0} max={40} step={1} value={panelRadius} onChange={(e) => set('panelRadius', Number(e.target.value || 0))} />
+
+        <label style={lbl}>Spessore bordo schede (px)</label>
+        <input style={inp} type='number' min={0} max={8} step={1} value={panelBorderWidth} onChange={(e) => set('panelBorderWidth', Number(e.target.value || 0))} />
+
+        <label style={lbl}>Colore bordo schede</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={panelBorderColor} onChange={(e) => set('panelBorderColor', e.target.value)} aria-label='Colore bordo schede' />
+          <input style={inp} value={panelBorderColor} onChange={(e) => set('panelBorderColor', e.target.value)} />
+        </div>
+
+        <label style={lbl}>Sfondo intestazioni schede</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={panelHeaderBackgroundColor} onChange={(e) => set('panelHeaderBackgroundColor', e.target.value)} aria-label='Sfondo intestazioni schede' />
+          <input style={inp} value={panelHeaderBackgroundColor} onChange={(e) => set('panelHeaderBackgroundColor', e.target.value)} />
+        </div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Spaziature</div>
+
+        <div style={{ ...lbl, marginTop: 0 }}>Padding esterno widget (px)</div>
+        <label style={lbl}>Superiore</label>
+        <input style={inp} type='number' min={0} max={80} step={1} value={outerPaddingTop} onChange={(e) => set('outerPaddingTop', Number(e.target.value || 0))} />
+        <label style={lbl}>Destro</label>
+        <input style={inp} type='number' min={0} max={80} step={1} value={outerPaddingRight} onChange={(e) => set('outerPaddingRight', Number(e.target.value || 0))} />
+        <label style={lbl}>Inferiore</label>
+        <input style={inp} type='number' min={0} max={80} step={1} value={outerPaddingBottom} onChange={(e) => set('outerPaddingBottom', Number(e.target.value || 0))} />
+        <label style={lbl}>Sinistro</label>
+        <input style={inp} type='number' min={0} max={80} step={1} value={outerPaddingLeft} onChange={(e) => set('outerPaddingLeft', Number(e.target.value || 0))} />
+
+        <div style={{ ...lbl, marginTop: 14 }}>Padding interno pannello indice (px)</div>
+        <label style={lbl}>Superiore</label>
+        <input style={inp} type='number' min={0} max={80} step={1} value={indexPaddingTop} onChange={(e) => set('indexPaddingTop', Number(e.target.value || 0))} />
+        <label style={lbl}>Destro</label>
+        <input style={inp} type='number' min={0} max={80} step={1} value={indexPaddingRight} onChange={(e) => set('indexPaddingRight', Number(e.target.value || 0))} />
+        <label style={lbl}>Inferiore</label>
+        <input style={inp} type='number' min={0} max={80} step={1} value={indexPaddingBottom} onChange={(e) => set('indexPaddingBottom', Number(e.target.value || 0))} />
+        <label style={lbl}>Sinistro</label>
+        <input style={inp} type='number' min={0} max={80} step={1} value={indexPaddingLeft} onChange={(e) => set('indexPaddingLeft', Number(e.target.value || 0))} />
+
+        <div style={{ ...lbl, marginTop: 14 }}>Padding interno pannello contenuto (px)</div>
+        <label style={lbl}>Superiore</label>
+        <input style={inp} type='number' min={0} max={80} step={1} value={articlePaddingTop} onChange={(e) => set('articlePaddingTop', Number(e.target.value || 0))} />
+        <label style={lbl}>Destro</label>
+        <input style={inp} type='number' min={0} max={80} step={1} value={articlePaddingRight} onChange={(e) => set('articlePaddingRight', Number(e.target.value || 0))} />
+        <label style={lbl}>Inferiore</label>
+        <input style={inp} type='number' min={0} max={80} step={1} value={articlePaddingBottom} onChange={(e) => set('articlePaddingBottom', Number(e.target.value || 0))} />
+        <label style={lbl}>Sinistro</label>
+        <input style={inp} type='number' min={0} max={80} step={1} value={articlePaddingLeft} onChange={(e) => set('articlePaddingLeft', Number(e.target.value || 0))} />
+
+        <div style={hint}>I valori predefiniti riproducono le spaziature attuali del widget.</div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Separatori interni</div>
+
+        <label style={lbl}>Colore separatori</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={separatorColor} onChange={(e) => set('separatorColor', e.target.value)} aria-label='Colore separatori' />
+          <input style={inp} value={separatorColor} onChange={(e) => set('separatorColor', e.target.value)} />
+        </div>
+
+        <label style={lbl}>Spessore separatori (px)</label>
+        <input style={inp} type='number' min={0} max={8} step={1} value={separatorWidth} onChange={(e) => set('separatorWidth', Number(e.target.value || 0))} />
+        <div style={hint}>Controlla le linee tra intestazioni e contenuti, tra articolo e navigazione e la guida verticale dell'indice.</div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Campi e pulsanti</div>
+
+        <label style={lbl}>Radius controlli (px)</label>
+        <input style={inp} type='number' min={0} max={30} step={1} value={controlRadius} onChange={(e) => set('controlRadius', Number(e.target.value || 0))} />
+
+        <label style={lbl}>Spessore bordo controlli (px)</label>
+        <input style={inp} type='number' min={0} max={8} step={1} value={controlBorderWidth} onChange={(e) => set('controlBorderWidth', Number(e.target.value || 0))} />
+
+        <label style={lbl}>Colore bordo controlli</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={controlBorderColor} onChange={(e) => set('controlBorderColor', e.target.value)} aria-label='Colore bordo controlli' />
+          <input style={inp} value={controlBorderColor} onChange={(e) => set('controlBorderColor', e.target.value)} />
+        </div>
+
+        <label style={lbl}>Sfondo controlli</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={controlBackgroundColor} onChange={(e) => set('controlBackgroundColor', e.target.value)} aria-label='Sfondo controlli' />
+          <input style={inp} value={controlBackgroundColor} onChange={(e) => set('controlBackgroundColor', e.target.value)} />
+        </div>
+
+        <label style={lbl}>Sfondo hover</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={controlHoverBackgroundColor} onChange={(e) => set('controlHoverBackgroundColor', e.target.value)} aria-label='Sfondo hover' />
+          <input style={inp} value={controlHoverBackgroundColor} onChange={(e) => set('controlHoverBackgroundColor', e.target.value)} />
+        </div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Divisore colonne</div>
+
+        <label style={lbl}>Colore linea divisore</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={splitterColor} onChange={(e) => set('splitterColor', e.target.value)} aria-label='Colore linea divisore' />
+          <input style={inp} value={splitterColor} onChange={(e) => set('splitterColor', e.target.value)} />
+        </div>
+
+        <label style={lbl}>Spessore linea divisore (px)</label>
+        <input style={inp} type='number' min={1} max={10} step={1} value={splitterWidth} onChange={(e) => set('splitterWidth', Number(e.target.value || 1))} />
+      </div>
 
       <div style={section}>
         <div style={sectionTitle}>Fonte articoli</div>

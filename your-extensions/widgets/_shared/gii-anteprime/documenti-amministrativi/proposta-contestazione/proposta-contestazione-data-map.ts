@@ -863,9 +863,9 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
   const determinazioneStato = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
   const iaTrasmessaAlRia = ['TRASMESSA_RIA', 'VALIDATA_RIA', 'TRASMESSA_FIRMA_DA', 'ADOTTATA'].includes(determinazioneStato) || Number(parseNumberInput(pickAttrCI(d, ['stato_IA'])) || 0) === 4
   const iaIterEsito = esitoIaNum === 2
-    ? 'Attestazione di conformità'
+    ? 'Istruttoria conforme'
     : esitoIaNum === 1
-      ? 'Richiesta di integrazione/rettifica'
+      ? 'Istruttoria non conforme'
       : esitoIaNum === 3
         ? 'Istruttoria non conforme'
         : ''
@@ -912,8 +912,8 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
     protocollo_istanza_data: pdfFieldValue(d, fields, 'protocollo_istanza_data'),
     oggetto_atto_amm: String(pickAttrCI(d, ['oggetto_atto_amm']) || ''),
     note_atto_amm: String(pickAttrCI(d, ['note_atto_amm']) || ''),
-    esito_ia: esitoIaNum === 1 ? 'Da integrare/rettificare' : esitoIaNum === 2 ? 'Conforme' : esitoIaNum === 3 ? 'Respinta' : '',
-    note_ia: String(pickAttrCI(d, ['note_IA', 'note_atto_amm']) || ''),
+    esito_ia: esitoIaNum === 1 ? 'Non conforme' : esitoIaNum === 2 ? 'Conforme' : esitoIaNum === 3 ? 'Non conforme' : '',
+    note_ia: String(pickAttrCI(d, ['note_IA']) || ''),
     determinazione_numero: String(pickAttrCI(d, ['determinazione_numero']) || ''),
     determinazione_data: pdfFieldValue(d, fields, 'determinazione_data'),
     accertamento_numero: verbaleNumberValue(d, oid),

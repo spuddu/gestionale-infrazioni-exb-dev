@@ -1364,8 +1364,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }
 
   return (
-    <div style={{ width: '100%', height: '100%', overflow: 'hidden', color: cfg.textColor, boxSizing: 'border-box', padding: 16 }}>
-      <div style={{ height: '100%', background: cfg.panelBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: 22, padding: 16, boxShadow: '0 18px 60px rgba(0,0,0,0.22)', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div style={{ width: '100%', height: '100%', overflow: 'hidden', color: cfg.textColor, boxSizing: 'border-box', padding: `${Number(cfg.outerPaddingTop ?? defaultConfig.outerPaddingTop)}px ${Number(cfg.outerPaddingRight ?? defaultConfig.outerPaddingRight)}px ${Number(cfg.outerPaddingBottom ?? defaultConfig.outerPaddingBottom)}px ${Number(cfg.outerPaddingLeft ?? defaultConfig.outerPaddingLeft)}px` }}>
+      <div style={{ height: '100%', background: cfg.panelBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: 22, padding: `${Number(cfg.panelPaddingTop ?? defaultConfig.panelPaddingTop)}px ${Number(cfg.panelPaddingRight ?? defaultConfig.panelPaddingRight)}px ${Number(cfg.panelPaddingBottom ?? defaultConfig.panelPaddingBottom)}px ${Number(cfg.panelPaddingLeft ?? defaultConfig.panelPaddingLeft)}px`, boxShadow: '0 18px 60px rgba(0,0,0,0.22)', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10, flexShrink: 0, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', minWidth: 0 }}>
             <div style={{ color: cfg.mutedColor, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap' }}>Quadro di sintesi delle fasi procedimentali delle pratiche di competenza.</div>
@@ -1380,7 +1380,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         {loading && <div style={{ padding: 10, marginBottom: 10, borderRadius: 14, background: 'rgba(255,255,255,0.08)', color: cfg.mutedColor, flexShrink: 0 }}>Caricamento report…</div>}
         {error && <div style={{ padding: 10, marginBottom: 10, borderRadius: 14, background: 'rgba(127,29,29,0.40)', border: '1px solid rgba(248,113,113,0.35)', color: '#fecaca', flexShrink: 0 }}>{error}</div>}
 
-        <section style={{ background: cfg.cardBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: 18, padding: 12, marginBottom: 10, flexShrink: 0 }}>
+        <section style={{ background: cfg.cardBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: Number(cfg.cardRadius ?? defaultConfig.cardRadius), padding: 12, marginBottom: 10, flexShrink: 0 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, alignItems: 'end' }}>
             <div>
               <FieldLabel cfg={cfg}>Cerca</FieldLabel>
@@ -1439,7 +1439,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           </div>
         </section>
 
-        <section style={{ background: cfg.cardBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: 18, padding: 12, flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <section style={{ background: cfg.cardBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: Number(cfg.cardRadius ?? defaultConfig.cardRadius), padding: 12, flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 8, flexShrink: 0 }}>
             <h3 style={{ margin: 0, fontSize: 15, color: cfg.textColor }}>Sintesi procedimentale</h3>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>

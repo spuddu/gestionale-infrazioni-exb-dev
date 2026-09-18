@@ -93,7 +93,25 @@ const MODERN_PALETTE = {
 }
 
 export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
-  const cfg: any = { ...defaultConfig, ...asJs(props.config) }
+  const rawCfg: any = asJs(props.config) || {}
+  const legacyWidgetPadding = Number.isFinite(Number(rawCfg.maskOuterOffset))
+    ? Number(rawCfg.maskOuterOffset)
+    : Number((defaultConfig as any).maskOuterOffset ?? 0)
+  const legacyMaskInnerPadding = Number.isFinite(Number(rawCfg.maskInnerPadding))
+    ? Number(rawCfg.maskInnerPadding)
+    : Number((defaultConfig as any).maskInnerPadding ?? 0)
+  const cfg: any = {
+    ...defaultConfig,
+    ...rawCfg,
+    widgetPaddingTop: rawCfg.widgetPaddingTop ?? legacyWidgetPadding,
+    widgetPaddingRight: rawCfg.widgetPaddingRight ?? legacyWidgetPadding,
+    widgetPaddingBottom: rawCfg.widgetPaddingBottom ?? legacyWidgetPadding,
+    widgetPaddingLeft: rawCfg.widgetPaddingLeft ?? legacyWidgetPadding,
+    maskInnerPaddingTop: rawCfg.maskInnerPaddingTop ?? legacyMaskInnerPadding,
+    maskInnerPaddingRight: rawCfg.maskInnerPaddingRight ?? legacyMaskInnerPadding,
+    maskInnerPaddingBottom: rawCfg.maskInnerPaddingBottom ?? legacyMaskInnerPadding,
+    maskInnerPaddingLeft: rawCfg.maskInnerPaddingLeft ?? legacyMaskInnerPadding
+  }
   const [openSec, setOpenSec] = React.useState<string>('datasource')
   const [layoutTab, setLayoutTab] = React.useState<string>('violazione')
   const toggle = (id:string) => setOpenSec(s => s === id ? '' : id)
@@ -372,8 +390,26 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       </SectionBox>
       <SectionBox title='Maschera / contenitore'>
         <div style={P.grid2}><Color k='maskBg' label='Sfondo maschera' fallback='#eef4fb'/><Color k='maskBorderColor' label='Colore bordo' fallback='#cbd8e6'/></div>
-        <div style={P.grid3}><Num k='maskBorderWidth' label='Spessore bordo' min={0} max={8}/><Num k='maskBorderRadius' label='Arrotondamento' min={0} max={40}/><Num k='maskInnerPadding' label='Padding interno' min={0} max={40}/></div>
-        <Num k='maskOuterOffset' label='Offset esterno' min={0} max={80}/>
+        <div style={P.grid2}><Num k='maskBorderWidth' label='Spessore bordo' min={0} max={8}/><Num k='maskBorderRadius' label='Arrotondamento' min={0} max={40}/></div>
+        <div style={{...P.hint, marginTop: 8, marginBottom: 6}}>Padding interno maschera</div>
+        <div style={P.grid2}>
+          <Num k='maskInnerPaddingTop' label='Superiore' min={0} max={80}/>
+          <Num k='maskInnerPaddingRight' label='Destro' min={0} max={80}/>
+        </div>
+        <div style={P.grid2}>
+          <Num k='maskInnerPaddingBottom' label='Inferiore' min={0} max={80}/>
+          <Num k='maskInnerPaddingLeft' label='Sinistro' min={0} max={80}/>
+        </div>
+      </SectionBox>
+      <SectionBox title='Padding interno widget' hint='Regola separatamente lo spazio tra il bordo del GII Editing TEC e il suo contenuto. Per compatibilità, finché un lato non viene modificato eredita il precedente Offset esterno.'>
+        <div style={P.grid2}>
+          <Num k='widgetPaddingTop' label='Superiore' min={0} max={80}/>
+          <Num k='widgetPaddingRight' label='Destro' min={0} max={80}/>
+        </div>
+        <div style={P.grid2}>
+          <Num k='widgetPaddingBottom' label='Inferiore' min={0} max={80}/>
+          <Num k='widgetPaddingLeft' label='Sinistro' min={0} max={80}/>
+        </div>
       </SectionBox>
       <SectionBox title='Barra superiore e messaggi'>
         <div style={P.grid2}>
@@ -386,6 +422,10 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
 
     <Acc id='formstyle' label='4. Stile form, campi e card' open={isOpen('formstyle')} onToggle={()=>toggle('formstyle')}/>
     {isOpen('formstyle') && <>
+      <SectionBox title='Padding contenuto schede' hint='Regola il contenitore esterno di tutte le schede, comprese Allegati e Anteprima. Non modifica il padding interno delle card o dei viewer.'>
+        <div style={P.grid2}><Num k='tabPaddingTop' label='Superiore' min={0} max={80}/><Num k='tabPaddingRight' label='Destro' min={0} max={80}/></div>
+        <div style={P.grid2}><Num k='tabPaddingBottom' label='Inferiore' min={0} max={80}/><Num k='tabPaddingLeft' label='Sinistro' min={0} max={80}/></div>
+      </SectionBox>
       <SectionBox title='Etichette campo'>
         <div style={P.grid2}><Color k='formLabelColor' label='Colore etichette' fallback='#334155'/><Num k='formLabelFontSize' label='Dimensione testo' min={8} max={24}/></div>
         <div style={P.grid2}><Num k='formLabelFontWeight' label='Peso testo' min={300} max={900} step={100}/><Num k='formLabelMarginBottom' label='Distanza da campo' min={0} max={20}/></div>
@@ -427,6 +467,11 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
           <button type='button' style={P.dangerBtn} onClick={() => setMany({ violazioneLayoutLeftPercent:58, violazioneLayoutMinLeftPx:520, violazioneLayoutMinRightPx:360, violazioneSplitterWidth:14, violazioneSplitterColor:'#94a3b8', violazioneDescrizioneRows:5, violazioneCircostanzeRows:4 })}>↺ Reset scheda Violazione</button>
         </SectionBox>
       </> : <>
+        {layoutTab === 'dati_tecnici' && (
+          <SectionBox title='Scheda Luoghi e dati tecnici — separatore verticale' hint='Regola la posizione della linea di separazione rispetto al bordo destro del widget. 0 = sul bordo; valori positivi = verso destra; valori negativi = verso l’interno del widget.'>
+            <Num k='datiTecniciSplitterOffsetX' label='Offset orizzontale separatore (px)' min={-80} max={120} hint='Il valore iniziale 13 px riproduce la posizione attuale.'/>
+          </SectionBox>
+        )}
         <SectionBox title={`Scheda ${layoutTab.replace(/_/g,' ')}`} hint='Qui puoi modificare colonne, larghezze, ordine dei campi e etichette visualizzate. La scheda Violazione ha un layout speciale dedicato nella relativa tab.'>
           <Num k='fieldGap' label='Gap generale tra campi (px)' min={0} max={40}/>
           {renderGenericLayoutEditor(layoutTab)}

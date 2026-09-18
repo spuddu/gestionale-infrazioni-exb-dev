@@ -3938,7 +3938,7 @@ function NoteSpeseManager (props: NsManagerProps) {
 
   return (
     <div style={{ border: '1px solid #b9d1ea', borderRadius: cardRadius, overflow: 'hidden', background: '#fff' }}>
-      <div style={{ background: formStyle.cardHeaderBg, color: formStyle.cardHeaderColor, padding: `${formStyle.cardHeaderPaddingY}px ${formStyle.cardHeaderPaddingX}px`, fontSize: formStyle.cardHeaderFontSize, fontWeight: formStyle.cardHeaderFontWeight as any, letterSpacing: 0.25, textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, borderTopLeftRadius: cardRadius, borderTopRightRadius: cardRadius }}>
+      <div style={{ background: formStyle.cardHeaderBg, color: formStyle.cardHeaderColor, padding: `${formStyle.cardHeaderPaddingY}px ${formStyle.cardHeaderPaddingX}px`, fontSize: formStyle.cardHeaderFontSize, fontWeight: formStyle.cardHeaderFontWeight as any, letterSpacing: 0.25, textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <span>{String(props.title || '').toLocaleUpperCase('it-IT')}</span>
         <span style={{ fontSize: formStyle.cardHeaderFontSize, opacity: 0.9 }}>{money(categoryTotal)} €</span>
       </div>
@@ -5127,13 +5127,20 @@ function NuovaPraticaForm (p: {
     if (editOid != null && Number.isFinite(Number(editOid)) && Number(editOid) > 0) return Number(editOid)
     return getOidFromAny(p.initialData)
   }, [mode, editOid, getOidFromAny, p.initialData])
+  const [persistentAnteprimaOid, setPersistentAnteprimaOid] = React.useState<number | null>(null)
+  React.useEffect(() => {
+    if (npTab === 'anteprima' && mode === 'edit' && currentOid != null) {
+      setPersistentAnteprimaOid(Number(currentOid))
+    }
+  }, [npTab, mode, currentOid])
+
   const currentLayerUrl = React.useMemo(() => {
     return ensureLayerIndex(normalizeFeatureLayerUrl(p.editLayerUrl) || normalizeFeatureLayerUrl(readDynamicSelection().layerUrl))
   }, [p.editLayerUrl])
   const createStartedAtRef = React.useRef<number>(Date.now())
   const [attachmentFiles, setAttachmentFiles] = React.useState<File[]>([])
   const [attachmentInputKey, setAttachmentInputKey] = React.useState(0)
-  const [attachments, setAttachments] = React.useState<Array<{ id: number; name?: string; size?: number; contentType?: string; url?: string; keywords?: string }>>([])
+  const [attachments, setAttachments] = React.useState<Array<{ id: number; name?: string; size?: number; contentType?: string; url?: string; keywords?: string; __pendingFile?: File; __pendingUpload?: boolean; __pendingReplace?: boolean }>>([])
   const [attachmentsForOid, setAttachmentsForOid] = React.useState<number | null>(null)
   const [attachmentsLoading, setAttachmentsLoading] = React.useState(false)
   const [attachmentsUploading, setAttachmentsUploading] = React.useState(false)
@@ -5161,7 +5168,11 @@ function NuovaPraticaForm (p: {
   const visibleTechnicalAttachments = React.useMemo(() => filterGiiAttachmentsForTechnicalRoles((Array.isArray(attachments) ? attachments : []) as any), [attachments])
 
   const [pendingDeleteAttachmentIds, setPendingDeleteAttachmentIds] = React.useState<number[]>([])
+  const [pendingDeleteAttachmentNames, setPendingDeleteAttachmentNames] = React.useState<Record<number, string>>({})
   const [pendingReplaceAttachments, setPendingReplaceAttachments] = React.useState<Record<number, File>>({})
+  const [pendingReplaceAttachmentOriginalNames, setPendingReplaceAttachmentOriginalNames] = React.useState<Record<number, string>>({})
+  const [pendingAttachmentRotations, setPendingAttachmentRotations] = React.useState<Record<number, number>>({})
+  const pendingAttachmentTempIdRef = React.useRef(-1)
   const [attachmentConfirm, setAttachmentConfirm] = React.useState<null | { type: 'delete' | 'replace'; attachment: { id: number; name?: string }; file?: File }>(null)
   const [replaceTargetAttachment, setReplaceTargetAttachment] = React.useState<{ id: number; name?: string } | null>(null)
   const replaceInputRef = React.useRef<HTMLInputElement | null>(null)
@@ -5206,7 +5217,9 @@ function NuovaPraticaForm (p: {
     setAttachmentFiles([])
     setAttachmentInputKey(k => k + 1)
     setPendingDeleteAttachmentIds([])
+    setPendingDeleteAttachmentNames({})
     setPendingReplaceAttachments({})
+    setPendingReplaceAttachmentOriginalNames({})
     setAttachmentConfirm(null)
     setReplaceTargetAttachment(null)
     setReplaceInputKey(k => k + 1)
@@ -5251,14 +5264,15 @@ function NuovaPraticaForm (p: {
   const hasPendingAttachments = attachmentFiles.length > 0
   const hasPendingAttachmentDeletes = pendingDeleteAttachmentIds.length > 0
   const hasPendingAttachmentReplacements = Object.keys(pendingReplaceAttachments).length > 0
+  const hasPendingAttachmentRotations = Object.values(pendingAttachmentRotations).some(v => (((Math.round(Number(v || 0) / 90) * 90) % 360 + 360) % 360) !== 0)
   const baselineArt15Selected = React.useMemo(() => draftHasArt15Selection(baselineDraft), [baselineDraft])
   const art15SelectionDirty = art15SelectedUi !== baselineArt15Selected
   const isDirty = React.useMemo(() => {
     if (isReadOnly) return false
     const draftDirty = !draftsEqual(draft, baselineDraft)
     if (isRitAgrTecLimitedEdit) return draftDirty
-    return draftDirty || art15SelectionDirty || !!p.clickedPointWgs84 || hasPendingAttachments || hasPendingAttachmentDeletes || hasPendingAttachmentReplacements || noteSpeseDraftDirty
-  }, [isReadOnly, draft, baselineDraft, art15SelectionDirty, isRitAgrTecLimitedEdit, p.clickedPointWgs84, hasPendingAttachments, hasPendingAttachmentDeletes, hasPendingAttachmentReplacements, noteSpeseDraftDirty])
+    return draftDirty || art15SelectionDirty || !!p.clickedPointWgs84 || hasPendingAttachments || hasPendingAttachmentDeletes || hasPendingAttachmentReplacements || hasPendingAttachmentRotations || noteSpeseDraftDirty
+  }, [isReadOnly, draft, baselineDraft, art15SelectionDirty, isRitAgrTecLimitedEdit, p.clickedPointWgs84, hasPendingAttachments, hasPendingAttachmentDeletes, hasPendingAttachmentReplacements, hasPendingAttachmentRotations, noteSpeseDraftDirty])
   React.useEffect(() => {
     p.onDirtyChange?.(isDirty)
   }, [isDirty, p.onDirtyChange])
@@ -5303,7 +5317,6 @@ function NuovaPraticaForm (p: {
   }, [previewAttachment?.id])
 
   React.useEffect(() => {
-    if (npTab !== 'allegati') return
     if (attachmentsLoading) return
     const list = Array.isArray(visibleTechnicalAttachments) ? visibleTechnicalAttachments : []
     if (list.length === 0) {
@@ -5319,7 +5332,7 @@ function NuovaPraticaForm (p: {
       name: first.name,
       contentType: first.contentType
     })
-  }, [npTab, visibleTechnicalAttachments, attachmentsLoading, previewAttachment?.id])
+  }, [visibleTechnicalAttachments, attachmentsLoading, previewAttachment?.id])
 
   // Effect anteprima allegato (richiede currentOid e currentLayerUrl)
   React.useEffect(() => {
@@ -5679,6 +5692,8 @@ React.useEffect(() => {
       setAttachmentFiles([])
       setPendingDeleteAttachmentIds([])
       setPendingReplaceAttachments({})
+      setPendingAttachmentRotations({})
+      pendingAttachmentTempIdRef.current = -1
       setAttachmentConfirm(null)
       setReplaceTargetAttachment(null)
       setPreviewAttachment(null)
@@ -5690,6 +5705,13 @@ React.useEffect(() => {
     setAttachmentsLoading(false)
     setAttachmentsUploading(false)
     setAttachmentsError(null)
+    setAttachmentFiles([])
+    setPendingDeleteAttachmentIds([])
+    setPendingDeleteAttachmentNames({})
+    setPendingReplaceAttachments({})
+    setPendingReplaceAttachmentOriginalNames({})
+    setPendingAttachmentRotations({})
+    pendingAttachmentTempIdRef.current = -1
     setAttachmentConfirm(null)
     setReplaceTargetAttachment(null)
     setPreviewAttachment(null)
@@ -5811,27 +5833,20 @@ React.useEffect(() => {
     const files = Array.isArray(filesArg) ? filesArg : attachmentFiles
     const origin = captureAttachmentOperation()
     if (origin.oid == null || files.length === 0 || !isAttachmentOperationCurrent(origin)) return
-    try {
-      setAttachmentsUploading(true)
-      setAttachmentsError(null)
-      const preferredUrl = await getAttachmentPreferredUrl(origin)
-      if (!isAttachmentOperationCurrent(origin)) return
-      const uploaded = await uploadFilesToFeatureAttachments(ds as any, origin.oid, files, preferredUrl)
-      if (!isAttachmentOperationCurrent(origin)) return
-      const optimistic = [
-        ...(Array.isArray(attachments) ? attachments : []),
-        ...uploaded.map((a, idx) => ({ id: Number(a?.id) || -(idx + 1), name: a?.name, size: a?.size, contentType: a?.contentType, url: a?.url }))
-      ]
-      setAttachmentFiles([])
-      setAttachmentInputKey(k => k + 1)
-      setAttachments(optimistic)
-      await refreshCurrentAttachmentsAfterUpload({ optimistic, expectedCount: optimistic.length, origin })
-    } catch (e: any) {
-      if (isAttachmentOperationCurrent(origin)) setAttachmentsError(e?.message || String(e))
-    } finally {
-      if (isAttachmentOperationCurrent(origin)) setAttachmentsUploading(false)
-    }
-  }, [attachmentFiles, captureAttachmentOperation, isAttachmentOperationCurrent, ds, attachments, refreshCurrentAttachmentsAfterUpload, getAttachmentPreferredUrl])
+    setAttachmentsError(null)
+    const staged = files.map((file) => ({
+      id: pendingAttachmentTempIdRef.current--,
+      name: file.name,
+      size: file.size,
+      contentType: file.type || undefined,
+      keywords: 'GII_ALLEGATO_TECNICO',
+      __pendingFile: file,
+      __pendingUpload: true
+    }))
+    setAttachmentFiles(prev => [...prev, ...files])
+    setAttachments(prev => [...(Array.isArray(prev) ? prev : []), ...staged])
+    setAttachmentInputKey(k => k + 1)
+  }, [attachmentFiles, captureAttachmentOperation, isAttachmentOperationCurrent])
 
   const openReplacePicker = React.useCallback((att: { id: number; name?: string }) => {
     const origin = captureAttachmentOperation()
@@ -5849,6 +5864,8 @@ React.useEffect(() => {
   const buildItAttachmentPreviewUrl = React.useCallback(async (att: GiiAttachmentViewerItem): Promise<string | null> => {
     const origin = captureAttachmentOperation()
     if (!att || origin.oid == null || !isAttachmentOperationCurrent(origin)) return null
+    const pendingFile = (att as any).__pendingFile
+    if (pendingFile instanceof Blob) return URL.createObjectURL(pendingFile)
     const ct = String(att.contentType || '').toLowerCase()
     const name = String(att.name || '').toLowerCase()
     const hasDerivedPdfPreview = !!String((att as any).previewUrl || '').trim()
@@ -5881,86 +5898,70 @@ React.useEffect(() => {
     return ct.includes('jpeg') || ct.includes('jpg') || ct.includes('png') || /\.(jpe?g|png)$/i.test(name)
   }, [])
 
-  const savePreviewRotation = React.useCallback(async () => {
-    const normalizedRotation = ((Math.round(previewRotationDeg / 90) * 90) % 360 + 360) % 360
-    const origin = captureAttachmentOperation()
-    if (!canRotateAttachments || origin.oid == null || !previewAttachment || normalizedRotation === 0 || !isAttachmentOperationCurrent(origin)) return
-    const selectedAttachment = (Array.isArray(visibleTechnicalAttachments) ? visibleTechnicalAttachments : []).find((a: any) => Number(a?.id) === Number(previewAttachment.id)) || previewAttachment
-    if (!isRotatableAttachment(selectedAttachment)) return
-    try {
-      setAttachmentsUploading(true)
-      setAttachmentsError(null)
-      const preferredUrl = await getAttachmentPreferredUrl(origin)
-      if (!isAttachmentOperationCurrent(origin)) return
-      const blob = await fetchAttachmentBlobForEdit(selectedAttachment, origin.oid, preferredUrl || origin.layerUrl)
-      if (!isAttachmentOperationCurrent(origin)) return
-      const file = await rotateImageAttachmentFile(blob, selectedAttachment.name || `allegato_${selectedAttachment.id}.jpg`, normalizedRotation)
-      if (!isAttachmentOperationCurrent(origin)) return
-      await updateFeatureAttachmentOnFeature(ds as any, origin.oid, Number(selectedAttachment.id), file, preferredUrl)
-      if (!isAttachmentOperationCurrent(origin)) return
-      if (prevBlobRef.current) { try { URL.revokeObjectURL(prevBlobRef.current) } catch {} prevBlobRef.current = null }
-      setPreviewBlobUrl(null)
-      setPreviewLoading(true)
-      setPreviewRotationDeg(0)
-      const refreshedAttachments = await refreshCurrentAttachmentsAfterUpload({ expectedCount: Array.isArray(attachments) ? attachments.length : null, origin })
-      if (!isAttachmentOperationCurrent(origin)) return
-      const refreshedAttachment = (Array.isArray(refreshedAttachments) ? refreshedAttachments : []).find((a: any) => Number(a?.id) === Number(selectedAttachment.id)) || selectedAttachment
-      setPreviewAttachment({
-        id: Number(selectedAttachment.id),
-        name: refreshedAttachment?.name || selectedAttachment.name,
-        contentType: refreshedAttachment?.contentType || file.type || selectedAttachment.contentType
+  const rotatePreviewAttachment = React.useCallback((delta: number) => {
+    if (!canRotateAttachments || !previewAttachment) return
+    const id = Number(previewAttachment.id)
+    if (!Number.isFinite(id)) return
+    setPreviewRotationDeg(prev => {
+      const next = prev + delta
+      const normalized = ((Math.round(next / 90) * 90) % 360 + 360) % 360
+      setPendingAttachmentRotations(current => {
+        const updated = { ...current }
+        if (normalized === 0) delete updated[id]
+        else updated[id] = normalized
+        return updated
       })
-    } catch (e: any) {
-      if (isAttachmentOperationCurrent(origin)) setAttachmentsError(e?.message || String(e))
-    } finally {
-      if (isAttachmentOperationCurrent(origin)) setAttachmentsUploading(false)
-    }
-  }, [visibleTechnicalAttachments, canRotateAttachments, captureAttachmentOperation, isAttachmentOperationCurrent, ds, getAttachmentPreferredUrl, isRotatableAttachment, previewAttachment, previewRotationDeg, refreshCurrentAttachmentsAfterUpload, attachments])
+      return next
+    })
+  }, [canRotateAttachments, previewAttachment])
 
-  const confirmAttachmentAction = React.useCallback(async () => {
+  const confirmAttachmentAction = React.useCallback(() => {
     const action = attachmentConfirm
-    const origin = captureAttachmentOperation()
-    if (!action || origin.oid == null || !isAttachmentOperationCurrent(origin)) return
-    try {
-      setAttachmentsUploading(true)
-      setAttachmentsError(null)
-      const preferredUrl = await getAttachmentPreferredUrl(origin)
-      if (!isAttachmentOperationCurrent(origin)) return
-      if (action.type === 'delete') {
-        const id = Number(action.attachment?.id)
-        if (Number.isFinite(id) && id > 0) {
-          const optimistic = (Array.isArray(attachments) ? attachments : []).filter((a: any) => Number(a?.id) !== id)
-          await deleteFeatureAttachmentsFromFeature(ds as any, origin.oid, [id], preferredUrl)
-          if (!isAttachmentOperationCurrent(origin)) return
-          setAttachments(optimistic)
-          await refreshCurrentAttachmentsAfterUpload({ optimistic, expectedCount: optimistic.length, origin })
-        }
-      } else if (action.type === 'replace' && action.file) {
-        const id = Number(action.attachment?.id)
-        if (Number.isFinite(id) && id > 0) {
-          await updateFeatureAttachmentOnFeature(ds as any, origin.oid, id, action.file, preferredUrl)
-          if (!isAttachmentOperationCurrent(origin)) return
-          const optimistic = (Array.isArray(attachments) ? attachments : []).map((a: any) => (
-            Number(a?.id) === id
-              ? { ...a, name: action.file?.name || a?.name, size: action.file?.size || a?.size, contentType: action.file?.type || a?.contentType }
-              : a
-          ))
-          setAttachments(optimistic)
-          setPreviewAttachment(null)
-          await refreshCurrentAttachmentsAfterUpload({ optimistic, expectedCount: optimistic.length, origin })
-        }
+    if (!action) return
+    const id = Number(action.attachment?.id)
+    if (!Number.isFinite(id)) return
+    setAttachmentsError(null)
+
+    if (action.type === 'delete') {
+      const currentItem = (Array.isArray(attachments) ? attachments : []).find((a: any) => Number(a?.id) === id) as any
+      if (id < 0) {
+        const pendingFile = currentItem?.__pendingFile
+        if (pendingFile) setAttachmentFiles(prev => prev.filter(file => file !== pendingFile))
+      } else {
+        const originalName = String(pendingReplaceAttachmentOriginalNames[id] || action.attachment?.name || currentItem?.name || `Allegato ${id}`).trim()
+        setPendingDeleteAttachmentIds(prev => Array.from(new Set([...prev, id])))
+        setPendingDeleteAttachmentNames(prev => ({ ...prev, [id]: originalName }))
       }
-    } catch (e: any) {
-      if (isAttachmentOperationCurrent(origin)) setAttachmentsError(e?.message || String(e))
-    } finally {
-      if (isAttachmentOperationCurrent(origin)) {
-        setAttachmentConfirm(null)
-        setReplaceTargetAttachment(null)
-        setReplaceInputKey(k => k + 1)
-        setAttachmentsUploading(false)
+      setPendingReplaceAttachments(prev => { const next = { ...prev }; delete next[id]; return next })
+      setPendingReplaceAttachmentOriginalNames(prev => { const next = { ...prev }; delete next[id]; return next })
+      setPendingAttachmentRotations(prev => { const next = { ...prev }; delete next[id]; return next })
+      setAttachments(prev => (Array.isArray(prev) ? prev : []).filter((a: any) => Number(a?.id) !== id))
+      if (Number(previewAttachment?.id) === id) { setPreviewAttachment(null); setPreviewRotationDeg(0) }
+    } else if (action.type === 'replace' && action.file) {
+      const file = action.file
+      if (id < 0) {
+        const currentItem = (Array.isArray(attachments) ? attachments : []).find((a: any) => Number(a?.id) === id) as any
+        const oldPendingFile = currentItem?.__pendingFile
+        setAttachmentFiles(prev => prev.map(existing => existing === oldPendingFile ? file : existing))
+      } else {
+        const originalName = String(action.attachment?.name || '').trim()
+        setPendingReplaceAttachments(prev => ({ ...prev, [id]: file }))
+        setPendingReplaceAttachmentOriginalNames(prev => prev[id] ? prev : ({ ...prev, [id]: originalName || `Allegato ${id}` }))
+      }
+      setPendingAttachmentRotations(prev => { const next = { ...prev }; delete next[id]; return next })
+      setAttachments(prev => (Array.isArray(prev) ? prev : []).map((a: any) => Number(a?.id) === id
+        ? { ...a, name: file.name || a?.name, size: file.size || a?.size, contentType: file.type || a?.contentType, __pendingFile: file, __pendingReplace: id > 0 }
+        : a))
+      if (Number(previewAttachment?.id) === id) {
+        setPreviewAttachment({ id, name: file.name, contentType: file.type || previewAttachment?.contentType })
+        setPreviewRotationDeg(0)
       }
     }
-  }, [attachmentConfirm, captureAttachmentOperation, isAttachmentOperationCurrent, ds, attachments, refreshCurrentAttachmentsAfterUpload, getAttachmentPreferredUrl])
+
+    setAttachmentConfirm(null)
+    setReplaceTargetAttachment(null)
+    setReplaceInputKey(k => k + 1)
+  }, [attachmentConfirm, attachments, previewAttachment, pendingReplaceAttachmentOriginalNames])
 
   const cancelAttachmentAction = React.useCallback(() => {
     setAttachmentConfirm(null)
@@ -6152,6 +6153,10 @@ React.useEffect(() => {
   const isSubstantiveField = React.useCallback((fieldName: string): boolean => {
     const k = String(fieldName || '').trim().toLowerCase()
     if (!k) return false
+    // norma_violata3 e' il contenitore tecnico aggregato delle violazioni Art. 8, 12, 27-37 e 39.
+    // Le variazioni effettive sono gia' tracciate dai singoli flag v_artXX: mantenerlo
+    // nell'audit produrrebbe un duplicato nel riepilogo "Campi modificati".
+    if (k === 'norma_violata3') return false
     if (k === 'objectid' || k === 'globalid') return false
     if (k === 'creationdate' || k === 'creator' || k === 'editdate' || k === 'editor') return false
     if (k === 'origine_pratica' || k === 'utente_loggato' || k === 'area_cod' || k === 'settore_cod' || k === 'req_point') return false
@@ -6249,6 +6254,73 @@ React.useEffect(() => {
   const sqlQuote = React.useCallback((v: any): string => `'${String(v ?? '').replace(/'/g, "''")}'`, [])
 
   const AUDIT_MAP_POINT_FIELD = 'coordinate_punto_mappa'
+  const AUDIT_ATTACHMENTS_KEY = 'gii_allegati_modificati'
+  type AttachmentAuditAction = 'AGGIUNTO' | 'ELIMINATO' | 'SOSTITUITO'
+  type AttachmentAuditEntry = {
+    action: AttachmentAuditAction
+    name: string
+    previousName?: string
+    attachmentId?: number
+  }
+
+  const parseAttachmentAuditEntries = React.useCallback((raw: any): AttachmentAuditEntry[] => {
+    if (!raw) return []
+    let parsed: any = raw
+    if (typeof raw === 'string') {
+      try { parsed = JSON.parse(raw) } catch { return [] }
+    }
+    if (!Array.isArray(parsed)) return []
+    return parsed.map((item: any) => {
+      const action = String(item?.action || '').trim().toUpperCase() as AttachmentAuditAction
+      const name = String(item?.name || '').trim()
+      const previousName = String(item?.previousName || '').trim()
+      const attachmentIdNum = Number(item?.attachmentId)
+      if (!['AGGIUNTO', 'ELIMINATO', 'SOSTITUITO'].includes(action) || !name) return null
+      return {
+        action,
+        name,
+        ...(previousName ? { previousName } : {}),
+        ...(Number.isFinite(attachmentIdNum) && attachmentIdNum > 0 ? { attachmentId: attachmentIdNum } : {})
+      } as AttachmentAuditEntry
+    }).filter(Boolean) as AttachmentAuditEntry[]
+  }, [])
+
+  const mergeAttachmentAuditEntries = React.useCallback((base: AttachmentAuditEntry[], delta: AttachmentAuditEntry[]): AttachmentAuditEntry[] => {
+    const out: AttachmentAuditEntry[] = Array.isArray(base) ? base.map(item => ({ ...item })) : []
+    const findById = (id?: number) => Number.isFinite(Number(id)) && Number(id) > 0 ? out.findIndex(item => Number(item.attachmentId) === Number(id)) : -1
+    const findAddedByName = (name: string) => out.findIndex(item => item.action === 'AGGIUNTO' && String(item.name || '').trim() === String(name || '').trim())
+    for (const op of (Array.isArray(delta) ? delta : [])) {
+      if (!op?.name) continue
+      const byId = findById(op.attachmentId)
+      if (op.action === 'ELIMINATO') {
+        const addedIdx = byId >= 0 && out[byId]?.action === 'AGGIUNTO' ? byId : findAddedByName(op.name)
+        if (addedIdx >= 0) {
+          // Aggiunto e poi eliminato nello stesso ciclo: nessuna modifica documentale netta.
+          out.splice(addedIdx, 1)
+          continue
+        }
+        if (byId >= 0) out.splice(byId, 1)
+        out.push({ ...op })
+        continue
+      }
+      if (op.action === 'SOSTITUITO') {
+        if (byId >= 0) {
+          const previous = out[byId]
+          if (previous.action === 'AGGIUNTO') {
+            out[byId] = { ...previous, name: op.name, attachmentId: op.attachmentId || previous.attachmentId }
+          } else {
+            out[byId] = { ...op, previousName: previous.previousName || op.previousName || previous.name }
+          }
+        } else {
+          out.push({ ...op })
+        }
+        continue
+      }
+      if (byId >= 0) out[byId] = { ...op }
+      else out.push({ ...op })
+    }
+    return out
+  }, [])
 
   const formatAuditMapPoint = React.useCallback((pt: any): string => {
     if (!pt) return ''
@@ -6266,8 +6338,17 @@ React.useEffect(() => {
   }, [formatAuditMapPoint])
 
   const buildDeltaMaps = React.useCallback((prevAttrs: Record<string, any>, nextAttrs: Record<string, any>) => {
+    const art30Active = (() => {
+      const flag = nextAttrs?.v_art30
+      if (flag === 1 || flag === true || flag === '1' || String(flag ?? '').trim().toLowerCase() === 'true') return true
+      return parseNorma3Codes(nextAttrs?.norma_violata3).includes('Art30')
+    })()
     const fields = Array.from(new Set([...Object.keys(prevAttrs || {}), ...Object.keys(nextAttrs || {})]))
       .filter((k) => isSubstantiveField(k))
+      // Se Art. 30 non e' pertinente, l'eventuale passaggio dei campi attrezzature_*
+      // da vecchi valori residui a null e' una bonifica automatica, non una modifica
+      // dell'operatore. La modifica sostanziale resta il flag v_art30.
+      .filter((k) => art30Active || !String(k || '').trim().toLowerCase().startsWith('attrezzature_'))
     const oldMap: Record<string, any> = {}
     const newMap: Record<string, any> = {}
     for (const field of fields) {
@@ -6360,7 +6441,7 @@ React.useEffect(() => {
     }
   }, [getLogLayer, parentGlobalIdWhereForLog, sqlQuote])
 
-  const upsertCurrentRoleCycleAudit = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>) => {
+  const upsertCurrentRoleCycleAudit = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>, attachmentAuditDelta: AttachmentAuditEntry[] = []) => {
     const roleForLog = getAuditRole()
     if (!roleForLog) return 0
     const parentGlobalId = String(currentGlobalId || p.initialData?.GlobalID || p.initialData?.globalid || p.initialData?.GLOBALID || '')
@@ -6369,7 +6450,8 @@ React.useEffect(() => {
       return 0
     }
     const delta = buildDeltaMaps(prevAttrs, nextAttrs)
-    if (Object.keys(delta.oldMap).length === 0) return 0
+    const hasAttachmentAuditDelta = Array.isArray(attachmentAuditDelta) && attachmentAuditDelta.length > 0
+    if (Object.keys(delta.oldMap).length === 0 && !hasAttachmentAuditDelta) return 0
     const logLayer = await getLogLayer()
     if (!logLayer?.applyEdits) return 0
     const giiCtx = currentUserContext
@@ -6416,7 +6498,30 @@ React.useEffect(() => {
     const attrs = openFeature.attributes || {}
     const existingOld = parseJsonObject(attrs.valori_prima_json)
     const existingNew = parseJsonObject(attrs.valori_dopo_json)
+    const existingAttachmentAudit = parseAttachmentAuditEntries(existingNew[AUDIT_ATTACHMENTS_KEY])
+    delete existingOld[AUDIT_ATTACHMENTS_KEY]
+    delete existingNew[AUDIT_ATTACHMENTS_KEY]
+    // Ripulisce anche un ciclo gia' aperto con dati registrati dalle versioni precedenti:
+    // norma_violata3 e' un duplicato tecnico dei v_artXX; i campi attrezzature_* non sono
+    // modifiche dell'operatore quando Art. 30 non e' pertinente.
+    delete existingOld.norma_violata3
+    delete existingNew.norma_violata3
+    const art30ActiveForAudit = (() => {
+      const flag = nextAttrs?.v_art30
+      if (flag === 1 || flag === true || flag === '1' || String(flag ?? '').trim().toLowerCase() === 'true') return true
+      return parseNorma3Codes(nextAttrs?.norma_violata3).includes('Art30')
+    })()
+    if (!art30ActiveForAudit) {
+      for (const key of Array.from(new Set([...Object.keys(existingOld), ...Object.keys(existingNew)]))) {
+        if (!String(key || '').trim().toLowerCase().startsWith('attrezzature_')) continue
+        delete existingOld[key]
+        delete existingNew[key]
+      }
+    }
     const merged = mergeCycleMaps(existingOld, existingNew, delta.oldMap, delta.newMap)
+    const mergedAttachmentAudit = mergeAttachmentAuditEntries(existingAttachmentAudit, attachmentAuditDelta)
+    const valoriDopoConAllegati: Record<string, any> = { ...merged.newMap }
+    if (mergedAttachmentAudit.length > 0) valoriDopoConAllegati[AUDIT_ATTACHMENTS_KEY] = JSON.stringify(mergedAttachmentAudit)
     const num = merged.fields.length
     const updAttrs = filterAttrsForLayer({
       [String(logLayer.objectIdField || 'OBJECTID')]: getLogObjectIdValue(attrs, logLayer),
@@ -6426,8 +6531,8 @@ React.useEffect(() => {
       session_id: sessionId,
       num_campi_modificati: num,
       campi_modificati: merged.fields.join(', '),
-      valori_prima_json: num > 0 ? JSON.stringify(merged.oldMap) : '',
-      valori_dopo_json: num > 0 ? JSON.stringify(merged.newMap) : ''
+      valori_prima_json: Object.keys(merged.oldMap).length > 0 ? JSON.stringify(merged.oldMap) : '',
+      valori_dopo_json: Object.keys(valoriDopoConAllegati).length > 0 ? JSON.stringify(valoriDopoConAllegati) : ''
     }, logLayer)
     try {
       const updRes = await logLayer.applyEdits({ updateFeatures: [{ attributes: updAttrs }] })
@@ -6439,18 +6544,121 @@ React.useEffect(() => {
       console.warn('[GII_LOG_EVENTI_CICLI] Errore aggiornamento audit ciclo:', e)
       return 0
     }
-  }, [buildDeltaMaps, currentGlobalId, editOid, findOpenRoleCycle, getAuditRole, getLogLayer, getLogObjectIdValue, getNextRoleCycleNumber, mergeCycleMaps, p.initialData, parseJsonObject, currentUserContextKey])
+  }, [buildDeltaMaps, currentGlobalId, editOid, findOpenRoleCycle, getAuditRole, getLogLayer, getLogObjectIdValue, getNextRoleCycleNumber, mergeCycleMaps, mergeAttachmentAuditEntries, p.initialData, parseAttachmentAuditEntries, parseJsonObject, currentUserContextKey])
 
-  const processAttachmentChanges = React.useCallback(async (_oid: number, _preferredUrl?: string | null) => {
-    // Gli allegati vengono gestiti immediatamente (allega/sostituisci/elimina), non al Salva della pratica.
+  const processAttachmentChanges = React.useCallback(async (_oid: number, _preferredUrl?: string | null): Promise<AttachmentAuditEntry[]> => {
+    const oid = Number(_oid)
+    if (!Number.isFinite(oid) || oid <= 0) return []
+    const origin = captureAttachmentOperation()
+    if (!isAttachmentOperationCurrent(origin)) throw new Error('Il contesto della pratica è cambiato durante il salvataggio degli allegati.')
+    const preferredUrl = await getAttachmentPreferredUrl(origin)
+    if (!isAttachmentOperationCurrent(origin)) throw new Error('Il contesto della pratica è cambiato durante il salvataggio degli allegati.')
+
+    const normalizeRotation = (value: any) => ((Math.round(Number(value || 0) / 90) * 90) % 360 + 360) % 360
+    const deleteIds: number[] = Array.from(new Set<number>((pendingDeleteAttachmentIds || []).map(Number).filter(id => Number.isFinite(id) && id > 0)))
+    const deleteSet = new Set(deleteIds)
+    const persistedIdsBefore = new Set<number>((Array.isArray(attachments) ? attachments : [])
+      .map((a: any) => Number(a?.id))
+      .filter((id: number) => Number.isFinite(id) && id > 0))
+    const auditEntries: AttachmentAuditEntry[] = []
+    for (const id of deleteIds) {
+      auditEntries.push({
+        action: 'ELIMINATO',
+        name: String(pendingDeleteAttachmentNames[id] || pendingReplaceAttachmentOriginalNames[id] || `Allegato ${id}`).trim(),
+        attachmentId: id
+      })
+    }
+    for (const [rawId, replacementValue] of Object.entries(pendingReplaceAttachments || {})) {
+      const id = Number(rawId)
+      const replacementFile = replacementValue as File
+      if (!Number.isFinite(id) || id <= 0 || deleteSet.has(id) || !(replacementFile instanceof Blob)) continue
+      auditEntries.push({
+        action: 'SOSTITUITO',
+        name: String(replacementFile.name || `Allegato ${id}`).trim(),
+        previousName: String(pendingReplaceAttachmentOriginalNames[id] || '').trim() || undefined,
+        attachmentId: id
+      })
+    }
+
+    if (deleteIds.length > 0) {
+      await deleteFeatureAttachmentsFromFeature(ds as any, oid, deleteIds, preferredUrl)
+      if (!isAttachmentOperationCurrent(origin)) throw new Error('Il contesto della pratica è cambiato durante il salvataggio degli allegati.')
+    }
+
+    for (const [rawId, replacementValue] of Object.entries(pendingReplaceAttachments || {})) {
+      const id = Number(rawId)
+      const replacementFile = replacementValue as File
+      if (!Number.isFinite(id) || id <= 0 || deleteSet.has(id) || !(replacementFile instanceof Blob)) continue
+      const rotation = normalizeRotation(pendingAttachmentRotations[id])
+      const finalFile = rotation !== 0
+        ? await rotateImageAttachmentFile(replacementFile, replacementFile.name || `allegato_${id}.jpg`, rotation)
+        : replacementFile
+      await updateFeatureAttachmentOnFeature(ds as any, oid, id, finalFile, preferredUrl)
+      if (!isAttachmentOperationCurrent(origin)) throw new Error('Il contesto della pratica è cambiato durante il salvataggio degli allegati.')
+    }
+
+    for (const [rawId, rawRotation] of Object.entries(pendingAttachmentRotations || {})) {
+      const id = Number(rawId)
+      const rotation = normalizeRotation(rawRotation)
+      if (!Number.isFinite(id) || id <= 0 || rotation === 0 || deleteSet.has(id) || pendingReplaceAttachments[id]) continue
+      const att = (Array.isArray(attachments) ? attachments : []).find((a: any) => Number(a?.id) === id)
+      if (!att) continue
+      const blob = await fetchAttachmentBlobForEdit(att, oid, preferredUrl)
+      if (!isAttachmentOperationCurrent(origin)) throw new Error('Il contesto della pratica è cambiato durante il salvataggio degli allegati.')
+      const file = await rotateImageAttachmentFile(blob, att.name || `allegato_${id}.jpg`, rotation)
+      await updateFeatureAttachmentOnFeature(ds as any, oid, id, file, preferredUrl)
+      if (!isAttachmentOperationCurrent(origin)) throw new Error('Il contesto della pratica è cambiato durante il salvataggio degli allegati.')
+    }
+
+    const pendingFilesToUpload: File[] = []
+    for (const file of attachmentFiles || []) {
+      const localItem = (Array.isArray(attachments) ? attachments : []).find((a: any) => a?.__pendingUpload && a?.__pendingFile === file) as any
+      const localId = Number(localItem?.id)
+      const rotation = Number.isFinite(localId) ? normalizeRotation(pendingAttachmentRotations[localId]) : 0
+      pendingFilesToUpload.push(rotation !== 0
+        ? await rotateImageAttachmentFile(file, file.name || 'allegato.jpg', rotation)
+        : file)
+    }
+    if (pendingFilesToUpload.length > 0) {
+      await uploadFilesToFeatureAttachments(ds as any, oid, pendingFilesToUpload, preferredUrl)
+      if (!isAttachmentOperationCurrent(origin)) throw new Error('Il contesto della pratica è cambiato durante il salvataggio degli allegati.')
+    }
+
+    const refreshedAttachments = await refreshCurrentAttachmentsAfterUpload({ origin, expectedCount: Array.isArray(attachments) ? attachments.length : null })
+    const usedNewIds = new Set<number>()
+    for (const file of attachmentFiles || []) {
+      const match = (Array.isArray(refreshedAttachments) ? refreshedAttachments : []).find((a: any) => {
+        const id = Number(a?.id)
+        if (!Number.isFinite(id) || id <= 0 || persistedIdsBefore.has(id) || usedNewIds.has(id)) return false
+        const sameName = String(a?.name || '').trim() === String(file?.name || '').trim()
+        const size = Number(a?.size)
+        const sameSize = !Number.isFinite(size) || !Number.isFinite(Number(file?.size)) || size === Number(file.size)
+        return sameName && sameSize
+      }) as any
+      const newId = Number(match?.id)
+      if (Number.isFinite(newId) && newId > 0) usedNewIds.add(newId)
+      auditEntries.push({
+        action: 'AGGIUNTO',
+        name: String(file?.name || 'Allegato').trim(),
+        ...(Number.isFinite(newId) && newId > 0 ? { attachmentId: newId } : {})
+      })
+    }
+
     setAttachmentFiles([])
     setAttachmentInputKey(k => k + 1)
     setPendingDeleteAttachmentIds([])
+    setPendingDeleteAttachmentNames({})
     setPendingReplaceAttachments({})
+    setPendingReplaceAttachmentOriginalNames({})
+    setPendingAttachmentRotations({})
+    pendingAttachmentTempIdRef.current = -1
     setAttachmentConfirm(null)
     setReplaceTargetAttachment(null)
     setReplaceInputKey(k => k + 1)
-  }, [])
+    setPreviewAttachment(null)
+    setPreviewRotationDeg(0)
+    return auditEntries
+  }, [attachmentFiles, attachments, pendingDeleteAttachmentIds, pendingDeleteAttachmentNames, pendingReplaceAttachments, pendingReplaceAttachmentOriginalNames, pendingAttachmentRotations, captureAttachmentOperation, getAttachmentPreferredUrl, isAttachmentOperationCurrent, ds, refreshCurrentAttachmentsAfterUpload])
 
   const performCancel = () => {
     setDraft({ ...baselineDraft })
@@ -6464,11 +6672,18 @@ React.useEffect(() => {
     setAttachmentFiles([])
     setAttachmentInputKey(k => k + 1)
     setPendingDeleteAttachmentIds([])
+    setPendingDeleteAttachmentNames({})
     setPendingReplaceAttachments({})
+    setPendingReplaceAttachmentOriginalNames({})
+    setPendingAttachmentRotations({})
+    pendingAttachmentTempIdRef.current = -1
     setAttachmentConfirm(null)
     setReplaceTargetAttachment(null)
     setReplaceInputKey(k => k + 1)
+    setPreviewAttachment(null)
+    setPreviewRotationDeg(0)
     setAttachmentsError(null)
+    if (mode === 'edit' && currentOid != null) void loadCurrentAttachments()
     setMsg(null)
     p.onClearPoint()
   }
@@ -6684,6 +6899,7 @@ React.useEffect(() => {
       const currentGiiUserDisplayName = mode === 'create' ? getCurrentGiiUserDisplayName(giiCtx.username) : ''
       const initialAreaLabel = normalizeAreaCode(p.initialData?.area_cod ?? p.initialData?.['Area (codice)'] ?? p.initialData?.AREA_COD)
       const initialSettoreLabel = normalizeSettoreCode(initialAreaLabel || roleAreaLabel, p.initialData?.settore_cod ?? p.initialData?.['Settore (codice)'] ?? p.initialData?.SETTORE_COD)
+      const art30SelectedForSave = parseNorma3Codes(g('norma_violata3')).includes('Art30')
       const attrs: Record<string, any> = {
         start: mode === 'create' ? (createStartTs || nowTs) : (p.initialData?.start ?? p.initialData?.Start ?? p.initialData?.START ?? null),
         end: mode === 'create' ? nowTs : (p.initialData?.end ?? p.initialData?.End ?? p.initialData?.END ?? null),
@@ -6773,12 +6989,14 @@ React.useEffect(() => {
         matricola_contatore: g('matricola_contatore') || null,
         matricola_tessera: g('matricola_tessera') || null,
         // Art. 30 — snapshot del rimborso attrezzature selezionato dall'IT AGR/TEC.
+        // Questi campi hanno significato solo quando Art. 30 e' effettivamente selezionato:
+        // null = non pertinente; 0/1 per la cauzione = pertinente e assente/presente.
         // Il rimborso spese per manodopera/mezzi/materiali resta invece nella Nota spese.
-        attrezzature_risarcimento_dettaglio: g('attrezzature_risarcimento_dettaglio') || null,
-        attrezzature_risarcimento_importo: String(g('attrezzature_risarcimento_importo') || '').trim() ? Number(g('attrezzature_risarcimento_importo')) : null,
-        attrezzature_cauzione_presente: isSelectedFlag(g('attrezzature_cauzione_presente')) ? 1 : 0,
-        attrezzature_cauzione_decurtata: String(g('attrezzature_cauzione_decurtata') || '').trim() ? Number(g('attrezzature_cauzione_decurtata')) : null,
-        attrezzature_importo_netto: String(g('attrezzature_importo_netto') || '').trim() ? Number(g('attrezzature_importo_netto')) : null
+        attrezzature_risarcimento_dettaglio: art30SelectedForSave ? (g('attrezzature_risarcimento_dettaglio') || null) : null,
+        attrezzature_risarcimento_importo: art30SelectedForSave && String(g('attrezzature_risarcimento_importo') || '').trim() ? Number(g('attrezzature_risarcimento_importo')) : null,
+        attrezzature_cauzione_presente: art30SelectedForSave ? (isSelectedFlag(g('attrezzature_cauzione_presente')) ? 1 : 0) : null,
+        attrezzature_cauzione_decurtata: art30SelectedForSave && String(g('attrezzature_cauzione_decurtata') || '').trim() ? Number(g('attrezzature_cauzione_decurtata')) : null,
+        attrezzature_importo_netto: art30SelectedForSave && String(g('attrezzature_importo_netto') || '').trim() ? Number(g('attrezzature_importo_netto')) : null
       }
 
       const cleanAttrsAll = filterAttrsForLayer(attrs, layer)
@@ -6802,7 +7020,7 @@ React.useEffect(() => {
           }
         }
         const changedFields = Object.keys(cleanAttrs).filter((k) => normalizeLogValue(prevAttrs?.[k]) !== normalizeLogValue(cleanAttrs[k]))
-        const hasAttachmentOps = !isRitAgrTecLimitedEdit && (attachmentFiles.length > 0 || pendingDeleteAttachmentIds.length > 0 || Object.keys(pendingReplaceAttachments).length > 0)
+        const hasAttachmentOps = !isRitAgrTecLimitedEdit && (attachmentFiles.length > 0 || pendingDeleteAttachmentIds.length > 0 || Object.keys(pendingReplaceAttachments).length > 0 || Object.keys(pendingAttachmentRotations).length > 0)
         const hasNoteSpeseOps = !isRitAgrTecLimitedEdit && noteSpeseDraftDirty
         if (changedFields.length === 0 && !geom && !hasAttachmentOps && !hasNoteSpeseOps) {
           setSaving(false)
@@ -6811,8 +7029,9 @@ React.useEffect(() => {
         }
         if (changedFields.length === 0 && !geom) {
           if (!isGiiPracticeContextStampCurrent(saveContextStamp)) { setSaving(false); return }
+          let attachmentAuditEntries: AttachmentAuditEntry[] = []
           if (hasAttachmentOps) {
-            await processAttachmentChanges(editOid, String(layer?.url || currentLayerUrl || ''))
+            attachmentAuditEntries = await processAttachmentChanges(editOid, String(layer?.url || currentLayerUrl || ''))
           }
           if (hasNoteSpeseOps && currentGlobalId && noteSpeseMissing.length === 0) {
             await syncNotaSpeseDraftToTable(noteSpeseCfg.detailUrlWrite, currentGlobalId, noteSpeseRowsBaseline, noteSpeseRowsDraft)
@@ -6834,7 +7053,11 @@ React.useEffect(() => {
             setNoteSpeseFormDirtyByCategory({ AT: false, PR: false, RU: false, SL: false, PF: false, RA: false })
             setNoteSpeseManagerResetKey(k => k + 1)
           }
+          await upsertCurrentRoleCycleAudit(prevAttrs, prevAttrs, attachmentAuditEntries)
           if (!isGiiPracticeContextStampCurrent(saveContextStamp)) { setSaving(false); return }
+          if (hasAttachmentOps) {
+            try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: editOid, layerUrl: String(layer?.url || currentLayerUrl || '') } })) } catch {}
+          }
           setBaselineDraft(draftFromRecord(p.initialData || {}))
           setDraft(draftFromRecord(p.initialData || {}))
           setMsg({ kind: 'ok', text: hasAttachmentOps && !hasNoteSpeseOps ? 'Allegati salvati.' : 'Pratica salvata.' })
@@ -6853,8 +7076,9 @@ React.useEffect(() => {
         if (!ok) throw new Error(err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res))
 
         const nextSavedData = { ...(p.initialData || {}), ...cleanAttrs, [editIdFieldName]: editOid }
+        let attachmentAuditEntries: AttachmentAuditEntry[] = []
         if (hasAttachmentOps) {
-          await processAttachmentChanges(editOid, String(layer?.url || currentLayerUrl || ''))
+          attachmentAuditEntries = await processAttachmentChanges(editOid, String(layer?.url || currentLayerUrl || ''))
         }
         if (noteSpeseDraftDirty && currentGlobalId && noteSpeseMissing.length === 0) {
           await syncNotaSpeseDraftToTable(noteSpeseCfg.detailUrlWrite, currentGlobalId, noteSpeseRowsBaseline, noteSpeseRowsDraft)
@@ -6881,7 +7105,7 @@ React.useEffect(() => {
         const auditNextAttrs = mapPointAuditDelta
           ? { ...prevAttrs, ...cleanAttrs, [AUDIT_MAP_POINT_FIELD]: mapPointAuditDelta.after }
           : { ...prevAttrs, ...cleanAttrs }
-        await upsertCurrentRoleCycleAudit(auditPrevAttrs, auditNextAttrs)
+        await upsertCurrentRoleCycleAudit(auditPrevAttrs, auditNextAttrs, attachmentAuditEntries)
         if (!isGiiPracticeContextStampCurrent(saveContextStamp)) { setSaving(false); return }
         const nextLayerUrl = ensureLayerIndex(normalizeFeatureLayerUrl(layer?.url) || normalizeFeatureLayerUrl(readDynamicSelection().layerUrl), layer)
         writeSelectedFeatureCache(nextLayerUrl, editOid, editIdFieldName, nextSavedData, 'edit')
@@ -7364,12 +7588,17 @@ ${e?.message || String(e)}`
   }, [cfg])
 
 
+  const legacyMaskInnerPadding = numCfg('maskInnerPadding', 12, 0, 80)
   const formStyle = React.useMemo(() => ({
     maskBg: modernColor((cfg as any).maskBg, '#eef4fb', ['#ffffff']),
     maskBorderColor: modernColor((cfg as any).maskBorderColor, '#cbd8e6', ['#e5e7eb']),
     maskBorderWidth: numCfg('maskBorderWidth', 1, 0, 8),
     maskBorderRadius: numCfg('maskBorderRadius', 10, 0, 40),
-    maskInnerPadding: numCfg('maskInnerPadding', 12, 0, 40),
+    maskInnerPadding: legacyMaskInnerPadding,
+    maskInnerPaddingTop: numCfg('maskInnerPaddingTop', legacyMaskInnerPadding, 0, 80),
+    maskInnerPaddingRight: numCfg('maskInnerPaddingRight', legacyMaskInnerPadding, 0, 80),
+    maskInnerPaddingBottom: numCfg('maskInnerPaddingBottom', legacyMaskInnerPadding, 0, 80),
+    maskInnerPaddingLeft: numCfg('maskInnerPaddingLeft', legacyMaskInnerPadding, 0, 80),
     labelColor: modernColor((cfg as any).formLabelColor, _defaultFormStyle.labelColor, ['#6b7280']),
     labelFontSize: numCfg('formLabelFontSize', _defaultFormStyle.labelFontSize, 8, 24),
     labelFontWeight: numCfg('formLabelFontWeight', _defaultFormStyle.labelFontWeight, 300, 900),
@@ -7432,34 +7661,45 @@ ${e?.message || String(e)}`
     return Math.max(min, Math.min(max, n))
   }, [])
 
-  const anteprimaPadding = React.useMemo(() => {
-    const outer = safePx((cfg as any).maskOuterOffset, 0, 0, 80)
-    return {
-      top: safePx((cfg as any).anteprimaPdfPaddingTop, 0, 0, 80),
-      x: safePx((cfg as any).anteprimaPdfPaddingX, 0, 0, 80),
-      bottom: safePx((cfg as any).anteprimaPdfPaddingBottom, 0, 0, 80),
-      bottomRadius: safePx((cfg as any).anteprimaPdfBottomRadius, 10, 0, 40),
-      outer
-    }
-  }, [cfg, safePx])
+  const anteprimaPadding = React.useMemo(() => ({
+    top: safePx((cfg as any).anteprimaPdfPaddingTop, 0, 0, 80),
+    x: safePx((cfg as any).anteprimaPdfPaddingX, 0, 0, 80),
+    bottom: safePx((cfg as any).anteprimaPdfPaddingBottom, 0, 0, 80),
+    bottomRadius: safePx((cfg as any).anteprimaPdfBottomRadius, 10, 0, 40)
+  }), [cfg, safePx])
+
+  const tabPadding = React.useMemo(() => ({
+    top: safePx((cfg as any).tabPaddingTop, (defaultConfig as any).tabPaddingTop ?? 12, 0, 80),
+    right: safePx((cfg as any).tabPaddingRight, (defaultConfig as any).tabPaddingRight ?? 2, 0, 80),
+    bottom: safePx((cfg as any).tabPaddingBottom, (defaultConfig as any).tabPaddingBottom ?? 2, 0, 80),
+    left: safePx((cfg as any).tabPaddingLeft, (defaultConfig as any).tabPaddingLeft ?? 2, 0, 80)
+  }), [cfg, safePx])
 
   const tabContentStyle: React.CSSProperties = React.useMemo(() => {
     const base: React.CSSProperties = {
       flex: '1 1 auto',
-      minHeight: 0
+      minHeight: 0,
+      boxSizing: 'border-box',
+      paddingTop: tabPadding.top,
+      paddingRight: tabPadding.right,
+      paddingBottom: tabPadding.bottom,
+      paddingLeft: tabPadding.left
     }
 
     if (npTab === 'anteprima' && mode === 'edit' && currentOid != null) {
       return {
         ...base,
         overflow: 'hidden',
-        padding: 0,
-        marginTop: anteprimaPadding.top,
-        marginLeft: anteprimaPadding.x - anteprimaPadding.outer,
-        marginRight: anteprimaPadding.x - anteprimaPadding.outer,
-        marginBottom: anteprimaPadding.bottom - anteprimaPadding.outer,
         borderBottomLeftRadius: anteprimaPadding.bottomRadius,
         borderBottomRightRadius: anteprimaPadding.bottomRadius
+      }
+    }
+
+    if (npTab === 'allegati' && mode === 'edit' && currentOid != null) {
+      return {
+        ...base,
+        overflow: 'hidden',
+        scrollbarGutter: 'auto'
       }
     }
 
@@ -7467,10 +7707,9 @@ ${e?.message || String(e)}`
       ...base,
       overflowY: 'auto',
       overflowX: 'hidden',
-      scrollbarGutter: 'stable',
-      padding: '12px 2px 2px 2px'
+      scrollbarGutter: 'auto'
     }
-  }, [npTab, anteprimaPadding, mode, currentOid])
+  }, [npTab, anteprimaPadding.bottomRadius, mode, currentOid, tabPadding])
 
   // ── Layout engine ──────────────────────────────────────────────────
   type FldR = { el: React.ReactNode; label: React.ReactNode; hint?: string }
@@ -7650,8 +7889,6 @@ ${e?.message || String(e)}`
   const editCardHeaderStyle: React.CSSProperties = {
     background: formStyle.cardHeaderBg,
     color: formStyle.cardHeaderColor,
-    borderTopLeftRadius: formStyle.cardBorderRadius,
-    borderTopRightRadius: formStyle.cardBorderRadius,
     padding: `${formStyle.cardHeaderPaddingY}px ${formStyle.cardHeaderPaddingX}px`,
     fontSize: formStyle.cardHeaderFontSize,
     fontWeight: formStyle.cardHeaderFontWeight as any,
@@ -8665,7 +8902,7 @@ ${e?.message || String(e)}`
   // Pareggia lo spazio sotto la riga titolo/pulsanti (padding-bottom toolbar + suo border-bottom 1px)
   // con quello sopra (border + padding del contenitore esterno), così il blocco non risulta
   // visivamente più vicino al bordo superiore della card che a quello inferiore.
-  const toolbarBottomPad = Math.max(0, Number(formStyle.maskBorderWidth || 0) + Number(formStyle.maskInnerPadding || 0) - 1)
+  const toolbarBottomPad = Math.max(0, Number(formStyle.maskBorderWidth || 0) + Number(formStyle.maskInnerPaddingTop || 0) - 1)
 
   return (
   <FormStyleCtx.Provider value={formStyle}>
@@ -8679,7 +8916,7 @@ ${e?.message || String(e)}`
       background: formStyle.maskBg,
       border: `${formStyle.maskBorderWidth}px solid ${formStyle.maskBorderColor}`,
       borderRadius: formStyle.maskBorderRadius,
-      padding: formStyle.maskInnerPadding,
+      padding: `${formStyle.maskInnerPaddingTop}px ${formStyle.maskInnerPaddingRight}px ${formStyle.maskInnerPaddingBottom}px ${formStyle.maskInnerPaddingLeft}px`,
       position: 'relative',
       overflow: npTab === 'dati_tecnici' ? 'visible' : 'hidden',
       zIndex: npTab === 'dati_tecnici' ? 2147483000 : 'auto'
@@ -8832,6 +9069,13 @@ ${e?.message || String(e)}`
       {/* ── Splitter overlay Luoghi e dati tecnici ── */}
       {npTab === 'dati_tecnici' && (() => {
         const splitterW = Math.max(6, Math.min(40, Number((cfg as any).violazioneSplitterWidth) || 14))
+        const rawSplitterOffsetX = Number((cfg as any).datiTecniciSplitterOffsetX)
+        const splitterOffsetX = Number.isFinite(rawSplitterOffsetX)
+          ? Math.max(-80, Math.min(120, rawSplitterOffsetX))
+          : 13
+        // Il parametro esprime la posizione della LINEA rispetto al bordo del widget.
+        // Il wrapper ha larghezza splitterW e la linea è centrata, quindi compensiamo metà larghezza.
+        const splitterRight = -(splitterOffsetX + splitterW / 2)
         const splitterDragZoneStyle: React.CSSProperties = {
           position: 'absolute',
           inset: 0,
@@ -8917,7 +9161,7 @@ ${e?.message || String(e)}`
               position: 'absolute',
               top: 0,
               bottom: 0,
-              right: -18,
+              right: splitterRight,
               width: splitterW,
               cursor: 'col-resize',
               userSelect: 'none',
@@ -9357,37 +9601,42 @@ ${e?.message || String(e)}`
 )}
 
 {/* ALLEGATI */}
-{npTab === 'allegati' && (
-  mode !== 'edit' || currentOid == null ? (
-    renderFullHeightEditCard('ALLEGATI', (
-      <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
-        Sarà possibile aggiungere gli allegati <b>solo dopo il primo salvataggio</b> della pratica.
-      </div>
-    ))
-  ) : (
+{mode === 'edit' && currentOid != null && (
+  <div style={{ display: npTab === 'allegati' ? 'flex' : 'none', flexDirection: 'column', minHeight: 0, height: '100%' }}>
     <GiiAttachmentViewer
       title='ALLEGATI'
       oidAvailable={mode === 'edit' && currentOid != null}
       items={visibleTechnicalAttachments as any}
       loading={attachmentsLoading}
-      busy={attachmentsUploading}
+      busy={attachmentsUploading || saving}
       error={attachmentsError}
       canEdit={!isReadOnly && !isRitAgrTecLimitedEdit}
       uploadInputKey={attachmentInputKey}
       onUpload={(files) => {
         if (isReadOnly || isRitAgrTecLimitedEdit) return
         setAttachmentsError(null)
-        setAttachmentFiles(files)
         if (files.length > 0) void uploadCurrentAttachments(files)
       }}
       selectedItemId={previewAttachment?.id ?? null}
       onSelectedItemChange={(item) => {
-        setPreviewRotationDeg(0)
-        if (!item) { setPreviewAttachment(null); return }
-        setPreviewAttachment({ id: Number(item.id), name: item.name, contentType: item.contentType })
+        if (!item) { setPreviewRotationDeg(0); setPreviewAttachment(null); return }
+        const id = Number(item.id)
+        setPreviewRotationDeg(Number(pendingAttachmentRotations[id] || 0))
+        setPreviewAttachment({ id, name: item.name, contentType: item.contentType })
       }}
       buildPreviewUrl={buildItAttachmentPreviewUrl as any}
       onOpen={(item) => {
+        const pendingFile = (item as any)?.__pendingFile as File | undefined
+        if (pendingFile instanceof Blob) {
+          try {
+            const localUrl = URL.createObjectURL(pendingFile)
+            window.open(localUrl, '_blank', 'noopener,noreferrer')
+            window.setTimeout(() => { try { URL.revokeObjectURL(localUrl) } catch {} }, 60000)
+          } catch (err: any) {
+            setAttachmentsError(err?.message || String(err))
+          }
+          return
+        }
         void openAttachmentInNewTab(item, Number(currentOid), currentLayerUrl).catch((err: any) => {
           setAttachmentsError(err?.message || String(err))
         })
@@ -9401,11 +9650,12 @@ ${e?.message || String(e)}`
         setAttachmentConfirm({ type: 'delete', attachment: { id: Number(item.id), name: item.name } })
       }}
       rotationDeg={previewRotationDeg}
-      rotationBusy={attachmentsUploading}
-      canConfirmRotation={canRotateAttachments && (((Math.round(previewRotationDeg / 90) * 90) % 360 + 360) % 360) !== 0}
-      onRotateLeft={() => setPreviewRotationDeg(v => v - 90)}
-      onRotateRight={() => setPreviewRotationDeg(v => v + 90)}
-      onConfirmRotation={() => { void savePreviewRotation() }}
+      rotationBusy={attachmentsUploading || saving}
+      onRotateLeft={() => rotatePreviewAttachment(-90)}
+      onRotateRight={() => rotatePreviewAttachment(90)}
+      showPreviewCaption
+      rotationControlsPosition='bottom'
+      showConfirmRotation={false}
       formatBytes={formatBytesLocal}
       labelFontSize={12}
       headerFontSize={formStyle.cardHeaderFontSize}
@@ -9415,20 +9665,42 @@ ${e?.message || String(e)}`
       borderRadius={formStyle.cardBorderRadius}
       innerHeaderColor={formStyle.hdrColor}
     />
-  )
+  </div>
+)}
+{npTab === 'allegati' && (mode !== 'edit' || currentOid == null) && (
+  renderFullHeightEditCard('ALLEGATI', (
+    <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
+      Sarà possibile aggiungere gli allegati <b>solo dopo il primo salvataggio</b> della pratica.
+    </div>
+  ))
 )}
 
 {/* ANTEPRIMA */}
-{npTab === 'anteprima' && (
-  mode !== 'edit' || currentOid == null ? (
-    renderFullHeightEditCard('ANTEPRIMA', (
-      <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
-        Sarà possibile generare l'anteprima del fascicolo <b>solo dopo il primo salvataggio</b> della pratica.
-      </div>
-    ))
-  ) : (
-  <div style={{ width: '100%', height: '100%', minHeight: 0, borderRadius: formStyle.cardBorderRadius, overflow: 'hidden' }}>
+{npTab === 'anteprima' && (mode !== 'edit' || currentOid == null) && (
+  renderFullHeightEditCard('ANTEPRIMA', (
+    <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
+      Sarà possibile generare l'anteprima del fascicolo <b>solo dopo il primo salvataggio</b> della pratica.
+    </div>
+  ))
+)}
+{mode === 'edit' && currentOid != null && (npTab === 'anteprima' || persistentAnteprimaOid === Number(currentOid)) && (
+  <div
+    style={{
+      display: npTab === 'anteprima' ? 'block' : 'none',
+      width: '100%',
+      height: '100%',
+      minHeight: 0,
+      boxSizing: 'border-box',
+      paddingTop: anteprimaPadding.top,
+      paddingRight: anteprimaPadding.x,
+      paddingBottom: anteprimaPadding.bottom,
+      paddingLeft: anteprimaPadding.x,
+      borderRadius: formStyle.cardBorderRadius,
+      overflow: 'hidden'
+    }}
+  >
     <AnteprimaPanel
+      key={`gii-anteprima-${Number(currentOid)}`}
       data={draft}
       mode={mode}
       nsRows={noteSpeseRowsDraft}
@@ -9449,7 +9721,6 @@ ${e?.message || String(e)}`
       sidebarBorderWidth={Number((cfg as any).anteprimaSidebarBorderWidth ?? 1)}
     />
   </div>
-  )
 )}
 
       </div>
@@ -9647,8 +9918,8 @@ ${e?.message || String(e)}`
                 const label = `Allegato ${idx >= 0 ? idx + 1 : Number(attachmentConfirm.attachment?.id) || ''}`.trim()
                 const fullLabel = attachmentConfirm.attachment?.name ? `${label} • ${attachmentConfirm.attachment.name}` : label
                 return attachmentConfirm.type === 'delete'
-                  ? <>L’allegato <b>{fullLabel}</b> verrà eliminato subito.</>
-                  : <>L’allegato <b>{fullLabel}</b> verrà sostituito subito con <b>{attachmentConfirm.file?.name || 'il nuovo file selezionato'}</b>.</>
+                  ? <>L’allegato <b>{fullLabel}</b> sarà eliminato con il salvataggio della pratica.</>
+                  : <>L’allegato <b>{fullLabel}</b> sarà sostituito, al salvataggio della pratica, con <b>{attachmentConfirm.file?.name || 'il nuovo file selezionato'}</b>.</>
               })()}
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
@@ -10235,6 +10506,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     ? (props.config as any).asMutable({ deep: true })
     : (props.config as any || {})
   const cfg: any = { ...defaultConfig, ...cfgMutable }
+  const legacyWidgetPadding = Number.isFinite(Number(cfgMutable?.maskOuterOffset))
+    ? Number(cfgMutable.maskOuterOffset)
+    : Number((defaultConfig as any).maskOuterOffset ?? 0)
+  const widgetPadding = {
+    top: Number.isFinite(Number(cfgMutable?.widgetPaddingTop)) ? Number(cfgMutable.widgetPaddingTop) : legacyWidgetPadding,
+    right: Number.isFinite(Number(cfgMutable?.widgetPaddingRight)) ? Number(cfgMutable.widgetPaddingRight) : legacyWidgetPadding,
+    bottom: Number.isFinite(Number(cfgMutable?.widgetPaddingBottom)) ? Number(cfgMutable.widgetPaddingBottom) : legacyWidgetPadding,
+    left: Number.isFinite(Number(cfgMutable?.widgetPaddingLeft)) ? Number(cfgMutable.widgetPaddingLeft) : legacyWidgetPadding
+  }
   const isCreatePage = cfg.enableCreateWithoutSelection === true
 
   const baseUserContext = useReactiveGiiUserContext(!isCreatePage)
@@ -10902,7 +11182,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [inCreateMode, effectiveIntent, editIdFieldName, editOid, editRecordData])
 
   return (
-    <div ref={rootRef} data-gii-editing-root='1' style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0, position: 'relative', zIndex: uiLocked ? 1001 : 'auto', background: modeBg, transition: 'background 0.3s' }}>
+    <div ref={rootRef} data-gii-editing-root='1' style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', paddingTop: widgetPadding.top, paddingRight: widgetPadding.right, paddingBottom: widgetPadding.bottom, paddingLeft: widgetPadding.left, position: 'relative', zIndex: uiLocked ? 1001 : 'auto', background: modeBg, transition: 'background 0.3s' }}>
       {/* Mappa esterna ExB (fallback legacy) — nascosta, solo per agganciare la view */}
       {mapWidgetId && (
         <div style={{ display: 'none' }}>

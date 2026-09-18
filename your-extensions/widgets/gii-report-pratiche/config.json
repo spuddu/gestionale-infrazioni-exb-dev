@@ -11,5 +11,14 @@
   "cardBg": "rgba(255,255,255,0.08)",
   "cardBorder": "rgba(255,255,255,0.14)",
   "textColor": "#ffffff",
-  "mutedColor": "rgba(255,255,255,0.70)"
+  "mutedColor": "rgba(255,255,255,0.70)",
+  "outerPaddingTop": 16,
+  "outerPaddingRight": 16,
+  "outerPaddingBottom": 16,
+  "outerPaddingLeft": 16,
+  "panelPaddingTop": 16,
+  "panelPaddingRight": 16,
+  "panelPaddingBottom": 16,
+  "panelPaddingLeft": 16,
+  "cardRadius": 18
 }

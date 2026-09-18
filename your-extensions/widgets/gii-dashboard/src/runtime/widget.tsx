@@ -810,7 +810,7 @@ function CardShell (props: { cfg: any; title?: string; right?: React.ReactNode; 
     <div style={{
       background: props.cfg.cardBg,
       border: `1px solid ${props.cfg.cardBorder}`,
-      borderRadius: 14,
+      borderRadius: Number(props.cfg.cardRadius ?? 14),
       padding: 16,
       minHeight: props.minHeight,
       boxShadow: '0 18px 54px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.04)',
@@ -1485,7 +1485,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }
 
   return (
-    <div style={{ width: '100%', height: '100%', overflow: 'hidden', color: cfg.textColor, boxSizing: 'border-box', padding: 14 }}>
+    <div style={{ width: '100%', height: '100%', overflow: 'hidden', color: cfg.textColor, boxSizing: 'border-box', padding: `${Number(cfg.outerPaddingTop ?? defaultConfig.outerPaddingTop)}px ${Number(cfg.outerPaddingRight ?? defaultConfig.outerPaddingRight)}px ${Number(cfg.outerPaddingBottom ?? defaultConfig.outerPaddingBottom)}px ${Number(cfg.outerPaddingLeft ?? defaultConfig.outerPaddingLeft)}px` }}>
       <div style={{
         height: '100%',
         minHeight: 0,
@@ -1495,10 +1495,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         background: `radial-gradient(circle at 18% 0%, rgba(56,189,248,0.13), transparent 34%), radial-gradient(circle at 86% 8%, rgba(52,211,153,0.10), transparent 30%), ${cfg.panelBg}`,
         border: `1px solid ${cfg.cardBorder}`,
         borderRadius: 18,
-        padding: 16,
+        padding: `${Number(cfg.panelPaddingTop ?? defaultConfig.panelPaddingTop)}px ${Number(cfg.panelPaddingRight ?? defaultConfig.panelPaddingRight)}px ${Number(cfg.panelPaddingBottom ?? defaultConfig.panelPaddingBottom)}px ${Number(cfg.panelPaddingLeft ?? defaultConfig.panelPaddingLeft)}px`,
         boxShadow: '0 28px 90px rgba(0,0,0,0.30)'
       }}>
-        <div style={{ overflowY: 'auto', overflowX: 'hidden', paddingRight: 2 }}>
+        <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: activeTab === 'statistiche' ? 'auto' : 'hidden', overflowX: 'hidden', paddingRight: 2 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14, borderBottom: `1px solid ${cfg.cardBorder}`, flexWrap: 'wrap' }}>
             {[
               { id: 'operativo' as DashboardTab, label: 'Operativo' },
@@ -1705,7 +1705,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             </React.Fragment>
           )}
 
-        <section style={{ background: cfg.cardBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: 14, padding: 12, minHeight: 320, display: 'flex', flexDirection: 'column', boxShadow: '0 18px 54px rgba(0,0,0,0.20)' }}>
+        <section style={{ background: cfg.cardBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: Number(cfg.cardRadius ?? defaultConfig.cardRadius), padding: 12, minHeight: activeTab === 'statistiche' ? 320 : 0, flex: activeTab === 'statistiche' ? '0 0 auto' : '1 1 0', display: 'flex', flexDirection: 'column', boxShadow: '0 18px 54px rgba(0,0,0,0.20)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 8, flexShrink: 0 }}>
             <h3 style={{ margin: 0, fontSize: 15, color: cfg.textColor }}>Pratiche aggiornate di recente</h3>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>

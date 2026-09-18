@@ -399,8 +399,35 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const sectionTitleColor = String(cfg.sectionTitleColor || '#1F4E79')
   const sectionTitleFontSize = num(cfg.sectionTitleFontSize) || 13
   const accentColor = String(cfg.accentColor || '#1F4E79')
+  const titleDividerColor = String(cfg.titleDividerColor || '#1F4E79')
+  const titleDividerWidth = Math.max(0, cfg.titleDividerWidth == null ? 2 : num(cfg.titleDividerWidth))
   const leftPanelBackgroundColor = String(cfg.leftPanelBackgroundColor || '#ffffff')
   const contentBackgroundColor = String(cfg.contentBackgroundColor || '#ffffff')
+  const panelRadius = Math.max(0, cfg.panelRadius == null ? 8 : num(cfg.panelRadius))
+  const panelBorderWidth = Math.max(0, cfg.panelBorderWidth == null ? 1 : num(cfg.panelBorderWidth))
+  const panelBorderColor = String(cfg.panelBorderColor || '#c5d9f1')
+  const panelHeaderBackgroundColor = String(cfg.panelHeaderBackgroundColor || '#f5f9ff')
+  const separatorColor = String(cfg.separatorColor || '#dbe7f4')
+  const separatorWidth = Math.max(0, cfg.separatorWidth == null ? 1 : num(cfg.separatorWidth))
+  const controlRadius = Math.max(0, cfg.controlRadius == null ? 6 : num(cfg.controlRadius))
+  const controlBorderWidth = Math.max(0, cfg.controlBorderWidth == null ? 1 : num(cfg.controlBorderWidth))
+  const controlBorderColor = String(cfg.controlBorderColor || '#aac4e0')
+  const controlBackgroundColor = String(cfg.controlBackgroundColor || '#ffffff')
+  const controlHoverBackgroundColor = String(cfg.controlHoverBackgroundColor || '#eef5ff')
+  const splitterColor = String(cfg.splitterColor || '#3d77c9')
+  const splitterWidth = Math.max(1, cfg.splitterWidth == null ? 2 : num(cfg.splitterWidth))
+  const outerPaddingTop = Math.max(0, cfg.outerPaddingTop == null ? 12 : num(cfg.outerPaddingTop))
+  const outerPaddingRight = Math.max(0, cfg.outerPaddingRight == null ? 12 : num(cfg.outerPaddingRight))
+  const outerPaddingBottom = Math.max(0, cfg.outerPaddingBottom == null ? 12 : num(cfg.outerPaddingBottom))
+  const outerPaddingLeft = Math.max(0, cfg.outerPaddingLeft == null ? 12 : num(cfg.outerPaddingLeft))
+  const indexPaddingTop = Math.max(0, cfg.indexPaddingTop == null ? 8 : num(cfg.indexPaddingTop))
+  const indexPaddingRight = Math.max(0, cfg.indexPaddingRight == null ? 8 : num(cfg.indexPaddingRight))
+  const indexPaddingBottom = Math.max(0, cfg.indexPaddingBottom == null ? 8 : num(cfg.indexPaddingBottom))
+  const indexPaddingLeft = Math.max(0, cfg.indexPaddingLeft == null ? 8 : num(cfg.indexPaddingLeft))
+  const articlePaddingTop = Math.max(0, cfg.articlePaddingTop == null ? 12 : num(cfg.articlePaddingTop))
+  const articlePaddingRight = Math.max(0, cfg.articlePaddingRight == null ? 12 : num(cfg.articlePaddingRight))
+  const articlePaddingBottom = Math.max(0, cfg.articlePaddingBottom == null ? 12 : num(cfg.articlePaddingBottom))
+  const articlePaddingLeft = Math.max(0, cfg.articlePaddingLeft == null ? 12 : num(cfg.articlePaddingLeft))
   const pdfUrl = String(cfg.pdfUrl || '').trim()
   const tableUrl = String(cfg.regolamentoArticoliUrl || '').trim()
   const [leftPct, rightPct] = useMemo(
@@ -507,7 +534,34 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     ['--gri-right-col' as any]: `${columnPercents[1].toFixed(2)}%`,
     ['--gri-split-col' as any]: '12px',
     ['--gri-left-panel-background' as any]: leftPanelBackgroundColor,
-    ['--gri-right-panel-background' as any]: contentBackgroundColor
+    ['--gri-right-panel-background' as any]: contentBackgroundColor,
+    ['--gri-title-divider-color' as any]: titleDividerColor,
+    ['--gri-title-divider-width' as any]: `${titleDividerWidth}px`,
+    ['--gri-panel-radius' as any]: `${panelRadius}px`,
+    ['--gri-panel-border-width' as any]: `${panelBorderWidth}px`,
+    ['--gri-panel-border-color' as any]: panelBorderColor,
+    ['--gri-panel-head-background' as any]: panelHeaderBackgroundColor,
+    ['--gri-separator-color' as any]: separatorColor,
+    ['--gri-separator-width' as any]: `${separatorWidth}px`,
+    ['--gri-control-radius' as any]: `${controlRadius}px`,
+    ['--gri-control-border-width' as any]: `${controlBorderWidth}px`,
+    ['--gri-control-border-color' as any]: controlBorderColor,
+    ['--gri-control-background' as any]: controlBackgroundColor,
+    ['--gri-control-hover-background' as any]: controlHoverBackgroundColor,
+    ['--gri-splitter-color' as any]: splitterColor,
+    ['--gri-splitter-width' as any]: `${splitterWidth}px`,
+    ['--gri-outer-padding-top' as any]: `${outerPaddingTop}px`,
+    ['--gri-outer-padding-right' as any]: `${outerPaddingRight}px`,
+    ['--gri-outer-padding-bottom' as any]: `${outerPaddingBottom}px`,
+    ['--gri-outer-padding-left' as any]: `${outerPaddingLeft}px`,
+    ['--gri-index-padding-top' as any]: `${indexPaddingTop}px`,
+    ['--gri-index-padding-right' as any]: `${indexPaddingRight}px`,
+    ['--gri-index-padding-bottom' as any]: `${indexPaddingBottom}px`,
+    ['--gri-index-padding-left' as any]: `${indexPaddingLeft}px`,
+    ['--gri-article-padding-top' as any]: `${articlePaddingTop}px`,
+    ['--gri-article-padding-right' as any]: `${articlePaddingRight}px`,
+    ['--gri-article-padding-bottom' as any]: `${articlePaddingBottom}px`,
+    ['--gri-article-padding-left' as any]: `${articlePaddingLeft}px`
   }
 
   const columnsDirty = Math.abs(columnPercents[0] - defaultColumnPercents[0]) > 0.05 || Math.abs(columnPercents[1] - defaultColumnPercents[1]) > 0.05
@@ -728,8 +782,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
 }
 
 const styles = `
-.gri-root { font-size:13px; padding:12px; height:100%; width:100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; font-family:inherit; overflow:hidden; }
-.gri-title { font-size:15px; font-weight:700; color:#1F4E79; border-bottom:2px solid #1F4E79; padding-bottom:6px; line-height:1.3; }
+.gri-root { font-size:13px; padding:var(--gri-outer-padding-top,12px) var(--gri-outer-padding-right,12px) var(--gri-outer-padding-bottom,12px) var(--gri-outer-padding-left,12px); height:100%; width:100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; font-family:inherit; overflow:hidden; }
+.gri-title { font-size:15px; font-weight:700; color:#1F4E79; border-bottom:var(--gri-title-divider-width,2px) solid var(--gri-title-divider-color,#1F4E79); padding-bottom:6px; line-height:1.3; }
 .gri-meta { display:flex; align-items:center; gap:14px; font-size:11.5px; color:#6b7280; margin-top:-5px; flex-wrap:wrap; }
 .gri-pdf-link { color:#1f6fb2; text-decoration:underline; }
 .gri-msg { padding:7px 12px; border-radius:6px; font-size:12px; font-weight:700; }
@@ -741,56 +795,56 @@ const styles = `
 .gri-split-spacer { grid-column:2; width:100%; min-width:0; }
 .gri-field { display:flex; flex-direction:column; gap:3px; min-width:0; width:100%; }
 .gri-label { font-size:11px; font-weight:700; color:#1F4E79; }
-.gri-input { width:100%; height:40px; min-height:40px; padding:8px 10px; border:1px solid #aac4e0; border-radius:6px; font-size:13px; line-height:22px; box-sizing:border-box; background:#fff; font-family:inherit; }
+.gri-input { width:100%; height:40px; min-height:40px; padding:8px 10px; border:var(--gri-control-border-width,1px) solid var(--gri-control-border-color,#aac4e0); border-radius:var(--gri-control-radius,6px); font-size:13px; line-height:22px; box-sizing:border-box; background:var(--gri-control-background,#fff); font-family:inherit; }
 .gri-search-wrap { position:relative; width:100%; min-width:0; display:block; }
 .gri-input.gri-search-input { display:block; width:100%; min-width:0; padding-right:40px; }
 .gri-clear-btn { position:absolute; right:6px; top:50%; transform:translateY(-50%); width:28px; height:28px; min-height:28px; border:none; background:transparent; color:#6d88a6; border-radius:999px; cursor:pointer; font-size:18px; line-height:1; display:inline-flex; align-items:center; justify-content:center; padding:0; font-family:inherit; }
-.gri-clear-btn:hover:not(:disabled) { background:#eef5fd; color:#1F4E79; }
+.gri-clear-btn:hover:not(:disabled) { background:var(--gri-control-hover-background,#eef5fd); color:#1F4E79; }
 .gri-clear-btn:focus { outline:none; box-shadow:0 0 0 2px rgba(31,78,121,0.18); }
 .gri-toolbar-meta { display:flex; align-items:flex-end; justify-content:flex-end; justify-self:stretch; min-width:0; width:100%; overflow:visible; }
 .gri-toolbar-meta-inner { display:flex; align-items:center; justify-content:flex-end; gap:8px; width:100%; min-width:0; }
 .gri-toolbar-counter { display:block; width:100%; max-width:none; margin-left:0; color:#8fa7c0; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:11.5px; line-height:1.2; font-weight:600; }
-.gri-cols-reset-btn { width:28px; height:28px; border:1px solid #aac4e0; background:#fff; color:#8aa4bf; border-radius:999px; cursor:default; font-size:15px; line-height:1; display:inline-flex; align-items:center; justify-content:center; opacity:0.75; flex:0 0 auto; }
+.gri-cols-reset-btn { width:28px; height:28px; border:var(--gri-control-border-width,1px) solid var(--gri-control-border-color,#aac4e0); background:var(--gri-control-background,#fff); color:#8aa4bf; border-radius:999px; cursor:default; font-size:15px; line-height:1; display:inline-flex; align-items:center; justify-content:center; opacity:0.75; flex:0 0 auto; }
 .gri-cols-reset-btn.active { background:#ffd700; color:#000; border-color:#ffd700; cursor:pointer; opacity:1; }
 .gri-cols-reset-btn.active:hover { background:#ffd700; border-color:#ffd700; }
 .gri-cols-reset-btn:disabled { pointer-events:none; }
 .gri-layout { flex:1; min-height:0; display:grid; grid-template-columns:minmax(0,var(--gri-left-col,28%)) var(--gri-split-col,12px) minmax(0,var(--gri-right-col,72%)); gap:0; column-gap:0; align-items:stretch; }
-.gri-panel { min-height:0; border:1px solid #c5d9f1; border-radius:8px; background:#fff; display:flex; flex-direction:column; overflow:hidden; }
+.gri-panel { min-height:0; border:var(--gri-panel-border-width,1px) solid var(--gri-panel-border-color,#c5d9f1); border-radius:var(--gri-panel-radius,8px); background:#fff; display:flex; flex-direction:column; overflow:hidden; }
 .gri-panel.gri-grid-left, .gri-panel.gri-grid-left .gri-panel-body { background:var(--gri-left-panel-background,#ffffff); }
 .gri-panel.gri-grid-right, .gri-panel.gri-grid-right .gri-panel-body { background:var(--gri-right-panel-background,#ffffff); }
-.gri-panel-head { min-height:49px; box-sizing:border-box; padding:10px 12px; background:#f5f9ff; border-bottom:1px solid #dbe7f4; font-weight:700; color:#1F4E79; border-top-left-radius:8px; border-top-right-radius:8px; display:flex; align-items:center; }
+.gri-panel-head { min-height:49px; box-sizing:border-box; padding:10px 12px; background:var(--gri-panel-head-background,#f5f9ff); border-bottom:var(--gri-separator-width,1px) solid var(--gri-separator-color,#dbe7f4); font-weight:700; color:#1F4E79; border-top-left-radius:var(--gri-panel-radius,8px); border-top-right-radius:var(--gri-panel-radius,8px); display:flex; align-items:center; }
 .gri-panel-head-row { width:100%; display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .gri-panel-head-actions { display:flex; align-items:center; gap:6px; }
-.gri-panel-body { flex:1; min-height:0; overflow:auto; border-bottom-left-radius:8px; border-bottom-right-radius:8px; }
+.gri-panel-body { flex:1; min-height:0; overflow:auto; border-bottom-left-radius:var(--gri-panel-radius,8px); border-bottom-right-radius:var(--gri-panel-radius,8px); }
 .gri-panel-body-article { overflow:hidden; display:flex; flex-direction:column; }
 .gri-article-scroll { flex:1; min-height:0; overflow:auto; }
-.gri-panel-body-pad { padding:8px; }
-.gri-nav-reset-btn { width:28px; height:28px; border:1px solid #aac4e0; background:#fff; color:#8aa4bf; border-radius:999px; cursor:default; font-size:15px; line-height:1; display:inline-flex; align-items:center; justify-content:center; opacity:0.75; flex:0 0 auto; }
+.gri-panel-body-pad { padding:var(--gri-index-padding-top,8px) var(--gri-index-padding-right,8px) var(--gri-index-padding-bottom,8px) var(--gri-index-padding-left,8px); }
+.gri-nav-reset-btn { width:28px; height:28px; border:var(--gri-control-border-width,1px) solid var(--gri-control-border-color,#aac4e0); background:var(--gri-control-background,#fff); color:#8aa4bf; border-radius:999px; cursor:default; font-size:15px; line-height:1; display:inline-flex; align-items:center; justify-content:center; opacity:0.75; flex:0 0 auto; }
 .gri-nav-reset-btn.active { background:#1F4E79; color:#fff; border-color:#1F4E79; cursor:pointer; opacity:1; }
 .gri-nav-reset-btn.active:hover { background:#295f92; border-color:#295f92; }
 .gri-nav-reset-btn:disabled { pointer-events:none; }
 .gri-col-resizer { position:relative; width:100%; min-width:0; cursor:col-resize; user-select:none; touch-action:none; }
-.gri-col-resizer::before { content:''; position:absolute; top:0; bottom:0; left:50%; transform:translateX(-50%); width:2px; background:#3d77c9; border-radius:999px; }
+.gri-col-resizer::before { content:''; position:absolute; top:0; bottom:0; left:50%; transform:translateX(-50%); width:var(--gri-splitter-width,2px); background:var(--gri-splitter-color,#3d77c9); border-radius:999px; }
 .gri-col-resizer:hover::before, .gri-col-resizer.dragging::before { background:#c5d9f1; }
 .gri-col-resizer::after { content:''; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:8px; height:56px; border-radius:999px; background:rgba(61,119,201,0.18); }
 .gri-col-resizer:hover::after, .gri-col-resizer.dragging::after { background:rgba(61,119,201,0.08); }
 .gri-sezione { margin-bottom:4px; }
 .gri-sezione-row { display:grid; grid-template-columns:1fr auto; gap:6px; align-items:center; }
-.gri-sezione-head { width:100%; text-align:left; border:none; background:transparent; padding:8px 10px; border-radius:6px; cursor:pointer; font-family:inherit; font-size:13px !important; color:#123; }
-.gri-sezione-head:hover { background:#eef5ff; }
-.gri-tree-toggle { width:34px; height:34px; border:none; background:transparent; border-radius:6px; cursor:pointer; color:#1F4E79; font-weight:700; font-size:13px; font-family:inherit; }
-.gri-tree-toggle:hover { background:#eef5ff; }
-.gri-articoli-list { margin-left:12px; padding:4px 0 4px 8px; border-left:2px solid #dbe7f4; display:flex; flex-direction:column; gap:4px; }
-.gri-art-btn { width:100%; text-align:left; border:none; background:transparent; padding:8px 10px; border-radius:6px; cursor:pointer; display:flex; flex-direction:column; align-items:flex-start; gap:2px; color:#123; font-family:inherit; font-size:13px; }
-.gri-art-btn:hover { background:#eef5ff; }
+.gri-sezione-head { width:100%; text-align:left; border:none; background:transparent; padding:8px 10px; border-radius:var(--gri-control-radius,6px); cursor:pointer; font-family:inherit; font-size:13px !important; color:#123; }
+.gri-sezione-head:hover { background:var(--gri-control-hover-background,#eef5ff); }
+.gri-tree-toggle { width:34px; height:34px; border:none; background:transparent; border-radius:var(--gri-control-radius,6px); cursor:pointer; color:#1F4E79; font-weight:700; font-size:13px; font-family:inherit; }
+.gri-tree-toggle:hover { background:var(--gri-control-hover-background,#eef5ff); }
+.gri-articoli-list { margin-left:12px; padding:4px 0 4px 8px; border-left:calc(var(--gri-separator-width,1px) * 2) solid var(--gri-separator-color,#dbe7f4); display:flex; flex-direction:column; gap:4px; }
+.gri-art-btn { width:100%; text-align:left; border:none; background:transparent; padding:8px 10px; border-radius:var(--gri-control-radius,6px); cursor:pointer; display:flex; flex-direction:column; align-items:flex-start; gap:2px; color:#123; font-family:inherit; font-size:13px; }
+.gri-art-btn:hover { background:var(--gri-control-hover-background,#eef5ff); }
 .gri-art-btn.active { color:#fff; }
 .gri-art-num { font-size:12.5px; line-height:1.2; font-weight:700; color:#516273; }
 .gri-art-btn.active .gri-art-num { color:#fff; }
 .gri-art-title { font-size:13px; line-height:1.35; color:inherit; }
 .gri-empty { padding:16px; color:#6b7280; text-align:center; font-size:13px; }
-.gri-article { width:100%; box-sizing:border-box; padding:12px; display:flex; flex-direction:column; gap:10px; }
+.gri-article { width:100%; box-sizing:border-box; padding:var(--gri-article-padding-top,12px) var(--gri-article-padding-right,12px) var(--gri-article-padding-bottom,12px) var(--gri-article-padding-left,12px); display:flex; flex-direction:column; gap:10px; }
 .gri-breadcrumb { font-size:11.5px; text-transform:uppercase; letter-spacing:0.03em; color:#8fa7c0; font-weight:700; }
-.gri-article-head { display:flex; flex-direction:column; gap:2px; padding-bottom:10px; border-bottom:1px solid #dbe7f4; }
+.gri-article-head { display:flex; flex-direction:column; gap:2px; padding-bottom:10px; border-bottom:var(--gri-separator-width,1px) solid var(--gri-separator-color,#dbe7f4); }
 .gri-article-num { font-size:13px; font-weight:700; opacity:0.8; }
 .gri-article-title { font-size:18px; font-weight:700; line-height:1.3; }
 .gri-article-body { font-size:13px; line-height:1.55; color:#1f2937; }
@@ -801,8 +855,8 @@ const styles = `
 .gri-ref-link:hover { color:#17558c; }
 .gri-mark { background:#fde68a; color:inherit; padding:0 1px; border-radius:2px; }
 .gri-art-btn.active .gri-mark { background:#fff3a6; color:#123; }
-.gri-nav-buttons { flex:0 0 auto; display:flex; justify-content:space-between; gap:10px; margin-top:0; padding:10px 12px; border-top:1px solid #dbe7f4; background:var(--gri-right-panel-background,#ffffff); }
-.gri-nav-btn { flex:0 0 auto; padding:8px 14px; font-size:13px; border:1px solid #aac4e0; border-radius:6px; background:#fff; color:#1F4E79; cursor:pointer; font-weight:700; font-family:inherit; }
+.gri-nav-buttons { flex:0 0 auto; display:flex; justify-content:space-between; gap:10px; margin-top:0; padding:10px 12px; border-top:var(--gri-separator-width,1px) solid var(--gri-separator-color,#dbe7f4); background:var(--gri-right-panel-background,#ffffff); }
+.gri-nav-btn { flex:0 0 auto; padding:8px 14px; font-size:13px; border:var(--gri-control-border-width,1px) solid var(--gri-control-border-color,#aac4e0); border-radius:var(--gri-control-radius,6px); background:var(--gri-control-background,#fff); color:#1F4E79; cursor:pointer; font-weight:700; font-family:inherit; }
 .gri-nav-btn:disabled { opacity:0.45; cursor:default; }
-.gri-nav-btn:not(:disabled):hover { background:#eef5ff; }
+.gri-nav-btn:not(:disabled):hover { background:var(--gri-control-hover-background,#eef5ff); }
 `

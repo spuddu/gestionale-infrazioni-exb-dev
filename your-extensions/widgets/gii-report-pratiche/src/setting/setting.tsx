@@ -89,6 +89,51 @@ export default function Setting (props: AllWidgetSettingProps<IMConfig>) {
       <NumInp value={Number(cfg.staleDays || 15)} min={1} onChange={v => update('staleDays', v)} />
       <Check value={cfg.showTechnicalInfo === true} onChange={v => update('showTechnicalInfo', v)} label='Mostra informazioni tecniche sull’ambito dati' />
 
+      <div style={P.sec}>Spaziatura</div>
+      <div style={P.hint}>Valori in pixel. Il padding esterno separa il pannello dai bordi del custom widget; il padding interno regola lo spazio tra il bordo del pannello e il suo contenuto.</div>
+      <label style={P.lbl}>Padding esterno</label>
+      <div style={P.row2}>
+        <div>
+          <label style={P.lbl}>Alto</label>
+          <NumInp value={Number(cfg.outerPaddingTop ?? defaultConfig.outerPaddingTop)} min={0} max={100} onChange={v => update('outerPaddingTop', v)} />
+        </div>
+        <div>
+          <label style={P.lbl}>Destro</label>
+          <NumInp value={Number(cfg.outerPaddingRight ?? defaultConfig.outerPaddingRight)} min={0} max={100} onChange={v => update('outerPaddingRight', v)} />
+        </div>
+        <div>
+          <label style={P.lbl}>Basso</label>
+          <NumInp value={Number(cfg.outerPaddingBottom ?? defaultConfig.outerPaddingBottom)} min={0} max={100} onChange={v => update('outerPaddingBottom', v)} />
+        </div>
+        <div>
+          <label style={P.lbl}>Sinistro</label>
+          <NumInp value={Number(cfg.outerPaddingLeft ?? defaultConfig.outerPaddingLeft)} min={0} max={100} onChange={v => update('outerPaddingLeft', v)} />
+        </div>
+      </div>
+      <label style={P.lbl}>Padding interno pannello</label>
+      <div style={P.row2}>
+        <div>
+          <label style={P.lbl}>Alto</label>
+          <NumInp value={Number(cfg.panelPaddingTop ?? defaultConfig.panelPaddingTop)} min={0} max={100} onChange={v => update('panelPaddingTop', v)} />
+        </div>
+        <div>
+          <label style={P.lbl}>Destro</label>
+          <NumInp value={Number(cfg.panelPaddingRight ?? defaultConfig.panelPaddingRight)} min={0} max={100} onChange={v => update('panelPaddingRight', v)} />
+        </div>
+        <div>
+          <label style={P.lbl}>Basso</label>
+          <NumInp value={Number(cfg.panelPaddingBottom ?? defaultConfig.panelPaddingBottom)} min={0} max={100} onChange={v => update('panelPaddingBottom', v)} />
+        </div>
+        <div>
+          <label style={P.lbl}>Sinistro</label>
+          <NumInp value={Number(cfg.panelPaddingLeft ?? defaultConfig.panelPaddingLeft)} min={0} max={100} onChange={v => update('panelPaddingLeft', v)} />
+        </div>
+      </div>
+
+      <div style={P.sec}>Aspetto schede</div>
+      <label style={P.lbl}>Radius schede (px)</label>
+      <NumInp value={Number(cfg.cardRadius ?? defaultConfig.cardRadius)} min={0} max={100} onChange={v => update('cardRadius', v)} />
+
       <div style={P.sec}>Colori</div>
       <label style={P.lbl}>Colore accento</label>
       <ColInp value={cfg.accentColor || '#b79ffe'} onChange={v => update('accentColor', v)} />

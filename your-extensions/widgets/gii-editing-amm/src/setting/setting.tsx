@@ -151,6 +151,16 @@ export default function Setting (props: Props) {
             <div><label style={P.lbl}>Padding interno</label><NumInp value={parseNum(cfgJs.maskInnerPadding, defaultConfig.maskInnerPadding)} onChange={n => patch({ maskInnerPadding: n })} min={0} max={40} unit='px' /></div>
           </div>
         </SectionBox>
+        <SectionBox title='Padding contenuto schede' hint='Regola il contenitore esterno di tutte le schede, comprese Allegati e Anteprima. Gli stessi valori sono usati dal gii-editing-tec.'>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Superiore</label><NumInp value={parseNum(cfgJs.tabPaddingTop, defaultConfig.tabPaddingTop)} onChange={n => patch({ tabPaddingTop: n })} min={0} max={80} unit='px' /></div>
+            <div><label style={P.lbl}>Destro</label><NumInp value={parseNum(cfgJs.tabPaddingRight, defaultConfig.tabPaddingRight)} onChange={n => patch({ tabPaddingRight: n })} min={0} max={80} unit='px' /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Inferiore</label><NumInp value={parseNum(cfgJs.tabPaddingBottom, defaultConfig.tabPaddingBottom)} onChange={n => patch({ tabPaddingBottom: n })} min={0} max={80} unit='px' /></div>
+            <div><label style={P.lbl}>Sinistro</label><NumInp value={parseNum(cfgJs.tabPaddingLeft, defaultConfig.tabPaddingLeft)} onChange={n => patch({ tabPaddingLeft: n })} min={0} max={80} unit='px' /></div>
+          </div>
+        </SectionBox>
         <SectionBox title='Titolo della pratica' hint='Dimensione del titolo principale visualizzato nella barra superiore del widget.'>
           <div style={P.row2}>
             <div><label style={P.lbl}>Dimensione titolo</label><NumInp value={parseNum(cfgJs.titleFontSize, defaultConfig.titleFontSize)} onChange={n => patch({ titleFontSize: n })} min={18} max={28} unit='px' /></div>

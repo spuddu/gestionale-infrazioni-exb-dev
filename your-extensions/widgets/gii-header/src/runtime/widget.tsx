@@ -678,7 +678,7 @@ function switchAccountWithoutRevokingCurrentSession(
   let beforeInstallPromise: Promise<void> | null = null
 
   if (originalAddOrReplaceSession && beforeDifferentSessionInstall) {
-    wrappedAddOrReplaceSession = function (session: any, ...args: any[]) {
+    wrappedAddOrReplaceSession = function (this: any, session: any, ...args: any[]) {
       const incomingUsername = normalizeAuthUsername(
         session?.username || session?.user?.username || session?.portalUser?.username
       )
@@ -1245,15 +1245,16 @@ function alertDisplayTitle (alert: GiiAlertItem): string {
   const activityType = String(firstNonEmptyAlertRawValue(alert, ['tipo_attivita']) || '').trim().toUpperCase()
   const rawActivityTitle = alertRawTitleText(alert)
 
-  // Per le attività correnti il titolo salvato nel record è la fonte autorevole.
-  // Non ricostruiamo più diciture da eventi legacy o da stati della pratica.
+  // Unica eccezione strutturata alla regola del titolo autorevole: il primo
+  // ingresso Survey/TR → CS è sempre una nuova rilevazione ricevuta, anche
+  // quando l'attività è già stata materializzata con un vecchio titolo generico.
+  if (alertIsNewRilevazione(alert)) return 'Nuova rilevazione ricevuta'
+
+  // Per le altre attività correnti il titolo salvato nel record resta la fonte
+  // autorevole: non ricostruiamo diciture da eventi legacy o stati della pratica.
   if (activityType === 'PRESA_IN_CARICO') {
     return rawActivityTitle || 'Attività da prendere in carico'
   }
-
-  // Unica eccezione: primo ingresso Survey/TR → CS, prima della materializzazione
-  // nella tabella attività correnti.
-  if (alertIsNewRilevazione(alert)) return 'Nuova rilevazione ricevuta'
 
   return String(alert?.title || '').trim() || 'Allarme'
 }
@@ -2903,11 +2904,11 @@ function HeaderAlertsPopup (props: {
                         }}
                       >
                         <div style={{ fontSize: 12, fontWeight: 900, color: '#fff', marginBottom: 7, letterSpacing: 0.1 }}>Priorità allarme</div>
-                        {[
+                        {([
                           { tone: 'blue', label: 'Informativo' },
                           { tone: 'orange', label: 'Attenzione' },
                           { tone: 'red', label: 'Criticità' }
-                        ].map(item => {
+                        ] as const).map(item => {
                           const itemColor = alertToneColor(item.tone)
                           return (
                             <div key={item.tone} style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 20, fontSize: 12.5, color: '#cbd5e1' }}>
@@ -4464,12 +4465,12 @@ export default function Widget(props: Props) {
                     Benvenuto, {user.fullName||user.username}
                   </span>
                   {bannerOpensAccountMenu && (
-                    <>
+                    <React.Fragment>
                       <span aria-hidden='true' style={{ flex:'1 1 auto',minWidth:14 }} />
                       <span aria-hidden='true' style={{ width:12,height:16,display:'inline-flex',alignItems:'center',justifyContent:'center',color:cfg.signInColor,opacity:0.8,fontSize:12,fontWeight:700,letterSpacing:0.2,flex:'0 0 auto' }}>
                         <span style={{ display:'inline-block',fontFamily:'Arial, sans-serif',fontSize:12,fontWeight:700,lineHeight:1,letterSpacing:'normal',transformOrigin:'50% 50%',transform:menuOpen ? 'rotate(180deg)' : 'rotate(0deg)',transition:'transform 0.18s ease' }}>▾</span>
                       </span>
-                    </>
+                    </React.Fragment>
                   )}
                 </button>
                 {displayRoleBadge && (

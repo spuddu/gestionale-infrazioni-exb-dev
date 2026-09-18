@@ -5,7 +5,7 @@ import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig, DETAIL_DEFAULT_TAB_FIELDS, DETAIL_NEVER_SHOW_FIELDS, DETAIL_GENERAL_FIELDS } from '../config'
-import { filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
+import { filterGiiAttachmentsForAdministrativeGenericSection, filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 import { ensureNsdJsonOnlyQueryFormat } from '../../../_shared/gii-anteprime/nsd-query-format-fix'
 import { isGiiIaUser, isPracticeAssignedToCurrentIa } from '../../../_shared/gii-access/ia-assignment'
 import { isGiiPracticePayloadCurrent, isGiiPracticeSelectionContextCurrent } from '../../../_shared/gii-selection/practice-context'
@@ -2611,6 +2611,7 @@ type CicloRecord = {
   fase: string
   num_campi_modificati: number | null
   campi_modificati: string
+  valori_dopo_json: string
   riepilogo_ciclo: string
 }
 
@@ -2689,8 +2690,18 @@ function formatCycleTitleEvento (c: CicloRecord, cycleLabelNumber: number, pract
 }
 
 function cleanIterNoteForDisplay (raw: any): string {
-  const text = String(raw ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
+  let text = String(raw ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
   if (!text) return ''
+
+  // Compatibilita' con i log storici: la motivazione manuale del rimando
+  // veniva salvata con il valore sulla riga successiva, mentre le motivazioni
+  // strutturate erano gia' in linea. Uniformiamo solo quel separatore,
+  // preservando eventuali ulteriori righe digitate dall'utente.
+  text = text.replace(/(Motivazione del rimando:)\s*\n+\s*([^\n]+)/gi, '$1 $2')
+
+  // Le sezioni strutturate del rimando devono restare compatte nel dettaglio:
+  // non inseriamo una riga vuota prima delle eventuali annotazioni libere.
+  text = text.replace(/\n\s*\n(?=\s*Ulteriori annotazioni:)/gi, '\n')
 
   // Le assegnazioni sono già rappresentate da titolo ciclo e destinatario.
   // Nel log storico possono però contenere note automatiche tipo:
@@ -2708,6 +2719,7 @@ function cleanIterNoteForDisplay (raw: any): string {
   const cleaned = paragraphs.filter(paragraph => {
     const normalized = paragraph.replace(/\s+/g, ' ').trim()
     if (/^A seguito della (verifica svolta|valutazione di competenza),/i.test(normalized)) return false
+    if (/^A seguito delle integrazioni eseguite,\s*si trasmette\b.*\bl['’]esito dell['’]integrazione\b.*\bper le valutazioni di competenza\.?$/i.test(normalized)) return false
     if (/^Si attesta la conformità della pratica/i.test(normalized)) return false
     if (/^Si condivide l['’]istruttoria amministrativa proposta/i.test(normalized)) return false
     return true
@@ -2781,6 +2793,24 @@ const ITER_TECHNICAL_MODIFIED_FIELDS = new Set([
   'esito_DT',
   'determinazione_numero',
   'dt_esito_DT',
+  // Workflow amministrativo RIA/IA: stati, prese in carico, esiti e note sono gia'
+  // rappresentati nell'Iter approvativo/log e non sono modifiche ai contenuti della pratica.
+  'stato_RIA',
+  'stato_IA',
+  'dt_presa_in_carico_RIA',
+  'dt_presa_in_carico_IA',
+  'dt_stato_RIA',
+  'dt_stato_IA',
+  'esito_RIA',
+  'esito_IA',
+  'dt_esito_RIA',
+  'dt_esito_IA',
+  'note_RIA',
+  'note_IA',
+
+  // Metadati tecnici di generazione della bozza di determinazione.
+  'dt_bozza_determinazione',
+  'bozza_determinazione_da',
   'determinazione_trasmessa_firma_il',
   'dt_presa_in_carico_IT',
   'dt_presa_in_carico_CS',
@@ -2811,6 +2841,20 @@ const ITER_TECHNICAL_MODIFIED_ALIASES = new Set([
   'Username IT assegnato',
   'IT assegnato',
   'Data assegnazione IT',
+  'Stato RIA',
+  'Stato IA',
+  'Data presa in carico RIA',
+  'Data presa in carico IA',
+  'Data stato RIA',
+  'Data stato IA',
+  'Esito RIA',
+  'Esito IA',
+  'Data esito RIA',
+  'Data esito IA',
+  'Note RIA',
+  'Note IA',
+  'Data generazione bozza determinazione',
+  'Bozza determinazione generata da',
 ].map(normKey))
 
 function isTechnicalIterModifiedField (raw: any, alias?: any): boolean {
@@ -2826,6 +2870,41 @@ function parseModifiedFieldNames (raw: any): string[] {
     .split(/[;,|\n]+/g)
     .map(s => s.trim())
     .filter(Boolean)
+}
+
+const ITER_ATTACHMENTS_AUDIT_KEY = 'gii_allegati_modificati'
+type IterAttachmentAuditEntry = {
+  action: 'AGGIUNTO' | 'ELIMINATO' | 'SOSTITUITO'
+  name: string
+  previousName?: string
+}
+
+function parseIterAttachmentAudit (rawJson: any): IterAttachmentAuditEntry[] {
+  if (!rawJson) return []
+  let outer: any = null
+  try { outer = typeof rawJson === 'object' ? rawJson : JSON.parse(String(rawJson)) } catch { return [] }
+  if (!outer || typeof outer !== 'object' || Array.isArray(outer)) return []
+  let rawEntries: any = outer[ITER_ATTACHMENTS_AUDIT_KEY]
+  if (!rawEntries) return []
+  if (typeof rawEntries === 'string') {
+    try { rawEntries = JSON.parse(rawEntries) } catch { return [] }
+  }
+  if (!Array.isArray(rawEntries)) return []
+  return rawEntries.map((item: any) => {
+    const action = String(item?.action || '').trim().toUpperCase()
+    const name = String(item?.name || '').trim()
+    const previousName = String(item?.previousName || '').trim()
+    if (!name || !['AGGIUNTO', 'ELIMINATO', 'SOSTITUITO'].includes(action)) return null
+    return { action, name, ...(previousName ? { previousName } : {}) } as IterAttachmentAuditEntry
+  }).filter(Boolean) as IterAttachmentAuditEntry[]
+}
+
+function formatIterAttachmentAuditEntry (entry: IterAttachmentAuditEntry): string {
+  const actionLabel = entry.action === 'AGGIUNTO' ? 'Aggiunto' : entry.action === 'ELIMINATO' ? 'Eliminato' : 'Sostituito'
+  if (entry.action === 'SOSTITUITO' && entry.previousName && entry.previousName !== entry.name) {
+    return `${entry.previousName} → ${entry.name} — ${actionLabel}`
+  }
+  return `${entry.name} — ${actionLabel}`
 }
 
 const VIOLATION_LABEL_BY_ARTICLE: Record<string, string> = {
@@ -2916,6 +2995,7 @@ function buildSyntheticCreationCycle (data: any, loggedCicli: CicloRecord[]): Ci
     fase: origin,
     num_campi_modificati: 0,
     campi_modificati: '',
+    valori_dopo_json: '',
     riepilogo_ciclo: 'CREAZIONE: nessun campo aggiornato'
   }
 }
@@ -3040,7 +3120,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
           'evento_chiusura', 'dt_chiusura', 'ruolo_destinatario',
           'utente_destinatario', 'note_chiusura',
           'area_cod', 'settore_cod', 'area', 'settore', 'fase',
-          'num_campi_modificati', 'campi_modificati', 'riepilogo_ciclo'
+          'num_campi_modificati', 'campi_modificati', 'valori_dopo_json', 'riepilogo_ciclo'
         ])
         const res = await fl.queryFeatures({
           where: `LOWER(parent_globalid) = '${gid}' OR LOWER(parent_globalid) = '{${gid}}'`,
@@ -3072,6 +3152,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
             fase: String(a.fase || ''),
             num_campi_modificati: a.num_campi_modificati ?? null,
             campi_modificati: String(a.campi_modificati || ''),
+            valori_dopo_json: String(a.valori_dopo_json || ''),
             riepilogo_ciclo: String(a.riepilogo_ciclo || '')
           }
         })
@@ -3154,6 +3235,9 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
         const destinatarioNomeLabel =
           resolveIterPersonName(c.utente_destinatario, utentiMap) ||
           findIterRecipientNameByRole(c.ruolo_destinatario, c.area, c.settore, utentiMap)
+        // Nel dettaglio si nascondono esclusivamente le frasi automatiche di
+        // sistema. Le annotazioni inserite manualmente dall'utente devono
+        // restare visibili anche quando l'evento e' ESITO_INTEGRAZIONE_TRASMESSO.
         const noteChiusuraLabel = cleanIterNoteForDisplay(c.note_chiusura)
         const cycleActionLabel = formatCycleTitleEvento(c, cycleLabelNumber, props.data)
 
@@ -3161,6 +3245,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
           .map(campo => ({ raw: campo, alias: getFieldAliasForIter(campo, props.aliasMap) }))
           .filter(item => Boolean(item.alias) && !isTechnicalIterModifiedField(item.raw, item.alias))
           .map(item => item.alias)
+        const allegatiModificati = parseIterAttachmentAudit(c.valori_dopo_json)
 
         return (
           <div key={i} style={{ border: `1px solid ${borderColor}`, borderRadius: 10, background: bgColor, overflow: 'hidden' }}>
@@ -3220,6 +3305,27 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
                       <span style={{ fontSize: 11, color: '#374151', lineHeight: 1.35, whiteSpace: 'normal' }}>
                         {campiList.join('; ')}
                       </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {allegatiModificati.length > 0 && (
+                <div style={{ padding: '7px 0', borderBottom: '1px solid rgba(0,0,0,0.07)' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: iterLabelValueColumns, gap: 8, alignItems: 'flex-start' }}>
+                    <span style={lblSt}>Allegati modificati</span>
+                    <span style={{ ...valSt, fontSize: 11 }}>
+                      {allegatiModificati.length} {allegatiModificati.length === 1 ? 'allegato' : 'allegati'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: iterLabelValueColumns, gap: 8, marginTop: 6 }}>
+                    <span />
+                    <div style={{ border: '1px solid rgba(209,213,219,0.95)', borderRadius: 8, padding: '6px 8px', background: '#fff' }}>
+                      {allegatiModificati.map((entry, idx) => (
+                        <div key={`${entry.action}-${entry.name}-${idx}`} style={{ fontSize: 11, color: '#374151', lineHeight: 1.45 }}>
+                          {formatIterAttachmentAuditEntry(entry)}
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -4205,6 +4311,7 @@ function DetailTabsPanel (props: {
   notaSpeseCfg: { detailUrl: string; attrezzatureParametriUrl: string }
   regolamentoCfg: { articoliUrl: string }
   emptyMessage?: string
+  currentRole?: string
 }) {
   const { active, ui } = props
 
@@ -4259,7 +4366,25 @@ function DetailTabsPanel (props: {
   const [attachments, setAttachments] = React.useState<Array<{ id: number; name?: string; size?: number; contentType?: string; url?: string; keywords?: string }>>([])
   const [attachmentsLoading, setAttachmentsLoading] = React.useState<boolean>(false)
   const [attachmentsError, setAttachmentsError] = React.useState<string | null>(null)
-  const visibleTechnicalAttachments = React.useMemo(() => filterGiiAttachmentsForTechnicalRoles((Array.isArray(attachments) ? attachments : []) as any), [attachments])
+  const isAdministrativeAttachmentViewer = React.useMemo(() => ['IA', 'RIA', 'DA', 'ADMIN'].includes(normalizeRuoloCod(props.currentRole)), [props.currentRole])
+  const technicalAttachments = React.useMemo(() => {
+    const list = (Array.isArray(attachments) ? attachments : []) as any
+    return filterGiiAttachmentsForTechnicalRoles(list)
+  }, [attachments])
+  const administrativeAttachments = React.useMemo(() => {
+    if (!isAdministrativeAttachmentViewer) return []
+    const list = (Array.isArray(attachments) ? attachments : []) as any
+    return filterGiiAttachmentsForAdministrativeGenericSection(list)
+  }, [attachments, isAdministrativeAttachmentViewer])
+  const visibleAttachments = React.useMemo(() => {
+    return isAdministrativeAttachmentViewer
+      ? [...technicalAttachments, ...administrativeAttachments]
+      : technicalAttachments
+  }, [technicalAttachments, administrativeAttachments, isAdministrativeAttachmentViewer])
+  const attachmentRefreshSignature = String(active?.state?.sig || '')
+  React.useEffect(() => {
+    setAttachmentsForOid(null)
+  }, [attachmentRefreshSignature])
 
   const formatBytes = React.useCallback((n?: number) => {
     if (n == null || isNaN(Number(n))) return ''
@@ -5091,7 +5216,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     return rows
   }, [data, aliasMap, fieldTypeMap, selectedPointGeometry])
 
-  const allegatiCountForBadge = visibleTechnicalAttachments.length
+  const allegatiCountForBadge = visibleAttachments.length
   const allegatiLoadingForBadge = attachmentsLoading && attachmentsForOid !== selectedOid
 
   const TabsBar = (
@@ -5233,57 +5358,172 @@ if (!hasSel) {
 
           {hasSel && !attachmentsLoading && !attachmentsError && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {(visibleTechnicalAttachments && visibleTechnicalAttachments.length) ? (
-                visibleTechnicalAttachments.map((a, idx) => {
-                  const url = getOpenUrl(a)
-                  return (
-                    <DetailSectionCard key={a.id} title={`Allegato ${idx + 1}`} bodyPadding={10}>
-                      <div style={{ display: 'grid', gap: 8 }}>
-                        <DetailRow label="Nome file" value={a.name || `Allegato #${a.id}`} labelSize={12} valueSize={13} multiline={false} />
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
-                          <DetailRow label="Tipo" value={a.contentType || '—'} labelSize={12} valueSize={13} multiline={false} />
-                          <DetailRow label="Dimensione" value={formatBytes(a.size) || '—'} labelSize={12} valueSize={13} multiline={false} />
-                        </div>
-                        {url ? (
-                          <div>
-                            <a
-                              href={url}
-                              target="_blank"
-                              rel="noreferrer"
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.background = '#eaf2ff'
-                                e.currentTarget.style.borderColor = '#2f6fed'
-                                e.currentTarget.style.color = '#1d4ed8'
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.background = '#fff'
-                                e.currentTarget.style.borderColor = 'rgba(0,0,0,0.12)'
-                                e.currentTarget.style.color = '#111827'
-                              }}
-                              style={{
-                                display: 'inline-flex',
-                                padding: '6px 10px',
-                                borderRadius: 10,
-                                border: '1px solid rgba(0,0,0,0.12)',
-                                background: '#fff',
-                                color: '#111827',
-                                textDecoration: 'none',
-                                fontSize: 12,
-                                fontWeight: 700,
-                                whiteSpace: 'nowrap',
-                                transition: 'all 0.15s ease'
-                              }}
-                            >
-                              Apri allegato
-                            </a>
-                          </div>
-                        ) : (
-                          <div style={{ opacity: 0.6, fontSize: 12 }}>URL non disponibile</div>
-                        )}
+              {(visibleAttachments && visibleAttachments.length) ? (
+                isAdministrativeAttachmentViewer ? (
+                  <>
+                    {!!technicalAttachments.length && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div style={{ fontWeight: 800, fontSize: 13, color: '#374151' }}>Allegati tecnici</div>
+                        {technicalAttachments.map((a, idx) => {
+                          const url = getOpenUrl(a)
+                          return (
+                            <DetailSectionCard key={`technical-${a.id}`} title={`Allegato ${idx + 1}`} bodyPadding={10}>
+                              <div style={{ display: 'grid', gap: 8 }}>
+                                <DetailRow label="Nome file" value={a.name || `Allegato #${a.id}`} labelSize={12} valueSize={13} multiline={false} />
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+                                  <DetailRow label="Tipo" value={a.contentType || '—'} labelSize={12} valueSize={13} multiline={false} />
+                                  <DetailRow label="Dimensione" value={formatBytes(a.size) || '—'} labelSize={12} valueSize={13} multiline={false} />
+                                </div>
+                                {url ? (
+                                  <div>
+                                    <a
+                                      href={url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = '#eaf2ff'
+                                        e.currentTarget.style.borderColor = '#2f6fed'
+                                        e.currentTarget.style.color = '#1d4ed8'
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = '#fff'
+                                        e.currentTarget.style.borderColor = 'rgba(0,0,0,0.12)'
+                                        e.currentTarget.style.color = '#111827'
+                                      }}
+                                      style={{
+                                        display: 'inline-flex',
+                                        padding: '6px 10px',
+                                        borderRadius: 10,
+                                        border: '1px solid rgba(0,0,0,0.12)',
+                                        background: '#fff',
+                                        color: '#111827',
+                                        textDecoration: 'none',
+                                        fontSize: 12,
+                                        fontWeight: 700,
+                                        whiteSpace: 'nowrap',
+                                        transition: 'all 0.15s ease'
+                                      }}
+                                    >
+                                      Apri allegato
+                                    </a>
+                                  </div>
+                                ) : (
+                                  <div style={{ opacity: 0.6, fontSize: 12 }}>URL non disponibile</div>
+                                )}
+                              </div>
+                            </DetailSectionCard>
+                          )
+                        })}
                       </div>
-                    </DetailSectionCard>
-                  )
-                })
+                    )}
+                    {!!administrativeAttachments.length && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div style={{ fontWeight: 800, fontSize: 13, color: '#374151' }}>Allegati amministrativi</div>
+                        {administrativeAttachments.map((a, idx) => {
+                          const url = getOpenUrl(a)
+                          return (
+                            <DetailSectionCard key={`administrative-${a.id}`} title={`Allegato ${idx + 1}`} bodyPadding={10}>
+                              <div style={{ display: 'grid', gap: 8 }}>
+                                <DetailRow label="Nome file" value={a.name || `Allegato #${a.id}`} labelSize={12} valueSize={13} multiline={false} />
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+                                  <DetailRow label="Tipo" value={a.contentType || '—'} labelSize={12} valueSize={13} multiline={false} />
+                                  <DetailRow label="Dimensione" value={formatBytes(a.size) || '—'} labelSize={12} valueSize={13} multiline={false} />
+                                </div>
+                                {url ? (
+                                  <div>
+                                    <a
+                                      href={url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = '#eaf2ff'
+                                        e.currentTarget.style.borderColor = '#2f6fed'
+                                        e.currentTarget.style.color = '#1d4ed8'
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = '#fff'
+                                        e.currentTarget.style.borderColor = 'rgba(0,0,0,0.12)'
+                                        e.currentTarget.style.color = '#111827'
+                                      }}
+                                      style={{
+                                        display: 'inline-flex',
+                                        padding: '6px 10px',
+                                        borderRadius: 10,
+                                        border: '1px solid rgba(0,0,0,0.12)',
+                                        background: '#fff',
+                                        color: '#111827',
+                                        textDecoration: 'none',
+                                        fontSize: 12,
+                                        fontWeight: 700,
+                                        whiteSpace: 'nowrap',
+                                        transition: 'all 0.15s ease'
+                                      }}
+                                    >
+                                      Apri allegato
+                                    </a>
+                                  </div>
+                                ) : (
+                                  <div style={{ opacity: 0.6, fontSize: 12 }}>URL non disponibile</div>
+                                )}
+                              </div>
+                            </DetailSectionCard>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  technicalAttachments.map((a, idx) => {
+                    const url = getOpenUrl(a)
+                    return (
+                      <DetailSectionCard key={a.id} title={`Allegato ${idx + 1}`} bodyPadding={10}>
+                        <div style={{ display: 'grid', gap: 8 }}>
+                          <DetailRow label="Nome file" value={a.name || `Allegato #${a.id}`} labelSize={12} valueSize={13} multiline={false} />
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+                            <DetailRow label="Tipo" value={a.contentType || '—'} labelSize={12} valueSize={13} multiline={false} />
+                            <DetailRow label="Dimensione" value={formatBytes(a.size) || '—'} labelSize={12} valueSize={13} multiline={false} />
+                          </div>
+                          {url ? (
+                            <div>
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noreferrer"
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background = '#eaf2ff'
+                                  e.currentTarget.style.borderColor = '#2f6fed'
+                                  e.currentTarget.style.color = '#1d4ed8'
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = '#fff'
+                                  e.currentTarget.style.borderColor = 'rgba(0,0,0,0.12)'
+                                  e.currentTarget.style.color = '#111827'
+                                }}
+                                style={{
+                                  display: 'inline-flex',
+                                  padding: '6px 10px',
+                                  borderRadius: 10,
+                                  border: '1px solid rgba(0,0,0,0.12)',
+                                  background: '#fff',
+                                  color: '#111827',
+                                  textDecoration: 'none',
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  whiteSpace: 'nowrap',
+                                  transition: 'all 0.15s ease'
+                                }}
+                              >
+                                Apri allegato
+                              </a>
+                            </div>
+                          ) : (
+                            <div style={{ opacity: 0.6, fontSize: 12 }}>URL non disponibile</div>
+                          )}
+                        </div>
+                      </DetailSectionCard>
+                    )
+                  })
+                )
               ) : (
                 <div style={{ opacity: 0.75, fontSize: 12 }}>Nessun allegato.</div>
               )}
@@ -5529,6 +5769,10 @@ const queryFields = React.useMemo(() => {
     }
   }, [])
 
+  const currentDetailRole = React.useMemo(() => normalizeRuoloCod(
+    currentUser?.profiloCod ?? currentUser?.profilo_cod ?? currentUser?.ruoloCod ?? currentUser?.ruolo_cod
+  ), [currentUser])
+
   const currentUserKey = React.useMemo(() => {
     if (!currentUser) return ''
     return [
@@ -5736,6 +5980,7 @@ const queryFields = React.useMemo(() => {
                     articoliUrl: String((cfg as any).regolamentoArticoliUrl || '')
                   }}
                   emptyMessage={detailAccessMessage}
+                  currentRole={currentDetailRole}
                   mapCfg={detailMapCfg}
                 />
         </>

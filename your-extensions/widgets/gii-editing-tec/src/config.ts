@@ -101,7 +101,17 @@ export interface Config {
   maskBorderWidth: number
   maskBorderRadius: number
   maskInnerPadding: number
+  // Padding interno maschera per-lato. Se assente, eredita maskInnerPadding per compatibilità.
+  maskInnerPaddingTop?: number
+  maskInnerPaddingRight?: number
+  maskInnerPaddingBottom?: number
+  maskInnerPaddingLeft?: number
   maskOuterOffset: number
+  // Padding interno del widget (per-lato). Se assente, eredita maskOuterOffset per compatibilità.
+  widgetPaddingTop?: number
+  widgetPaddingRight?: number
+  widgetPaddingBottom?: number
+  widgetPaddingLeft?: number
   dividerColor: string
 
   // --- Tipografia
@@ -137,6 +147,13 @@ export interface Config {
   formCardHeaderPaddingX: number
   formCardHeaderPaddingY: number
   formCardBodyPadding: number
+
+  // --- Padding contenuto schede (contenitore esterno di tutte le tab)
+  tabPaddingTop: number
+  tabPaddingRight: number
+  tabPaddingBottom: number
+  tabPaddingLeft: number
+
   sectionHeaderColor: string
   sectionHeaderFontSize: number
   sectionDividerColor: string
@@ -219,6 +236,10 @@ export interface Config {
   violazioneLayoutMinRightPx: number
   violazioneSplitterWidth: number
   violazioneSplitterColor: string
+
+  // --- Scheda Luoghi e dati tecnici (overlay separatore Sidebar ExB)
+  // Distanza della linea dal bordo destro del widget: + verso destra, - verso l'interno.
+  datiTecniciSplitterOffsetX: number
 }
 
 export const defaultConfig: Config = {
@@ -304,6 +325,14 @@ export const defaultConfig: Config = {
   formCardHeaderPaddingX: 10,
   formCardHeaderPaddingY: 7,
   formCardBodyPadding: 10,
+
+  // Mantiene come default il comportamento storico delle schede generiche;
+  // i quattro lati sono ora indipendenti e configurabili dal setting.
+  tabPaddingTop: 12,
+  tabPaddingRight: 2,
+  tabPaddingBottom: 2,
+  tabPaddingLeft: 2,
+
   sectionHeaderColor: '#0f4c81',
   sectionHeaderFontSize: 11,
   sectionDividerColor: '#93c5fd',
@@ -383,7 +412,10 @@ export const defaultConfig: Config = {
   violazioneLayoutMinLeftPx: 520,
   violazioneLayoutMinRightPx: 360,
   violazioneSplitterWidth: 14,
-  violazioneSplitterColor: '#94a3b8'
+  violazioneSplitterColor: '#94a3b8',
+
+  // Con splitter da 10 px riproduce il precedente right: -18 (linea a +13 px dal bordo).
+  datiTecniciSplitterOffsetX: 13
 }
 
 export const DEFAULT_FIELD_LAYOUTS: Record<string, LayoutRow[]> = {

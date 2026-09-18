@@ -1,6 +1,7 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps, DataSourceComponent, UrlManager, getAppStore } from 'jimu-core'
+import { Button } from 'jimu-ui'
 import { buildVerbalePdfBlob } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-data-map'
 import { replacePropostaContestazionePdfAttachment } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-attachment-store'
 import { buildBozzaDeterminazioneDocx, getBozzaDeterminazioneDocxFileName } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-docx-builder'
@@ -17,6 +18,7 @@ import { createPortal } from 'react-dom'
 import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from '../../../_shared/gii-alerts/attivita-correnti-query-format-fix'
 import { isPracticeAssignedToCurrentIa } from '../../../_shared/gii-access/ia-assignment'
 import { getGiiPracticeContextStamp, isGiiPracticeContextStampCurrent, isGiiPracticePayloadCurrent, isGiiPracticeSelectionContextCurrent, stampGiiPracticePayload } from '../../../_shared/gii-selection/practice-context'
+import { ADMINISTRATIVE_RIMANDO_TARGET_OPTIONS, buildAdministrativeRimandoNote } from '../../../_shared/gii-workflow/administrative-rimando'
 
 const LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 const GII_ATTIVITA_CORRENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_ATTIVITA_CORRENTI/FeatureServer/0'
@@ -164,10 +166,12 @@ async function loadAuthorizedAttoSignerIdentities (): Promise<AttoParticipantIde
       })
       .filter(hasAttoParticipantName)
 
-    return Array.from(new Map(identities.map(identity => {
+    const uniqueIdentities = new Map<string, AttoParticipantIdentity>()
+    identities.forEach((identity: AttoParticipantIdentity) => {
       const key = `${normalizeAttoSignerIdentityText(identity.nome)}|${normalizeAttoSignerIdentityText(identity.cognome)}`
-      return [key, identity] as const
-    })).values())
+      uniqueIdentities.set(key, identity)
+    })
+    return Array.from(uniqueIdentities.values())
   } catch (e) {
     console.warn('[GII-Editing-AMM] Errore lettura Rubrica firmatari per verifica firma Atto:', e)
     throw new Error('Non è stato possibile leggere la Rubrica dei firmatari autorizzati. Il documento non è stato acquisito.')
@@ -274,9 +278,9 @@ async function loadAssignedIaSenderEmail (attrs: Record<string, any>): Promise<s
     normalizeAmmUtentiAreaCod(a?.area_cod ?? a?.area) === 'AMM'
   )
   const candidates = preferred.length ? preferred : rows
-  const emails = Array.from(new Set(candidates
+  const emails: string[] = Array.from(new Set<string>(candidates
     .map((a: any) => String(a?.email || '').trim().toLowerCase())
-    .filter(Boolean)))
+    .filter((email: string) => !!email)))
 
   if (!emails.length) {
     console.warn('[GII_EMAIL] Mittente privo di indirizzo e-mail.', { username })
@@ -1820,6 +1824,188 @@ async function loadLatestHistoricalRiaOperatorName (parentGlobalIdRaw: any, revi
   return name
 }
 
+
+type RiaIntegrationDocumentInfo = {
+  action: 'AGGIUNTO' | 'SOSTITUITO'
+  name: string
+  previousName?: string
+  attachmentId?: number
+}
+
+type RiaIntegrationCycleInfo = {
+  requested: boolean
+  requestUsername: string
+  requestOperatorName: string
+  requestAt: any
+  requestNote: string
+  requestTargets: string[]
+  requestMotivation: string
+  received: boolean
+  responseUsername: string
+  responseOperatorName: string
+  responseAt: any
+  responseNote: string
+  modifiedFields: string[]
+  documents: RiaIntegrationDocumentInfo[]
+}
+
+const EMPTY_RIA_INTEGRATION_CYCLE: RiaIntegrationCycleInfo = {
+  requested: false,
+  requestUsername: '',
+  requestOperatorName: '',
+  requestAt: null,
+  requestNote: '',
+  requestTargets: [],
+  requestMotivation: '',
+  received: false,
+  responseUsername: '',
+  responseOperatorName: '',
+  responseAt: null,
+  responseNote: '',
+  modifiedFields: [],
+  documents: []
+}
+
+function parseAdministrativeIntegrationRequestNote (raw: any): { targets: string[], motivation: string } {
+  const note = String(raw || '').trim()
+  if (!note) return { targets: [], motivation: '' }
+  const targetsMatch = note.match(/Oggetto\s+del\s+rimando\s*:\s*([^\r\n]+)/i)
+  const motivationMatch = note.match(/Motivazione\s+del\s+rimando\s*:\s*([\s\S]+)$/i)
+  const targets = String(targetsMatch?.[1] || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean)
+  const motivation = String(motivationMatch?.[1] || '').trim()
+  return { targets, motivation: motivation || (!targetsMatch ? note : '') }
+}
+
+function parseIntegrationDocumentAudit (rawJson: any): RiaIntegrationDocumentInfo[] {
+  const outer = parseJsonObject(rawJson)
+  let rawEntries: any = outer.gii_allegati_modificati
+  if (typeof rawEntries === 'string') {
+    try { rawEntries = JSON.parse(rawEntries) } catch { rawEntries = [] }
+  }
+  if (!Array.isArray(rawEntries)) return []
+  return rawEntries.map((item: any) => {
+    const action = String(item?.action || '').trim().toUpperCase()
+    const name = String(item?.name || '').trim()
+    const previousName = String(item?.previousName || '').trim()
+    const attachmentId = Number(item?.attachmentId)
+    if (!name || !['AGGIUNTO', 'SOSTITUITO'].includes(action)) return null
+    return {
+      action: action as 'AGGIUNTO' | 'SOSTITUITO',
+      name,
+      ...(previousName ? { previousName } : {}),
+      ...(Number.isFinite(attachmentId) && attachmentId > 0 ? { attachmentId } : {})
+    } as RiaIntegrationDocumentInfo
+  }).filter(Boolean) as RiaIntegrationDocumentInfo[]
+}
+
+function isIntegrationWorkflowField (fieldNameRaw: any): boolean {
+  const fieldName = String(fieldNameRaw || '').trim().toLowerCase()
+  if (!fieldName) return true
+  if (fieldName === 'objectid' || fieldName === 'globalid' || fieldName === 'gii_allegati_modificati') return true
+  if (['determinazione_stato', 'dt_bozza_determinazione', 'bozza_determinazione_da'].includes(fieldName)) return true
+  if (fieldName.startsWith('gii_')) return true
+  if (/^(stato|esito|dt_stato|dt_esito|dt_presa_in_carico|presa_in_carico)_/i.test(fieldName)) return true
+  if (/^note_(ia|ria)$/i.test(fieldName)) return true
+  if (/_(assegnato_username|assegnato_nome|assegnato_da|assegnato_il)$/i.test(fieldName)) return true
+  return false
+}
+
+async function loadCurrentRiaIntegrationCycle (parentGlobalIdRaw: any): Promise<RiaIntegrationCycleInfo> {
+  const parentGlobalId = String(parentGlobalIdRaw ?? '').trim()
+  if (!parentGlobalId) return { ...EMPTY_RIA_INTEGRATION_CYCLE }
+  try {
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const fl = new FeatureLayer({ url: LOG_EVENTI_CICLI_URL, outFields: ['*'] })
+    if (typeof fl?.load === 'function') { try { await fl.load() } catch {} }
+    if (!fl?.queryFeatures) return { ...EMPTY_RIA_INTEGRATION_CYCLE }
+    const q = fl.createQuery ? fl.createQuery() : {}
+    q.where = `(${parentGlobalIdWhereForLog(parentGlobalId)}) AND stato_record = 'CHIUSO'`
+    q.outFields = ['evento_chiusura', 'ruolo_competente', 'ruolo_destinatario', 'utente_operatore', 'dt_chiusura', 'note_chiusura', 'campi_modificati', 'valori_dopo_json']
+    q.returnGeometry = false
+    q.num = 2000
+    const oidField = String(fl.objectIdField || 'OBJECTID')
+    q.orderByFields = ['dt_chiusura ASC', `${oidField} ASC`]
+    const res = await fl.queryFeatures(q)
+    const rows = (res?.features || []).map((feature: any) => feature?.attributes || {}).filter(Boolean)
+    let requestIndex = -1
+    for (let index = 0; index < rows.length; index++) {
+      const attrs = rows[index]
+      const event = String(attrs?.evento_chiusura || '').trim().toUpperCase()
+      const role = String(attrs?.ruolo_competente || '').trim().toUpperCase()
+      const destination = String(attrs?.ruolo_destinatario || '').trim().toUpperCase()
+      if (role === 'IA' && destination === 'RIA' && ['ISTRUTTORIA_RIMANDATA_INTEGRAZIONE', 'ISTRUTTORIA_RIMANDATA_PER_INTEGRAZIONE'].includes(event)) {
+        requestIndex = index
+      }
+    }
+    if (requestIndex < 0) return { ...EMPTY_RIA_INTEGRATION_CYCLE }
+
+    const requestAttrs = rows[requestIndex]
+    const requestAtMs = workflowTimestamp(requestAttrs?.dt_chiusura)
+    let responseAttrs: any = null
+    let responseIndex = -1
+    for (let index = requestIndex + 1; index < rows.length; index++) {
+      const attrs = rows[index]
+      const event = String(attrs?.evento_chiusura || '').trim().toUpperCase()
+      const role = String(attrs?.ruolo_competente || '').trim().toUpperCase()
+      const destination = String(attrs?.ruolo_destinatario || '').trim().toUpperCase()
+      if (event === 'ESITO_INTEGRAZIONE_TRASMESSO' && role === 'RIA' && destination === 'IA') {
+        responseAttrs = attrs
+        responseIndex = index
+      }
+    }
+
+    const responseAtMs = workflowTimestamp(responseAttrs?.dt_chiusura)
+    const endIndex = responseIndex >= 0 ? responseIndex : rows.length - 1
+    const modifiedFields = new Set<string>()
+    const documentsByKey = new Map<string, RiaIntegrationDocumentInfo>()
+    rows.slice(requestIndex + 1, endIndex + 1).forEach((attrs: any) => {
+      String(attrs?.campi_modificati || '')
+        .split(/[;,|\n]+/g)
+        .map(value => value.trim())
+        .filter(value => value && !isIntegrationWorkflowField(value))
+        .forEach(value => modifiedFields.add(value))
+      parseIntegrationDocumentAudit(attrs?.valori_dopo_json).forEach(document => {
+        const key = document.attachmentId
+          ? `id:${document.attachmentId}`
+          : `${document.action}|${document.previousName || ''}|${document.name}`.toLowerCase()
+        documentsByKey.set(key, document)
+      })
+    })
+
+    const requestNote = String(requestAttrs?.note_chiusura || '').trim()
+    const parsedRequest = parseAdministrativeIntegrationRequestNote(requestNote)
+    const requestUsername = String(requestAttrs?.utente_operatore || '').trim()
+    const responseUsername = String(responseAttrs?.utente_operatore || '').trim()
+    const [requestOperatorName, responseOperatorName] = await Promise.all([
+      resolveHistoricalAmmOperatorName(requestUsername, 'IA'),
+      responseAttrs ? resolveHistoricalAmmOperatorName(responseUsername, 'RIA') : Promise.resolve('')
+    ])
+
+    return {
+      requested: true,
+      requestUsername,
+      requestOperatorName,
+      requestAt: requestAtMs || requestAttrs?.dt_chiusura || null,
+      requestNote,
+      requestTargets: parsedRequest.targets,
+      requestMotivation: parsedRequest.motivation,
+      received: !!responseAttrs,
+      responseUsername,
+      responseOperatorName,
+      responseAt: responseAtMs || responseAttrs?.dt_chiusura || null,
+      responseNote: String(responseAttrs?.note_chiusura || '').trim(),
+      modifiedFields: Array.from(modifiedFields),
+      documents: Array.from(documentsByKey.values())
+    }
+  } catch (e) {
+    console.warn('[GII_LOG_EVENTI_CICLI] Impossibile ricostruire il ciclo di integrazione IA -> RIA -> IA:', e)
+    return { ...EMPTY_RIA_INTEGRATION_CYCLE }
+  }
+}
+
 function getLogObjectIdValue (attrs: any, layer?: any): any {
   const oidField = String(layer?.objectIdField || 'OBJECTID')
   return pickAttrCI(attrs, [oidField, 'OBJECTID', 'ObjectID', 'ObjectId', 'objectId', 'objectid'])
@@ -2638,7 +2824,7 @@ function buildGiiPagoPaBatchPlan (
   })
 
   const now = Date.now()
-  const base = {
+  const base: Record<string, any> = {
     pratica_globalid: practiceGlobalId,
     modalita_pagamento: 'PAGOPA',
     stato_pagamento: 'DA_PAGARE',
@@ -3124,6 +3310,19 @@ async function replaceBozzaDeterminazionePdfAttachment (layer: any, oid: number,
   return finalBozzaPdfs
 }
 
+function canvasToBlobForAmmEdit (canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob(blob => {
+        if (blob) resolve(blob)
+        else reject(new Error('Rotazione immagine non riuscita.'))
+      }, type, quality)
+    } catch (ex) {
+      reject(ex)
+    }
+  })
+}
+
 async function rotateImageAttachmentFile (blob: Blob, fileName: string, rotationDeg: number): Promise<File> {
   const contentType = String(blob.type || '').toLowerCase()
   const lowerName = String(fileName || '').toLowerCase()
@@ -3246,6 +3445,37 @@ async function updateAmmAttachment (oid: number, attachmentId: number, file: Fil
   if (!resp.ok || json?.error) throw new Error(json?.error?.message || `Sostituzione allegato fallita (HTTP ${resp.status}).`)
   const result = json?.updateAttachmentResult || json
   if (result?.success === false) throw new Error(result?.error?.description || result?.error?.message || 'Sostituzione allegato non riuscita.')
+}
+
+async function persistAmmAttachmentRotations (params: {
+  layer: any
+  oid: number
+  layerUrl: string
+  rotations: Record<number, number>
+}): Promise<void> {
+  const { layer, oid, layerUrl, rotations } = params
+  if (!oid || !layerUrl) return
+  const attachmentList = await queryAmmAttachments(layer, oid, layerUrl)
+  for (const [rawId, rawRotation] of Object.entries(rotations || {})) {
+    const attachmentId = Number(rawId)
+    const rotation = ((Math.round(Number(rawRotation || 0) / 90) * 90) % 360 + 360) % 360
+    if (!Number.isFinite(attachmentId) || attachmentId <= 0 || rotation === 0) continue
+    const att = attachmentList.find(item => Number(item?.id) === attachmentId)
+    // I ruoli amministrativi possono salvare l'orientamento solo dei propri allegati.
+    // Sugli allegati tecnici la rotazione resta una semplice modifica della vista.
+    if (!att || !isAdministrativeGenericAttachment(att)) continue
+    const previewBlobUrl = await buildAttachmentPreviewUrl(att, oid, layerUrl)
+    if (!previewBlobUrl) throw new Error(`Anteprima non disponibile per la rotazione di “${att.name || `Allegato ${attachmentId}`}”.`)
+    try {
+      const resp = await fetch(String(previewBlobUrl).split('#')[0])
+      if (!resp.ok) throw new Error(`Caricamento immagine fallito (HTTP ${resp.status}).`)
+      const blob = await resp.blob()
+      const file = await rotateImageAttachmentFile(blob, att.name || `allegato_${attachmentId}.jpg`, rotation)
+      await updateAmmAttachment(oid, attachmentId, file, layerUrl)
+    } finally {
+      try { URL.revokeObjectURL(previewBlobUrl) } catch {}
+    }
+  }
 }
 
 async function downloadAmmAttachmentFile (att: AmmAttachmentInfo, oid: number, layerUrl: string, fileNameOverride?: string): Promise<void> {
@@ -3499,7 +3729,7 @@ function InfoBox (props: { children: React.ReactNode, kind?: 'info' | 'warn' | '
 }
 
 
-type BozzaIconName = 'check' | 'edit' | 'upload' | 'send' | 'mail' | 'download' | 'trash' | 'protocol'
+type BozzaIconName = 'check' | 'cross' | 'edit' | 'upload' | 'send' | 'mail' | 'download' | 'trash' | 'protocol'
 
 function BozzaActionIcon (props: { name: BozzaIconName, size?: number }): React.ReactElement {
   const size = Number(props.size || 24)
@@ -3507,6 +3737,14 @@ function BozzaActionIcon (props: { name: BozzaIconName, size?: number }): React.
     return (
       <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
         <path d='M20 6L9 17l-5-5'/>
+      </svg>
+    )
+  }
+  if (props.name === 'cross') {
+    return (
+      <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M18 6L6 18'/>
+        <path d='M6 6l12 12'/>
       </svg>
     )
   }
@@ -3797,6 +4035,207 @@ function ConfirmActionDialog (props: { title: string, text: string, confirmLabel
 }
 
 
+type IaOutcomeChoice = '' | 'CONFORME' | 'NON_CONFORME'
+
+function IaOutcomeDialog (props: { outcome: IaOutcomeChoice, currentOutcome?: IaOutcomeChoice, saving?: boolean, onChange: (value: IaOutcomeChoice) => void, onCancel: () => void, onConfirm: () => void }) {
+  const currentOutcome = props.currentOutcome || ''
+  const canConfirm = !props.saving && !!props.outcome && props.outcome !== currentOutcome
+  const outcomeText = props.outcome && props.outcome === currentOutcome
+    ? 'Questo è l’esito già espresso per il ciclo corrente. Selezionare un esito diverso per modificarlo.'
+    : props.outcome === 'CONFORME'
+      ? 'Confermando l’istruttoria sarà registrata come conforme.'
+      : props.outcome === 'NON_CONFORME'
+        ? 'Confermando si proseguirà con il rimando per integrazione. L’esito non conforme sarà registrato soltanto alla conferma del rimando.'
+        : 'Selezionare l’esito dell’istruttoria.'
+  const popupTheme = { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8' }
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, zIndex: 2147483645, background: 'rgba(0,0,0,0.48)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+    >
+      <div
+        role='dialog'
+        aria-modal='true'
+        style={{ width: 'min(92vw, 560px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, display: 'grid', gap: 14, position: 'relative', zIndex: 2147483646 }}
+        onClick={(e) => { e.stopPropagation() }}
+        onMouseDown={(e) => { e.stopPropagation() }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, background: popupTheme.bg, border: `1px solid ${popupTheme.border}`, borderRadius: 10, padding: '10px 12px' }}>
+          <div style={{ fontWeight: 800, fontSize: 18, color: popupTheme.color, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, overflow: 'hidden' }}>
+            <span style={{ fontSize: 20, flex: '0 0 auto' }}>{popupTheme.icon}</span>
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: '1 1 auto' }}>Gestisci istruttoria</span>
+          </div>
+          <button
+            type='button'
+            onClick={props.onCancel}
+            disabled={!!props.saving}
+            style={{ border: `1px solid ${popupTheme.border}`, background: '#fff', color: props.saving ? '#9ca3af' : '#374151', borderRadius: 8, padding: '6px 10px', fontWeight: 700, cursor: props.saving ? 'not-allowed' : 'pointer', opacity: props.saving ? 0.65 : 1 }}
+            aria-label='Chiudi'
+          >
+            ×
+          </button>
+        </div>
+
+        <div style={{ display: 'grid', gap: 6 }}>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>Esito</div>
+          <select
+            value={props.outcome}
+            disabled={!!props.saving}
+            onChange={(e) => props.onChange(String(e.target.value || '') as IaOutcomeChoice)}
+            style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', outline: 'none', fontSize: 15, background: '#fff' }}
+          >
+            <option value='' disabled>— Seleziona —</option>
+            <option value='CONFORME'>Conforme</option>
+            <option value='NON_CONFORME'>Non conforme</option>
+          </select>
+        </div>
+
+        <div style={{ fontSize: 15, color: '#374151', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{outcomeText}</div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between', marginTop: 4 }}>
+          <div style={{ flex: '1 1 auto', minWidth: 0, minHeight: 20 }} />
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flex: '0 0 auto' }}>
+            <button
+              type='button'
+              disabled={!!props.saving}
+              onClick={props.onCancel}
+              style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 600, fontSize: 15, cursor: props.saving ? 'not-allowed' : 'pointer', opacity: props.saving ? 0.65 : 1 }}
+            >
+              Annulla
+            </button>
+            <button
+              type='button'
+              disabled={!canConfirm}
+              onClick={props.onConfirm}
+              style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${popupTheme.buttonBorder}`, background: popupTheme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: canConfirm ? 'pointer' : 'not-allowed', opacity: canConfirm ? 1 : 0.6 }}
+            >
+              {props.saving ? 'Operazione in corso…' : 'Conferma'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function IaIntegrationRimandoDialog (props: { targets: string[], motivation: string, saving?: boolean, onTargetsChange: (targets: string[]) => void, onMotivationChange: (value: string) => void, onCancel: () => void, onConfirm: () => void }) {
+  const iaOwnedRimandoTargets = new Set(['Bozza di determinazione'])
+  const motivationTrim = String(props.motivation || '').trim()
+  const selectableTargets = props.targets.filter(target => !iaOwnedRimandoTargets.has(target))
+  const targetsInvalid = selectableTargets.length === 0
+  const motivationInvalid = !motivationTrim
+  const canConfirm = !props.saving && !targetsInvalid && !motivationInvalid
+  const popupTheme = { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309' }
+  const toggleTarget = (target: string) => {
+    if (iaOwnedRimandoTargets.has(target)) return
+    props.onTargetsChange(props.targets.includes(target)
+      ? props.targets.filter(item => item !== target)
+      : [...props.targets, target])
+  }
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, zIndex: 2147483645, background: 'rgba(0,0,0,0.48)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+    >
+      <div
+        role='dialog'
+        aria-modal='true'
+        style={{ width: 'min(92vw, 560px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, display: 'grid', gap: 14, position: 'relative', zIndex: 2147483646 }}
+        onClick={(e) => { e.stopPropagation() }}
+        onMouseDown={(e) => { e.stopPropagation() }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, background: popupTheme.bg, border: `1px solid ${popupTheme.border}`, borderRadius: 10, padding: '10px 12px' }}>
+          <div style={{ fontWeight: 800, fontSize: 18, color: popupTheme.color, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, overflow: 'hidden' }}>
+            <span style={{ fontSize: 20, flex: '0 0 auto' }}>{popupTheme.icon}</span>
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: '1 1 auto' }}>Gestisci istruttoria</span>
+          </div>
+          <button
+            type='button'
+            onClick={props.onCancel}
+            disabled={!!props.saving}
+            style={{ border: `1px solid ${popupTheme.border}`, background: '#fff', color: props.saving ? '#9ca3af' : '#374151', borderRadius: 8, padding: '6px 10px', fontWeight: 700, cursor: props.saving ? 'not-allowed' : 'pointer', opacity: props.saving ? 0.65 : 1 }}
+            aria-label='Chiudi'
+          >
+            ×
+          </button>
+        </div>
+
+        <div style={{ fontSize: 15, color: '#374151', lineHeight: 1.6 }}>
+          L’istruttoria verrà rimandata al Responsabile dell’istruttoria amministrativa per integrazione.
+        </div>
+
+        <div style={{ display: 'grid', gap: 7 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>Oggetto del rimando</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280' }}>(obbligatorio)</div>
+          </div>
+          <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '6px 8px', background: '#fff' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', columnGap: 10, rowGap: 2 }}>
+              {ADMINISTRATIVE_RIMANDO_TARGET_OPTIONS.map(opt => {
+                const disabledForIa = iaOwnedRimandoTargets.has(opt)
+                const disabled = !!props.saving || disabledForIa
+                return (
+                  <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 4px', border: 'none', borderRadius: 4, background: 'transparent', fontSize: 14, cursor: disabled ? 'not-allowed' : 'pointer', minWidth: 0, opacity: disabled ? 0.5 : 1 }}>
+                    <input
+                      type='checkbox'
+                      checked={!disabledForIa && props.targets.includes(opt)}
+                      onChange={() => toggleTarget(opt)}
+                      disabled={disabled}
+                      style={{ margin: 0, flex: '0 0 auto' }}
+                    />
+                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{opt}</span>
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>Motivazione del rimando</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280' }}>(obbligatoria)</div>
+          </div>
+          <textarea
+            value={props.motivation}
+            disabled={!!props.saving}
+            onChange={(e) => props.onMotivationChange(String(e.target.value || ''))}
+            rows={4}
+            placeholder='Indicare le modifiche, integrazioni o rettifiche richieste…'
+            style={{ width: '100%', resize: 'vertical', minHeight: 96, padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', outline: 'none', fontSize: 15, lineHeight: 1.45, background: '#fff' }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between', marginTop: 4 }}>
+          <div style={{ flex: '1 1 auto', minWidth: 0, minHeight: 20 }} />
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flex: '0 0 auto' }}>
+            <button
+              type='button'
+              disabled={!!props.saving}
+              onClick={props.onCancel}
+              style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 600, fontSize: 15, cursor: props.saving ? 'not-allowed' : 'pointer', opacity: props.saving ? 0.65 : 1 }}
+            >
+              Annulla
+            </button>
+            <button
+              type='button'
+              disabled={!canConfirm}
+              onClick={props.onConfirm}
+              style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${popupTheme.buttonBorder}`, background: popupTheme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: canConfirm ? 'pointer' : 'not-allowed', opacity: canConfirm ? 1 : 0.6 }}
+            >
+              {props.saving ? 'Operazione in corso…' : 'Conferma'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 function PaymentPlanConfirmDialog (props: { currentCount: number, rateCount: number, saving?: boolean, onCancel: () => void, onConfirm: () => void }) {
   const st = useAdminStyle()
   const nextCount = props.rateCount >= 2 ? props.rateCount + 1 : 1
@@ -3817,32 +4256,6 @@ function PaymentPlanConfirmDialog (props: { currentCount: number, rateCount: num
 }
 
 
-function AttestationConfirmDialog (props: { note: string, saving?: boolean, onCancel: () => void, onConfirm: () => void }) {
-  const st = useAdminStyle()
-  return (
-    <div style={{ position: 'fixed', zIndex: 2147483000, inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <div role='dialog' aria-modal='true' style={{ width: 'min(620px, 100%)', background: '#fff', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
-        <div style={{ background: '#eff6ff', color: '#0d3b66', padding: '14px 16px', fontWeight: 900, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>Apponi visto di conformità</div>
-        <div style={{ padding: 16, color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45 }}>
-          <div style={{ marginBottom: 10 }}>
-            Confermando, il visto di conformità sarà registrato sulla pratica e la Proposta di contestazione sarà generata e aggiunta al fascicolo.
-          </div>
-          <div style={{ border: '1px solid #c5d9f1', background: '#f8fbff', borderRadius: 9, padding: 10 }}>
-            <div style={{ color: '#0d3b66', fontWeight: 900, fontSize: adminLabelFontSize(st), marginBottom: 5 }}>Testo visto</div>
-            <div style={{ color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{props.note || '—'}</div>
-          </div>
-        </div>
-        <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button type='button' disabled={!!props.saving} onClick={props.onCancel} style={{ border: '1px solid #94a3b8', background: '#fff', color: '#334155', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>Annulla</button>
-          <button type='button' disabled={!!props.saving} onClick={props.onConfirm} style={{ border: '1px solid #1a7f37', background: props.saving ? '#e5e7eb' : '#1a7f37', color: props.saving ? '#9ca3af' : '#fff', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>{props.saving ? 'Apposizione in corso…' : 'Conferma'}</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-
-
 function TransmitBozzaConfirmDialog (props: { saving?: boolean, reopenCycle?: boolean, onCancel: () => void, onConfirm: () => void }) {
   const st = useAdminStyle()
   return (
@@ -3853,7 +4266,7 @@ function TransmitBozzaConfirmDialog (props: { saving?: boolean, reopenCycle?: bo
         </div>
         <div style={{ padding: 16, color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45 }}>
           {props.reopenCycle
-            ? 'La pratica risulta già approvata dal Responsabile e il protocollo del fascicolo è stato registrato. Confermando verrà aperto un nuovo ciclo di verifica: l’approvazione corrente del Responsabile dell’istruttoria amministrativa e i dati di protocollo del fascicolo saranno invalidati. La bozza PDF corrente sarà trasmessa nuovamente al Responsabile.'
+            ? 'L’istruttoria risulta già approvata dal Responsabile e il protocollo del fascicolo è stato registrato. Confermando verrà aperto un nuovo ciclo di verifica: l’approvazione corrente del Responsabile dell’istruttoria amministrativa e i dati di protocollo del fascicolo saranno invalidati. La bozza PDF corrente sarà trasmessa nuovamente al Responsabile.'
             : 'Confermando, il fascicolo istruttorio contenente la Proposta di contestazione e la bozza PDF della determinazione sarà trasmesso al Responsabile dell’istruttoria amministrativa per la verifica. Dopo la trasmissione la bozza non sarà più liberamente modificabile dall’Istruttore amministrativo, salvo rimando.'}
         </div>
         <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
@@ -3877,7 +4290,7 @@ function DeleteBozzaConfirmDialog (props: { saving?: boolean, finalPdf?: boolean
         <div style={{ padding: 16, color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45 }}>
           {props.finalPdf
             ? 'Confermando verrà eliminato esclusivamente il PDF della determinazione attualmente caricato. L’approvazione del Responsabile dell’istruttoria amministrativa, i dati di protocollo e il riferimento interno della versione approvata resteranno invariati. La predisposizione dell’e-mail al Direttore verrà nuovamente bloccata finché non sarà caricato e verificato un nuovo PDF della determinazione.'
-            : 'Confermando verrà eliminato esclusivamente il PDF attualmente caricato. Il Word di lavoro, il visto e lo stato della pratica resteranno invariati. Sarà quindi possibile generare nuovamente il Word oppure caricare un nuovo PDF.'}
+            : 'Confermando verrà eliminato esclusivamente il PDF attualmente caricato. Il Word di lavoro, l’esito dell’istruttoria e lo stato della pratica resteranno invariati. Sarà quindi possibile generare nuovamente il Word oppure caricare un nuovo PDF.'}
         </div>
         <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type='button' disabled={!!props.saving} onClick={props.onCancel} style={{ border: '1px solid #94a3b8', background: '#fff', color: '#334155', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>Annulla</button>
@@ -3893,9 +4306,9 @@ function UndoAttestationConfirmDialog (props: { saving?: boolean, onCancel: () =
   return (
     <div style={{ position: 'fixed', zIndex: 2147483000, inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div role='dialog' aria-modal='true' style={{ width: 'min(620px, 100%)', background: '#fff', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
-        <div style={{ background: '#fff7ed', color: '#9a3412', padding: '14px 16px', fontWeight: 900, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>Annulla visto di conformità</div>
+        <div style={{ background: '#fff7ed', color: '#9a3412', padding: '14px 16px', fontWeight: 900, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>Annulla esito dell’istruttoria</div>
         <div style={{ padding: 16, color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45 }}>
-          Confermando, il visto sarà rimosso e la scheda tornerà alla fase di verifica. I successivi adempimenti amministrativi saranno nuovamente bloccati finché non verrà apposto un nuovo visto.
+          Confermando, l’esito corrente sarà annullato e la scheda tornerà alla fase di verifica. I successivi adempimenti amministrativi saranno nuovamente bloccati finché non verrà espresso un nuovo esito conforme.
         </div>
         <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type='button' disabled={!!props.saving} onClick={props.onCancel} style={{ border: '1px solid #94a3b8', background: '#fff', color: '#334155', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>Annulla</button>
@@ -4029,11 +4442,48 @@ function isIaVistoActionPending (data: Record<string, any>): boolean {
   if (isDeterminazioneAdottata(d)) return false
   const esitoIa = parseNumberInput(pickAttrCI(d, ['esito_IA']))
   const esitoRia = parseNumberInput(pickAttrCI(d, ['esito_RIA']))
-  // Il nuovo ciclo riparte dal visto quando il IA non ha ancora attestato
-  // la conformità oppure quando il RIA ha richiesto una nuova verifica.
-  // Finché questo passaggio è pendente nessun indicatore delle fasi successive
-  // deve sopravvivere dal ciclo precedente.
-  return esitoIa !== 2 || esitoRia === 1
+  const esitoAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_IA']))
+  const presaAt = workflowTimestamp(pickAttrCI(d, ['dt_presa_in_carico_IA']))
+  const esitoRiaAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_RIA', 'dt_stato_RIA']))
+  // Un esito precedente resta visibile, ma dopo una nuova presa in carico IA
+  // o dopo un successivo rimando RIA deve essere espresso un nuovo giudizio.
+  // Un esito IA già registrato nel ciclo corrente (conforme o non conforme)
+  // chiude invece la scelta fino al successivo rientro/rimando.
+  if (presaAt > 0 && presaAt > esitoAt) return true
+  if (esitoRia === 1 && ((esitoRiaAt > 0 && esitoRiaAt > esitoAt) || (esitoRiaAt === 0 && esitoIa === 2))) return true
+  return esitoIa == null
+}
+
+function currentIaOutcomeChoice (data: Record<string, any>): IaOutcomeChoice {
+  const d = data || {}
+  const esitoIa = parseNumberInput(pickAttrCI(d, ['esito_IA']))
+  if (esitoIa !== 1 && esitoIa !== 2) return ''
+  const esitoAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_IA']))
+  const presaAt = workflowTimestamp(pickAttrCI(d, ['dt_presa_in_carico_IA']))
+  const esitoRia = parseNumberInput(pickAttrCI(d, ['esito_RIA']))
+  const esitoRiaAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_RIA', 'dt_stato_RIA']))
+  // Il badge conserva l'ultimo esito espresso, ma non lo consideriamo esito del
+  // ciclo corrente quando una nuova presa in carico o un rimando RIA è successivo.
+  if (presaAt > 0 && presaAt > esitoAt) return ''
+  if (esitoRia === 1 && ((esitoRiaAt > 0 && esitoRiaAt > esitoAt) || (esitoRiaAt === 0 && esitoIa === 2))) return ''
+  return esitoIa === 2 ? 'CONFORME' : 'NON_CONFORME'
+}
+
+function canIaManageOutcomeBeforeTransmission (data: Record<string, any>): boolean {
+  const d = data || {}
+  if (isDeterminazioneAdottata(d)) return false
+  const stato = determinationWorkflowState(d)
+  if (stato === 'TRASMESSA_RIA' || stato === 'VALIDATA_RIA' || stato === TRASMESSA_FIRMA_DA_STATE || stato === 'ADOTTATA' || stato === 'NON_SOTTOSCRITTA') return false
+  // Salvaguardia per pratiche legacy: una trasmissione IA→RIA già registrata nel
+  // routing cristallizza l'esito anche se il dominio determinazione_stato non è allineato.
+  const dest = String(pickAttrCI(d, ['GII_a', 'gii_a']) || '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
+  const trasm = parseNumberInput(pickAttrCI(d, ['GII_trasm', 'gii_trasm']))
+  // Quando il routing indica che la pratica è già stata trasmessa al RIA,
+  // l'esito IA è cristallizzato per quel passaggio e non deve più essere
+  // modificabile dalla scheda corrente. Non vincoliamo questo controllo a
+  // stato_IA = 4: il rimando per NON CONFORME usa correttamente stato_IA = 3.
+  if ((dest === 'RIA' || dest === 'RIA-AMM') && trasm === 1) return false
+  return true
 }
 
 function verbaleApprovalDateValue (data: Record<string, any>): any {
@@ -5377,7 +5827,7 @@ function displayAdminFieldValue (data: Record<string, any>, fields: LayerFieldIn
   return String(raw)
 }
 
-function StatusSummaryItem (props: { label: string, value: React.ReactNode, hint?: string, tone?: 'normal' | 'auto' | 'warn' | 'total' }) {
+function StatusSummaryItem (props: { label: string, value: React.ReactNode, hint?: string, tone?: 'normal' | 'auto' | 'ok' | 'warn' | 'total' }) {
   const st = useAdminStyle()
   const tone = props.tone || 'normal'
   const total = tone === 'total'
@@ -5385,16 +5835,20 @@ function StatusSummaryItem (props: { label: string, value: React.ReactNode, hint
     ? (st.statusSummaryTotalBorderColor || '#0d3b66')
     : tone === 'warn'
       ? (st.statusSummaryWarnBorderColor || '#fed7aa')
-      : tone === 'auto'
-        ? (st.statusSummaryAutoBorderColor || '#bfdbfe')
-        : (st.statusSummaryNormalBorderColor || '#c5d9f1')
+      : tone === 'ok'
+        ? '#bbf7d0'
+        : tone === 'auto'
+          ? (st.statusSummaryAutoBorderColor || '#bfdbfe')
+          : (st.statusSummaryNormalBorderColor || '#c5d9f1')
   const bg = total
     ? (st.statusSummaryTotalBg || st.formCardHeaderBg || 'linear-gradient(90deg, #0d3b66, #155e9d)')
     : tone === 'warn'
       ? (st.statusSummaryWarnBg || '#fff7ed')
-      : tone === 'auto'
-        ? (st.statusSummaryAutoBg || '#f5f9ff')
-        : (st.statusSummaryNormalBg || '#f8fbff')
+      : tone === 'ok'
+        ? '#ecfdf3'
+        : tone === 'auto'
+          ? (st.statusSummaryAutoBg || '#f5f9ff')
+          : (st.statusSummaryNormalBg || '#f8fbff')
   const labelColor = total ? (st.statusSummaryTotalLabelColor || 'rgba(255,255,255,0.86)') : (st.statusSummaryLabelColor || '#6b7280')
   const valueColor = total ? (st.statusSummaryTotalValueColor || st.formCardHeaderColor || '#fff') : (st.statusSummaryValueColor || '#111827')
   const hintColor = total ? (st.statusSummaryTotalHintColor || 'rgba(255,255,255,0.78)') : (st.statusSummaryHintColor || '#6b7280')
@@ -5403,6 +5857,143 @@ function StatusSummaryItem (props: { label: string, value: React.ReactNode, hint
       <div style={{ color: labelColor, fontSize: adminLabelFontSize(st), fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.25, marginBottom: 4 }}>{props.label}</div>
       <div style={{ color: valueColor, fontSize: total ? Math.max(16, Number(st.amountFontSize ?? 16)) : adminFieldFontSize(st), fontWeight: 800, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{props.value || '—'}</div>
       {props.hint && <div style={{ marginTop: 4, color: hintColor, fontSize: adminLabelFontSize(st), lineHeight: 1.35 }}>{props.hint}</div>}
+    </div>
+  )
+}
+
+function integrationModifiedFieldLabel (fieldName: string, fields: LayerFieldInfo[]): string {
+  const info = getFieldInfo(fields, fieldName)
+  const alias = String(info?.alias || '').trim()
+  if (alias && alias.toLowerCase() !== String(fieldName || '').trim().toLowerCase()) return alias
+  return String(fieldName || '')
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^./, char => char.toUpperCase())
+}
+
+function AdministrativeIntegrationCycleCards (props: { cycle: RiaIntegrationCycleInfo, fields: LayerFieldInfo[] }) {
+  const st = useAdminStyle()
+  const cycle = props.cycle || EMPTY_RIA_INTEGRATION_CYCLE
+  const requestOperator = cleanAmmOperatorLabel(cycle.requestOperatorName || cycle.requestUsername)
+  const responseOperator = cleanAmmOperatorLabel(cycle.responseOperatorName || cycle.responseUsername)
+  const requestAt = formatDateTimeValue(cycle.requestAt)
+  const responseAt = formatDateTimeValue(cycle.responseAt)
+  const fieldLabels = cycle.modifiedFields
+    .map(fieldName => integrationModifiedFieldLabel(fieldName, props.fields))
+    .filter(Boolean)
+  const cardBase: React.CSSProperties = {
+    minWidth: 0,
+    overflow: 'hidden',
+    borderRadius: Number(st.formCardBorderRadius ?? 9),
+    background: '#fff',
+    boxShadow: '0 1px 2px rgba(15, 23, 42, 0.05)'
+  }
+  const metadataStyle: React.CSSProperties = {
+    display: 'grid',
+    gap: 4,
+    color: '#475569',
+    fontSize: adminLabelFontSize(st),
+    lineHeight: 1.4
+  }
+  const detailTitleStyle: React.CSSProperties = {
+    color: st.formWorkflowBadgeTitleColor || '#0d3b66',
+    fontWeight: 900,
+    fontSize: adminLabelFontSize(st),
+    textTransform: 'uppercase',
+    letterSpacing: 0.2
+  }
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 10, alignItems: 'stretch' }}>
+      <div style={{ ...cardBase, border: '1px solid #fed7aa' }}>
+        <div style={{ padding: '9px 11px', background: '#fff7ed', color: '#9a3412', borderBottom: '1px solid #fed7aa', fontWeight: 900, fontSize: adminFieldFontSize(st) }}>
+          Richiesta di integrazione
+        </div>
+        <div style={{ padding: 11, display: 'grid', gap: 10 }}>
+          {(requestOperator || requestAt) && (
+            <div style={metadataStyle}>
+              {requestOperator && <div><span style={{ fontWeight: 800 }}>Richiedente: </span>{requestOperator}</div>}
+              {requestAt && <div><span style={{ fontWeight: 800 }}>Data e ora richiesta: </span>{requestAt}</div>}
+            </div>
+          )}
+          {cycle.requestTargets.length > 0 && (
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div style={detailTitleStyle}>Oggetto del rimando</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {cycle.requestTargets.map(target => (
+                  <span key={target} style={{ border: '1px solid #fdba74', background: '#fff7ed', color: '#9a3412', borderRadius: 999, padding: '3px 8px', fontSize: adminLabelFontSize(st), fontWeight: 800 }}>{target}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          <div style={{ display: 'grid', gap: 5 }}>
+            <div style={detailTitleStyle}>Motivazione del rimando</div>
+            <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+              {cycle.requestMotivation || cycle.requestNote || '—'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ ...cardBase, border: `1px solid ${cycle.received ? '#bfdbfe' : '#dbe4ee'}` }}>
+        <div style={{ padding: '9px 11px', background: cycle.received ? '#eff6ff' : '#f8fafc', color: cycle.received ? '#1d4ed8' : '#64748b', borderBottom: `1px solid ${cycle.received ? '#bfdbfe' : '#dbe4ee'}`, fontWeight: 900, fontSize: adminFieldFontSize(st) }}>
+          {cycle.received ? 'Esito integrazione ricevuto' : 'Esito integrazione non ancora ricevuto'}
+        </div>
+        <div style={{ padding: 11, display: 'grid', gap: 10 }}>
+          {!cycle.received ? (
+            <div style={{ color: '#64748b', fontSize: adminFieldFontSize(st), lineHeight: 1.45 }}>
+              La richiesta è stata trasmessa. L’esito dell’integrazione non è ancora disponibile.
+            </div>
+          ) : (
+            <>
+              {(responseOperator || responseAt) && (
+                <div style={metadataStyle}>
+                  {responseOperator && <div><span style={{ fontWeight: 800 }}>Trasmettitore: </span>{responseOperator}</div>}
+                  {responseAt && <div><span style={{ fontWeight: 800 }}>Data e ora trasmissione: </span>{responseAt}</div>}
+                </div>
+              )}
+              <div style={{ display: 'grid', gap: 5 }}>
+                <div style={detailTitleStyle}>Annotazioni</div>
+                <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                  {cycle.responseNote || 'Nessuna ulteriore annotazione.'}
+                </div>
+              </div>
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={detailTitleStyle}>Modifiche registrate</div>
+                {fieldLabels.length > 0 ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {fieldLabels.map(label => (
+                      <span key={label} style={{ border: '1px solid #cbd5e1', background: '#f8fafc', color: '#334155', borderRadius: 999, padding: '3px 8px', fontSize: adminLabelFontSize(st), fontWeight: 800 }}>{label}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ color: '#64748b', fontSize: adminLabelFontSize(st) }}>Nessuna modifica ai dati registrata nel ciclo.</div>
+                )}
+              </div>
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={detailTitleStyle}>Documenti integrati</div>
+                {cycle.documents.length > 0 ? (
+                  <div style={{ display: 'grid', gap: 5 }}>
+                    {cycle.documents.map((document, index) => (
+                      <div key={`${document.attachmentId || index}-${document.name}`} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, border: '1px solid #e2e8f0', background: '#f8fafc', borderRadius: 7, padding: '7px 8px', minWidth: 0 }}>
+                        <span aria-hidden='true' style={{ color: '#0d3b66', fontWeight: 900, lineHeight: 1.3 }}>▣</span>
+                        <div style={{ minWidth: 0, color: '#1f2937', fontSize: adminLabelFontSize(st), lineHeight: 1.4, overflowWrap: 'anywhere' }}>
+                          <span style={{ fontWeight: 800 }}>{document.action === 'AGGIUNTO' ? 'Aggiunto: ' : 'Sostituito: '}</span>
+                          {document.action === 'SOSTITUITO' && document.previousName && document.previousName !== document.name
+                            ? `${document.previousName} → ${document.name}`
+                            : document.name}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ color: '#64748b', fontSize: adminLabelFontSize(st) }}>Nessun documento aggiunto o sostituito nel ciclo.</div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -5448,7 +6039,7 @@ function IaVerificationSummary (props: {
   role: string
   saving?: boolean
   onChange: (name: string, value: any) => void
-  onApplyAttestation: (note: string) => void
+  onManageOutcome: () => void
   onUndoAttestation: () => void
   onGenerateBozzaDeterminazioneWord: () => void
   onDeleteBozzaDeterminazione: () => boolean | Promise<boolean>
@@ -5476,13 +6067,13 @@ function IaVerificationSummary (props: {
   const hasEsito = esitoCode != null
   const iaHaAttestatoConformita = esitoCode === 2
   const esitoLabel = esitoCode === 1
-    ? 'Da integrare/rettificare'
+    ? 'Non conforme'
     : esitoCode === 2
       ? 'Conforme'
       : esitoCode === 3
         ? 'Respinta'
         : (hasAdminValue(esitoRaw) ? String(esitoRaw) : '')
-  const note = String(pickAttrCI(d, ['note_IA', 'note_atto_amm']) || '').trim()
+  const note = String(pickAttrCI(d, ['note_IA']) || '').trim()
   const riaEsitoRaw = pickAttrCI(d, ['esito_RIA'])
   const riaEsitoCode = parseNumberInput(riaEsitoRaw)
   const riaNote = String(pickAttrCI(d, ['note_RIA']) || '').trim()
@@ -5494,13 +6085,62 @@ function IaVerificationSummary (props: {
   const riaRimandoReason = riaHaRichiestoIntegrazioni ? (riaNoteClean || riaRimandoReasonFromTiNote) : ''
   const riaApprovalNote = riaHaApprovato ? riaNoteClean : ''
   const showRiaConsequenceInsideTiBox = esitoCode === 1 || riaHaRichiestoIntegrazioni || riaHaApprovato
-  const iaSummaryTitle = riaHaRimandatoProposta
-    ? 'Rientro all’Istruttore amministrativo'
-    : 'Visto di conformità dell’Istruttore amministrativo'
-  const noteLabel = esitoCode === 1 || riaHaRichiestoIntegrazioni
-    ? 'Integrazioni/rettifiche proposte'
-    : 'Visto di conformità'
-  const iaNoteText = normalizeAmmWorkflowText(note) || '—'
+  const iaEsitoAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_IA']))
+  const iaPresaInCaricoAt = workflowTimestamp(pickAttrCI(d, ['dt_presa_in_carico_IA']))
+  const workflowParentGlobalId = String(pickAttrCI(d, ['GlobalID', 'globalid', 'GLOBALID']) || '').trim()
+  const [riaIntegrationCycle, setRiaIntegrationCycle] = React.useState<RiaIntegrationCycleInfo>({ ...EMPTY_RIA_INTEGRATION_CYCLE })
+  React.useEffect(() => {
+    let cancelled = false
+    if (role !== 'IA' || !workflowParentGlobalId) {
+      setRiaIntegrationCycle({ ...EMPTY_RIA_INTEGRATION_CYCLE })
+      return () => { cancelled = true }
+    }
+    const loadCycle = () => {
+      void loadCurrentRiaIntegrationCycle(workflowParentGlobalId).then(info => {
+        if (!cancelled) setRiaIntegrationCycle(info)
+      })
+    }
+    loadCycle()
+    window.addEventListener('gii-log-eventi-cicli-changed', loadCycle)
+    return () => {
+      cancelled = true
+      window.removeEventListener('gii-log-eventi-cicli-changed', loadCycle)
+    }
+  }, [role, workflowParentGlobalId, iaPresaInCaricoAt, iaEsitoAt])
+  const riaIntegrationRequestAt = workflowTimestamp(riaIntegrationCycle.requestAt)
+  // La richiesta resta corrente solo finché l'IA non esprime un esito successivo.
+  // Il timestamp della risposta RIA non deve riattivare un ciclo già superato da
+  // una nuova valutazione IA.
+  const integrationRequestStillCurrent = riaIntegrationCycle.requested && (
+    iaEsitoAt <= 0 || riaIntegrationRequestAt <= 0 || iaEsitoAt <= riaIntegrationRequestAt
+  )
+  // Il routing della feature madre viene aggiornato insieme al workflow, quindi è
+  // disponibile prima della query asincrona al LOG. Nel rientro RIA -> IA successivo
+  // a una bozza già trasmessa al RIA possiamo usarlo come segnale immediato e
+  // lasciare al LOG il solo compito di arricchire il pannello con autore/data/note.
+  const immediateRiaIntegrationReturn = (() => {
+    if (role !== 'IA') return false
+    const from = String(pickAttrCI(d, ['GII_da', 'gii_da']) || '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
+    const to = String(pickAttrCI(d, ['GII_a', 'gii_a']) || '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
+    const transmitted = parseNumberInput(pickAttrCI(d, ['GII_trasm', 'gii_trasm'])) === 1
+    const rimando = parseNumberInput(pickAttrCI(d, ['GII_rim', 'gii_rim'])) === 1
+    const statoBozza = determinationWorkflowState(d)
+    return (from === 'RIA' || from === 'RIA-AMM') &&
+      (to === 'IA' || to === 'IA-AMM') &&
+      transmitted &&
+      !rimando &&
+      (statoBozza === 'TRASMESSA_RIA' || statoBozza === 'BOZZA_TRASMESSA_RIA')
+  })()
+  const hasLoggedRiaIntegrationResponse = role === 'IA' && riaIntegrationCycle.received && integrationRequestStillCurrent
+  const hasCurrentRiaIntegrationResponse =
+    (immediateRiaIntegrationReturn && (!riaIntegrationCycle.requested || integrationRequestStillCurrent)) ||
+    hasLoggedRiaIntegrationResponse
+  const hasActiveAdministrativeIntegrationCycle = role === 'IA' && integrationRequestStillCurrent
+  const iaSummaryTitle = 'Ultimo esito espresso'
+  const noteLabel = esitoCode === 1
+    ? 'Richiesta di integrazione'
+    : (riaHaRichiestoIntegrazioni ? 'Integrazioni/rettifiche proposte' : 'Esito dell’istruttoria')
+  const iaNoteText = esitoCode === 1 ? (note || '—') : ''
   const riaApprovalNoteIsStandard = (() => {
     const txt = riaApprovalNote.toLowerCase().replace(/\s+/g, ' ').trim()
     return !!txt && txt.includes('si approva l’istruttoria amministrativa') && txt.includes('restituzione della pratica all’istruttore amministrativo')
@@ -5521,7 +6161,7 @@ function IaVerificationSummary (props: {
   const riaConsequenceAction = riaHaRichiestoIntegrazioni
     ? (attoContestazioneOutcomeCycle
         ? 'Apportare le modifiche richieste alla bozza dell’Atto e predisporre il nuovo PDF prima di ritrasmetterlo al Responsabile.'
-        : 'A seguito delle modifiche è necessario apporre un nuovo visto di conformità; la Proposta di contestazione sarà rigenerata prima della predisposizione della nuova bozza.')
+        : 'A seguito delle modifiche è necessario esprimere un nuovo esito dell’istruttoria; in caso di conformità la Proposta di contestazione sarà rigenerata prima della predisposizione della nuova bozza.')
     : ''
   const riaConsequenceDetailLabel = riaHaApprovato ? 'Note del Responsabile: ' : 'Motivazione del rimando: '
   const riaConsequenceDetail = riaHaApprovato
@@ -5533,7 +6173,7 @@ function IaVerificationSummary (props: {
   // La verifica del Responsabile si riferisce al ciclo amministrativo corrente.
   // Dopo un rimando RIA va ricondotta al blocco delle integrazioni/rettifiche
   // dell’IA, così causa, esito e azione successiva restano nello stesso contesto.
-  const hasRiaEsito = !showRiaConsequenceInsideTiBox && (iaHaAttestatoConformita || riaHaRimandatoProposta) && (riaEsitoCode != null || hasAdminValue(riaEsitoRaw))
+  const hasRiaEsito = !hasActiveAdministrativeIntegrationCycle && !hasCurrentRiaIntegrationResponse && !showRiaConsequenceInsideTiBox && (iaHaAttestatoConformita || riaHaRimandatoProposta) && (riaEsitoCode != null || hasAdminValue(riaEsitoRaw))
   const riaEsitoLabel = riaEsitoCode === 1
     ? 'Integrazioni/rettifiche richieste'
     : riaEsitoCode === 2
@@ -5568,7 +6208,7 @@ function IaVerificationSummary (props: {
     return () => { cancelled = true }
   }, [riaParentGlobalId, riaHaApprovato, riaHaRichiestoIntegrazioni, riaEsitoCode, riaDataEsitoRaw])
   const riaDataEsito = formatDateTimeValue(riaDataEsitoRaw)
-  const showRiaOutcomeAsPrimary = riaHaRichiestoIntegrazioni || riaHaApprovato
+  const showRiaOutcomeAsPrimary = !hasCurrentRiaIntegrationResponse && (riaHaRichiestoIntegrazioni || riaHaApprovato)
   const primarySummaryTitle = showRiaOutcomeAsPrimary
     ? 'Esito del Responsabile dell’istruttoria amministrativa'
     : iaSummaryTitle
@@ -5583,14 +6223,17 @@ function IaVerificationSummary (props: {
     : cleanAmmOperatorLabel(tecnico)
   const primaryDateLabel = showRiaOutcomeAsPrimary
     ? (riaHaApprovato ? 'Data e ora approvazione' : 'Data e ora esito')
-    : (esitoCode === 2 ? 'Data e ora visto' : 'Data e ora esito')
+    : 'Data e ora esito'
   const primaryDateValue = showRiaOutcomeAsPrimary ? riaDataEsito : dataEsito
   const primaryTone = showRiaOutcomeAsPrimary
     ? (riaHaApprovato ? 'auto' : 'warn')
-    : (esitoCode === 1 ? 'warn' : 'auto')
+    : (esitoCode === 1 ? 'warn' : esitoCode === 2 ? 'ok' : 'auto')
   const hasIaVerification = hasEsito || !!note
+  // Il ciclo di integrazione integra il riepilogo dell'esito precedente: non lo
+  // sostituisce. L'IA deve continuare a vedere l'esito che ha originato il rimando
+  // insieme alla richiesta e alla successiva risposta del RIA.
   const hasPrimaryVerification = hasIaVerification || showRiaOutcomeAsPrimary
-  const hasVerification = hasPrimaryVerification || hasRiaEsito
+  const hasVerification = hasActiveAdministrativeIntegrationCycle || hasPrimaryVerification || hasRiaEsito
   const determinazioneAdottata = isDeterminazioneAdottata(props.savedData || d)
   const attoCycleStartedForDetermination = isDeterminazioneAdottata(props.savedData || d) && attoContestazioneWorkflowState(props.savedData || d) !== ''
   const determinazioneCorrectionLocked =
@@ -5601,18 +6244,24 @@ function IaVerificationSummary (props: {
     hasAdminValue(pickAttrCI(props.savedData || {}, ['notifica_data']))
   const canEditDetermination = props.canEdit && (role === 'IA' || role === 'ADMIN') && !determinazioneCorrectionLocked
   const bozzaRientrataDaRia = isBozzaDeterminazioneRientrataDaRia(d)
-  const showIaInfo = role === 'IA' && props.canEdit
-  const vistoActionPending = showIaInfo && isIaVistoActionPending(d)
-  const attestazioneButtonTitle = riaHaRimandatoProposta || esitoCode === 1
-    ? 'Riappone visto di conformità e rigenera la Proposta'
-    : 'Apponi visto di conformità'
-
+  const iaRoutingDest = String(pickAttrCI(d, ['GII_a', 'gii_a']) || '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
+  const iaRoutingTransmitted = parseNumberInput(pickAttrCI(d, ['GII_trasm', 'gii_trasm'])) === 1
+  const iaTransferredToRia = (iaRoutingDest === 'RIA' || iaRoutingDest === 'RIA-AMM') && iaRoutingTransmitted
+  // Il comando resta visibile per l'IA anche dopo il trasferimento al RIA, ma viene
+  // disabilitato. In questo modo la barra Azioni resta stabile e rende evidente che
+  // l'esito non è più modificabile nel ciclo corrente.
+  const showIaInfo = role === 'IA'
+  const vistoActionPending = showIaInfo && props.canEdit && !iaTransferredToRia && isIaVistoActionPending(d)
+  // Un ESITO_INTEGRAZIONE_TRASMESSO RIA -> IA apre un nuovo ciclo di valutazione:
+  // il vecchio stato documentale TRASMESSA_RIA resta storico, ma non deve bloccare
+  // il comando Gestisci istruttoria del nuovo ciclo.
+  const manageOutcomeEnabled = showIaInfo && props.canEdit && (hasCurrentRiaIntegrationResponse || canIaManageOutcomeBeforeTransmission(d))
   return (
     <div style={{ display: 'grid', gap: 10 }}>
       {hasVerification && (
         <Section
           title='VERIFICA ISTRUTTORIA AMMINISTRATIVA'
-          right={<SectionInfoButton text={showIaInfo ? 'Il visto avvia la predisposizione della determinazione.' : null} title='Informazioni verifica istruttoria amministrativa' />}
+          right={<SectionInfoButton text={showIaInfo ? 'Gestisci istruttoria consente di esprimere l’esito. In caso di conformità si avvia la predisposizione della determinazione; in caso di non conformità si prosegue con il rimando per integrazione.' : null} title='Informazioni verifica istruttoria amministrativa' />}
           bodyStyle={{ padding: 8 }}
         >
           <div style={{ display: 'grid', gap: 10 }}>
@@ -5624,10 +6273,7 @@ function IaVerificationSummary (props: {
                   <StatusSummaryItem label={primaryOperatoreLabel} value={primaryOperatoreValue || '—'} tone='auto' />
                   <StatusSummaryItem label={primaryDateLabel} value={primaryDateValue || '—'} tone='auto' />
                 </div>
-                <div style={{ border: `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}`, background: st.formWorkflowBadgeBg || '#ffffff', borderRadius: 9, padding: 10 }}>
-                  {!showRiaOutcomeAsPrimary && (
-                    <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: adminLabelFontSize(st), marginBottom: 5 }}>{noteLabel}</div>
-                  )}
+                {(showRiaOutcomeAsPrimary || esitoCode === 1) && <div style={{ border: `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}`, background: st.formWorkflowBadgeBg || '#ffffff', borderRadius: 9, padding: 10 }}>
                   {showRiaOutcomeAsPrimary ? (
                     <div style={{ display: 'grid', gap: 6, color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45 }}>
                       <div style={{ whiteSpace: 'pre-wrap' }}>{riaConsequenceText}</div>
@@ -5639,13 +6285,23 @@ function IaVerificationSummary (props: {
                       )}
                     </div>
                   ) : (
-                    <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}><AmmWorkflowText text={iaNoteText} /></div>
+                    <div style={{ display: 'grid', minWidth: 0 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: adminLabelFontSize(st), marginBottom: 5 }}>{noteLabel}</div>
+                        <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}><AmmWorkflowText text={iaNoteText} /></div>
+                      </div>
+                    </div>
                   )}
-                </div>
+                </div>}
+              </div>
+            )}
+            {hasActiveAdministrativeIntegrationCycle && (
+              <div style={{ borderTop: hasPrimaryVerification ? `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}` : 'none', paddingTop: hasPrimaryVerification ? 10 : 0 }}>
+                <AdministrativeIntegrationCycleCards cycle={riaIntegrationCycle} fields={props.fields} />
               </div>
             )}
             {hasRiaEsito && (
-              <div style={{ display: 'grid', gap: 8, borderTop: hasPrimaryVerification ? `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}` : 'none', paddingTop: hasPrimaryVerification ? 10 : 0 }}>
+              <div style={{ display: 'grid', gap: 8, borderTop: (hasActiveAdministrativeIntegrationCycle || hasPrimaryVerification) ? `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}` : 'none', paddingTop: (hasActiveAdministrativeIntegrationCycle || hasPrimaryVerification) ? 10 : 0 }}>
                 <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: Number(st.formSectionTitleSize ?? 14), textTransform: 'uppercase', letterSpacing: 0.2 }}>Verifica del Responsabile istruttoria amministrativa</div>
                 <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 10 }}>
                   <StatusSummaryItem label='Esito' value={riaEsitoLabel || '—'} tone={riaEsitoCode === 1 || riaEsitoCode === 3 ? 'warn' : 'auto'} />
@@ -5673,8 +6329,9 @@ function IaVerificationSummary (props: {
         onChange={props.onChange}
         actionBarTarget={props.actionBarTarget}
         vistoActionPending={vistoActionPending}
-        attestazioneButtonTitle={attestazioneButtonTitle}
-        onApplyAttestation={props.onApplyAttestation}
+        manageOutcomeEnabled={manageOutcomeEnabled}
+        integrationReturnActive={hasCurrentRiaIntegrationResponse}
+        onManageOutcome={props.onManageOutcome}
         onGenerateBozzaDeterminazioneWord={props.onGenerateBozzaDeterminazioneWord}
         onDeleteBozzaDeterminazione={props.onDeleteBozzaDeterminazione}
         onTransmitBozzaDeterminazioneRia={props.onTransmitBozzaDeterminazioneRia}
@@ -5773,8 +6430,9 @@ function PostAttestazioneIaWorkSection (props: {
   onChange: (name: string, value: any) => void
   actionBarTarget?: HTMLElement | null
   vistoActionPending?: boolean
-  attestazioneButtonTitle?: string
-  onApplyAttestation: (note: string) => void
+  manageOutcomeEnabled?: boolean
+  integrationReturnActive?: boolean
+  onManageOutcome: () => void
   onGenerateBozzaDeterminazioneWord: () => void
   onDeleteBozzaDeterminazione: () => boolean | Promise<boolean>
   onTransmitBozzaDeterminazioneRia: () => void
@@ -5795,6 +6453,10 @@ function PostAttestazioneIaWorkSection (props: {
   workflowScope?: 'approvazione' | 'notifica'
 }) {
   const st = useAdminStyle()
+  const iaRoutingDest = String(pickAttrCI(props.data || {}, ['GII_a', 'gii_a']) || '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
+  const iaRoutingTransmitted = parseNumberInput(pickAttrCI(props.data || {}, ['GII_trasm', 'gii_trasm'])) === 1
+  const iaTransferredToRia = (iaRoutingDest === 'RIA' || iaRoutingDest === 'RIA-AMM') && iaRoutingTransmitted
+  const integrationReturnActive = !!props.integrationReturnActive
   const workflowScope = props.workflowScope || 'approvazione'
   const showDeterminationWorkflow = workflowScope === 'approvazione'
   const showAttoWorkflow = workflowScope === 'notifica'
@@ -5807,6 +6469,12 @@ function PostAttestazioneIaWorkSection (props: {
   const iaHaRichiestoIntegrazioni = iaEsitoCode === 1
   const riaHaApprovatoProposta = isPropostaContestazioneApprovedByRia(d) || isDeterminazioneAdottata(d)
   const riaHaRimandatoProposta = isBozzaDeterminazioneRimandataDaRia(d)
+  const giiAmmDest = String(pickAttrCI(d, ['GII_a', 'gii_a']) || '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
+  const giiAmmRimando = parseNumberInput(pickAttrCI(d, ['GII_rim', 'gii_rim']))
+  const riaIntegrationReturnPending =
+    parseNumberInput(pickAttrCI(d, ['esito_RIA', 'ESITO_RIA'])) === 3 ||
+    parseNumberInput(pickAttrCI(d, ['stato_RIA', 'STATO_RIA'])) === 3 ||
+    (giiAmmRimando === 1 && (giiAmmDest === 'IA' || giiAmmDest === 'IA-AMM'))
   const vistoDaRinnovareDopoRimando = iaHaRichiestoIntegrazioni || riaHaRimandatoProposta
   const protocolloFascicoloOk = hasAdminValue(pickAttrCI(d, ['protocollo_fascicolo_numero'])) && hasAdminValue(pickAttrCI(d, ['protocollo_fascicolo_data']))
   const protocolloFascicoloSalvatoOk =
@@ -5871,7 +6539,11 @@ function PostAttestazioneIaWorkSection (props: {
   const iaVistoAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_IA']))
   const wordGeneratedAt = workflowTimestamp(pickAttrCI(d, ['dt_bozza_determinazione']))
   const approvalAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_RIA']))
-  const hasBozzaGenerated = wordGeneratedAt > 0 && (iaVistoAt <= 0 || wordGeneratedAt >= iaVistoAt)
+  // Una bozza generata prima dell'ultimo esito IA non è più la bozza corrente:
+  // resta storicamente riconoscibile tramite la sua data, ma deve essere rigenerata.
+  // In questo modo non servono nuovi flag/campi e il controllo sopravvive ai refresh.
+  const bozzaDaRigenerare = wordGeneratedAt > 0 && iaVistoAt > 0 && wordGeneratedAt < iaVistoAt
+  const hasBozzaGenerated = wordGeneratedAt > 0 && !bozzaDaRigenerare
   const bozzaRimandataDaRia = isBozzaDeterminazioneRimandataDaRia(d)
   const bozzaValidataDaRia = isBozzaDeterminazioneValidataDaRia(d)
   const bozzaRientrataDaRia = bozzaValidataDaRia || bozzaRimandataDaRia
@@ -5893,14 +6565,20 @@ function PostAttestazioneIaWorkSection (props: {
   const determinationDisplayStateCode = determinazioneAdottata
     ? 'ADOTTATA'
     : (currentStatoBozzaCode || pickAttrCI(d, ['determinazione_stato']))
-  const statoBozza = displayAdminFieldValue(
-    { ...d, determinazione_stato: determinationDisplayStateCode },
-    props.fields,
-    'determinazione_stato',
-    hasBozzaGenerated ? 'Bozza predisposta' : 'Non generata'
-  )
-  const dataGenerazione = displayAdminFieldValue(d, props.fields, 'dt_bozza_determinazione')
-  const generataDa = displayAdminFieldValue(d, props.fields, 'bozza_determinazione_da')
+  const statoBozza = bozzaDaRigenerare && iaHaAttestatoConformita && !determinazioneAdottata
+    ? 'Da rigenerare'
+    : (String(determinationDisplayStateCode || '').trim().toUpperCase() === 'BOZZA'
+        ? (hasBozzaGenerated ? 'Bozza predisposta' : 'Non generata')
+        : displayAdminFieldValue(
+            { ...d, determinazione_stato: determinationDisplayStateCode },
+            props.fields,
+            'determinazione_stato',
+            hasBozzaGenerated ? 'Bozza predisposta' : 'Non generata'
+          ))
+  // I metadati della versione superata restano nel record per consentire il confronto
+  // temporale, ma non vengono presentati come dati della bozza corrente.
+  const dataGenerazione = bozzaDaRigenerare ? '—' : displayAdminFieldValue(d, props.fields, 'dt_bozza_determinazione')
+  const generataDa = bozzaDaRigenerare ? '—' : displayAdminFieldValue(d, props.fields, 'bozza_determinazione_da')
   const determinationPdfFileName = sanitizeEmailFileName(`determinazione_${getReportCode(d, oid) || String(oid || '')}.pdf`, 'determinazione.pdf')
   const [bozzaAttachments, setBozzaAttachments] = React.useState<AmmAttachmentInfo[]>([])
   const [attoAttachments, setAttoAttachments] = React.useState<AmmAttachmentInfo[]>([])
@@ -7072,16 +7750,20 @@ function PostAttestazioneIaWorkSection (props: {
   }
 
   const preApprovalGuideText = nextIaAction === 'GENERATE_WORD' && !riaHaApprovatoProposta
-    ? 'Il visto di conformità è stato apposto. Generare la bozza Word della determinazione.'
+    ? (bozzaDaRigenerare
+        ? 'L’esito dell’istruttoria è cambiato. Rigenerare la bozza Word della determinazione.'
+        : 'L’istruttoria è conforme. Generare la bozza Word della determinazione.')
     : nextIaAction === 'UPLOAD_PDF' && !riaHaApprovatoProposta
       ? 'La bozza Word è stata generata. Predisporre il PDF e caricarlo nella pratica.'
       : nextIaAction === 'TRANSMIT_RIA'
-        ? 'PDF pronto. Trasmettere il fascicolo per la verifica.'
+        ? (riaIntegrationReturnPending
+            ? 'PDF pronto. Trasmettere l’esito dell’integrazione.'
+            : (attoWorkflow ? 'PDF pronto. Trasmettere l’Atto per la verifica.' : 'PDF pronto. Trasmettere il fascicolo per la verifica.'))
         : ''
 
   const generateBozzaButtonLabel = postApprovalProtocolSaved
     ? 'Aggiorna determinazione'
-    : (hasBozzaGenerated ? 'Rigenera bozza' : 'Genera bozza')
+    : (bozzaDaRigenerare || hasBozzaGenerated ? 'Rigenera bozza' : 'Genera bozza')
 
   // Tooltip coerenti con lo stato dei comandi: quando un'azione è stata completata
   // e il relativo pulsante resta visibile ma disabilitato, il tooltip lo dichiara
@@ -7102,7 +7784,7 @@ function PostAttestazioneIaWorkSection (props: {
     ? (riaHaApprovatoProposta
         ? 'Fascicolo già approvato'
         : 'Fascicolo già trasmesso per la verifica')
-    : 'Trasmetti fascicolo al Responsabile'
+    : (riaIntegrationReturnPending ? 'Trasmetti esito integrazione' : 'Trasmetti fascicolo al Responsabile')
 
   const generateActionDisabled = !attachmentsResolved || (attoWorkflow ? !canGenerateAttoContestazioneWord : actionDisabled)
   const attoPreparationBlockReason = attoWorkflow && attoInLavorazioneIa && !attoPreDraftReady
@@ -7137,7 +7819,11 @@ function PostAttestazioneIaWorkSection (props: {
             : uploadBozzaActionTitle))
   const transmitActionDisabled = !attachmentsResolved || (attoWorkflow ? !canTransmitAttoContestazione : !canTransmitBozza)
   const transmitActionTitle = attoWorkflow
-    ? (attoTransmittedRia ? 'Atto già trasmesso per la verifica' : (attoApprovedRia ? 'Atto già approvato' : 'Trasmetti Atto per la verifica'))
+    ? (attoTransmittedRia
+        ? 'Atto già trasmesso per la verifica'
+        : (attoApprovedRia
+            ? 'Atto già approvato'
+            : (riaIntegrationReturnPending ? 'Trasmetti esito integrazione' : 'Trasmetti Atto per la verifica')))
     : transmitBozzaActionTitle
   const contextualEmailIsProtocollo = !attoWorkflow && emailActionIsProtocollo
   const contextualEmailIsAttoProtocollo = attoWorkflow && hasAttoFirmato
@@ -7272,6 +7958,10 @@ function PostAttestazioneIaWorkSection (props: {
               {!verifiedFinalPdfCaricato && !determinazioneAdottata && !vistoDaRinnovareDopoRimando && riaHaApprovatoProposta && bozzaRientrataDaRia ? (
                 <InfoBox kind='warn'>
                   {riaApprovedMessage}
+                </InfoBox>
+              ) : (integrationReturnActive) ? (
+                <InfoBox>
+                  L’esito dell’integrazione è stato ricevuto. Esprimere una nuova valutazione dell’istruttoria.
                 </InfoBox>
               ) : (!vistoDaRinnovareDopoRimando && bozzaAlreadyTransmitted && !riaHaApprovatoProposta) ? (
                 <InfoBox>
@@ -7523,26 +8213,37 @@ function PostAttestazioneIaWorkSection (props: {
           padding: `${Number(st.actionBarPaddingY ?? 10)}px ${Number(st.actionBarPaddingX ?? 12)}px`
         }}>
           <div style={{ fontSize: Number(st.actionBarTitleFontSize ?? 14), fontWeight: 700, color: String(st.actionBarTitleColor || '#111827') }}>Azioni</div>
-          <div style={{ display: 'flex', gap: Number(st.actionBarButtonGap ?? 10), flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             {showDeterminationWorkflow && props.showIaInfo && (
               <span style={{ position: 'relative', display: 'inline-flex' }}>
-                {props.vistoActionPending && !props.saving && <NextActionPulse floating title='Azione successiva: apponi il visto di conformità' />}
-                <button
-                  type='button'
-                  title={props.vistoActionPending
-                    ? (props.attestazioneButtonTitle || 'Apponi visto di conformità')
-                    : 'Visto di conformità già apposto'}
-                  aria-label={props.vistoActionPending
-                    ? (props.attestazioneButtonTitle || 'Apponi visto di conformità')
-                    : 'Visto di conformità già apposto'}
-                  disabled={!props.vistoActionPending || !!props.saving}
-                  onClick={() => props.onApplyAttestation('A seguito della verifica svolta, si attesta la conformità della pratica sotto il profilo istruttorio-amministrativo.')}
-                  style={bozzaIconButtonStyle({ disabled: !props.vistoActionPending || !!props.saving })}
+                {props.vistoActionPending && !props.saving && <NextActionPulse floating title='Azione successiva: esprimere l’esito dell’istruttoria' />}
+                <Button
+                  type='primary'
+                  title={props.manageOutcomeEnabled
+                    ? 'Gestisci istruttoria'
+                    : iaTransferredToRia
+                      ? 'Pratica già trasmessa al RIA'
+                      : 'Esito cristallizzato con la trasmissione del fascicolo'}
+                  aria-label='Gestisci istruttoria'
+                  disabled={!props.manageOutcomeEnabled || !!props.saving}
+                  onClick={props.onManageOutcome}
+                  style={{
+                    borderRadius: 8,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    padding: '8px 16px',
+                    backgroundColor: (!props.manageOutcomeEnabled || !!props.saving) ? '#e5e7eb' : '#1d4ed8',
+                    borderColor: (!props.manageOutcomeEnabled || !!props.saving) ? '#e5e7eb' : '#1d4ed8',
+                    color: (!props.manageOutcomeEnabled || !!props.saving) ? '#9ca3af' : '#ffffff',
+                    cursor: (!props.manageOutcomeEnabled || !!props.saving) ? 'not-allowed' : 'pointer'
+                  }}
                 >
-                  <BozzaActionIcon name='check' size={24} />
-                </button>
+                  Gestisci istruttoria
+                </Button>
               </span>
             )}
+
+            <div style={{ flex: 1 }} />
 
             <span style={{ position: 'relative', display: 'inline-flex' }}>
               {nextIaAction === 'GENERATE_WORD' && <NextActionPulse floating title={attoWorkflow ? (attoApprovedRia ? 'Azione successiva: genera l’Atto senza filigrana' : 'Azione successiva: genera la bozza Word dell’Atto') : `Azione successiva: ${generateBozzaButtonLabel}`} />}
@@ -7592,7 +8293,7 @@ function PostAttestazioneIaWorkSection (props: {
             </span>
 
             <span style={{ position: 'relative', display: 'inline-flex' }}>
-              {nextIaAction === 'TRANSMIT_RIA' && <NextActionPulse floating title={attoWorkflow ? 'Azione successiva: trasmetti l’Atto al Responsabile' : 'Azione successiva: trasmetti il fascicolo al Responsabile'} />}
+              {nextIaAction === 'TRANSMIT_RIA' && <NextActionPulse floating title={riaIntegrationReturnPending ? 'Azione successiva: trasmetti esito integrazione' : (attoWorkflow ? 'Azione successiva: trasmetti l’Atto al Responsabile' : 'Azione successiva: trasmetti il fascicolo al Responsabile')} />}
               <button
                 type='button'
                 title={transmitActionTitle}
@@ -11396,7 +12097,8 @@ function AllegaiaSection (props: {
   onRotateLeft: () => void,
   onRotateRight: () => void,
   onRotationConfirmed: () => void,
-  practiceContextRevision: number
+  practiceContextRevision: number,
+  refreshKey?: number
 }) {
   const st = useAdminStyle()
   const oid = props.oid != null && Number.isFinite(Number(props.oid)) ? Number(props.oid) : null
@@ -11420,7 +12122,7 @@ function AllegaiaSection (props: {
     setDeleteTarget(null)
     props.onSelectedAttachmentChange(null)
     props.onRotationConfirmed()
-  }, [oid, props.practiceContextRevision])
+  }, [oid, props.practiceContextRevision, props.refreshKey])
 
   const resolveAttachmentLayer = React.useCallback(async () => {
     const layer = await resolveLayerForEdit(props.ds, props.layerUrl)
@@ -11464,7 +12166,7 @@ function AllegaiaSection (props: {
     } finally {
       if (isCurrent()) setLoading(false)
     }
-  }, [oid, resolveAttachmentLayer, props.practiceContextRevision])
+  }, [oid, resolveAttachmentLayer, props.practiceContextRevision, props.refreshKey])
 
   React.useEffect(() => {
     if (oid && loadedOid !== oid) void load()
@@ -11644,6 +12346,9 @@ function AllegaiaSection (props: {
       onRotateLeft={props.onRotateLeft}
       onRotateRight={props.onRotateRight}
       onConfirmRotation={() => { void confirmAmmRotation() }}
+      showPreviewCaption
+      rotationControlsPosition='bottom'
+      showConfirmRotation={false}
       formatBytes={formatAttachmentBytes}
       labelFontSize={adminLabelFontSize(st)}
       headerFontSize={Number(st.formCardHeaderFontSize ?? 14)}
@@ -12135,13 +12840,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [automaticValues, setAutomaticValues] = React.useState<Record<string, any>>({})
   const [saving, setSaving] = React.useState(false)
   const [dialog, setDialog] = React.useState<{ kind: 'ok' | 'err' | 'warn', title: string, text: string } | null>(null)
-  const [pendingAttestationText, setPendingAttestationText] = React.useState<string | null>(null)
+  const [iaOutcomeDialogOpen, setIaOutcomeDialogOpen] = React.useState(false)
+  const [iaOutcomeChoice, setIaOutcomeChoice] = React.useState<IaOutcomeChoice>('')
+  const [iaIntegrationRimandoDialogOpen, setIaIntegrationRimandoDialogOpen] = React.useState(false)
+  const [iaIntegrationRimandoTargets, setIaIntegrationRimandoTargets] = React.useState<string[]>([])
+  const [iaIntegrationRimandoMotivation, setIaIntegrationRimandoMotivation] = React.useState('')
   const [pendingUndoAttestation, setPendingUndoAttestation] = React.useState(false)
   const [confirmTransmitBozza, setConfirmTransmitBozza] = React.useState(false)
   const [confirmTransmitReopensCycle, setConfirmTransmitReopensCycle] = React.useState(false)
-  const [ammPreviewAttachment, setAmmPreviewAttachment] = React.useState<{ id: number; name?: string; contentType?: string } | null>(null)
+  const [ammPreviewAttachment, setAmmPreviewAttachment] = React.useState<{ id: number; name?: string; contentType?: string; readOnly?: boolean } | null>(null)
   const [ammPreviewRotationDeg, setAmmPreviewRotationDeg] = React.useState(0)
+  const [pendingAmmAttachmentRotations, setPendingAmmAttachmentRotations] = React.useState<Record<number, number>>({})
   const [activeAmmSection, setActiveAmmSection] = React.useState<AmmSectionKey>(() => getRequestedAmmSection() || AMM_DEFAULT_SECTION)
+  const [persistentAnteprimaOid, setPersistentAnteprimaOid] = React.useState<number | null>(null)
   const [verificationActionBarTarget, setVerificationActionBarTarget] = React.useState<HTMLDivElement | null>(null)
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   const [pageVisible, setPageVisible] = React.useState(false)
@@ -12187,11 +12898,16 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setAttoDirettoreEmailPreparedMarker(null)
       try { window.sessionStorage.removeItem('GII_ATTO_EMAIL_DA_PREPARED') } catch {}
       setDialog(null)
-      setPendingAttestationText(null)
+      setIaOutcomeDialogOpen(false)
+      setIaOutcomeChoice('')
+      setIaIntegrationRimandoDialogOpen(false)
+      setIaIntegrationRimandoTargets([])
+      setIaIntegrationRimandoMotivation('')
       setPendingUndoAttestation(false)
       setConfirmTransmitBozza(false)
       setAmmPreviewAttachment(null)
       setAmmPreviewRotationDeg(0)
+      setPendingAmmAttachmentRotations({})
     }
     window.addEventListener('gii-practice-context-reset', onPracticeContextReset)
     return () => window.removeEventListener('gii-practice-context-reset', onPracticeContextReset)
@@ -12360,6 +13076,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const data = activeSelection?.data || null
   const oid = activeSelection?.oid ?? (data ? pickOidFromData(data, activeSelection?.idFieldName || 'OBJECTID') : null)
   const hasSelection = !!data || (oid != null && Number.isFinite(Number(oid)))
+  React.useEffect(() => {
+    if (activeAmmSection === 'anteprima' && oid != null && Number.isFinite(Number(oid))) {
+      setPersistentAnteprimaOid(Number(oid))
+    }
+  }, [activeAmmSection, oid])
   const roleAllowed = isAllowedAdminRole(profile.role)
   const title = buildPracticeTitle(cfg, data || {}, oid)
   const titleParts = buildPracticeTitleParts(data || {}, oid)
@@ -12447,6 +13168,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     setAutomaticValues({})
     setAmmPreviewAttachment(null)
     setAmmPreviewRotationDeg(0)
+    setPendingAmmAttachmentRotations({})
     setActiveAmmSection(nextSection)
     persistAmmSection(nextSection)
     broadcastAmmSection(nextSection)
@@ -12542,7 +13264,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const determinationIsDirty =
     !sameDraftValue(pickAttrCI(initialDraft, ['determinazione_numero']), pickAttrCI(draft, ['determinazione_numero']), 'determinazione_numero') ||
     !sameDraftValue(pickAttrCI(initialDraft, ['determinazione_data']), pickAttrCI(draft, ['determinazione_data']), 'determinazione_data')
-  const isDirty = generalIsDirty || determinationIsDirty
+  const hasPendingAmmAttachmentRotations = Object.values(pendingAmmAttachmentRotations).some(value => (((Math.round(Number(value || 0) / 90) * 90) % 360 + 360) % 360) !== 0)
+  const isDirty = generalIsDirty || determinationIsDirty || hasPendingAmmAttachmentRotations
 
   const logLayerRef = React.useRef<any | null>(null)
   const attivitaLayerRef = React.useRef<any | null>(null)
@@ -12611,6 +13334,41 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return Number.isFinite(lastNum) && lastNum > 0 ? lastNum + 1 : 1
     } catch {
       return 1
+    }
+  }, [getLogLayer])
+
+
+  // Determina in modo strutturale se la prossima trasmissione IA -> RIA
+  // sta realmente chiudendo una richiesta di integrazione aperta dal RIA.
+  // Il valore e' tri-state:
+  //   true  = l'ultimo passaggio RIA -> IA e' una richiesta sul documento;
+  //   false = l'ultimo passaggio RIA -> IA e' gia' una risposta di integrazione;
+  //   null  = nessuna evidenza strutturata disponibile (solo allora sono ammessi
+  //           i fallback legacy sui campi della feature).
+  // In particolare, RIA -> IA con ESITO_INTEGRAZIONE_TRASMESSO chiude la richiesta
+  // che era partita da IA: il successivo invio IA -> RIA e' quindi ordinario.
+  const getRiaToIaDocumentIntegrationState = React.useCallback(async (
+    parentGlobalId: string,
+    requestEvent: 'FASCICOLO_RIMANDATO_INTEGRAZIONE' | 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE'
+  ): Promise<boolean | null> => {
+    const logLayer = await getLogLayer()
+    if (!parentGlobalId || !logLayer?.queryFeatures) return null
+    try {
+      const q = logLayer.createQuery ? logLayer.createQuery() : {}
+      q.where = `(${parentGlobalIdWhereForLog(parentGlobalId)}) AND ruolo_competente = 'RIA' AND ruolo_destinatario = 'IA' AND ` +
+        `evento_chiusura IN (${sqlQuote(requestEvent)}, 'ESITO_INTEGRAZIONE_TRASMESSO')`
+      q.outFields = ['evento_chiusura', 'dt_chiusura', 'ruolo_competente', 'ruolo_destinatario']
+      q.returnGeometry = false
+      q.num = 1
+      const oidField = String(logLayer.objectIdField || 'OBJECTID')
+      q.orderByFields = ['dt_chiusura DESC', `${oidField} DESC`]
+      const res = await logLayer.queryFeatures(q)
+      const latest = res?.features?.[0]?.attributes || null
+      if (!latest) return null
+      return String(latest?.evento_chiusura || '').trim().toUpperCase() === requestEvent
+    } catch (e) {
+      console.warn('[GII_LOG_EVENTI_CICLI] Impossibile determinare lo stato integrazione documento RIA->IA:', e)
+      return null
     }
   }, [getLogLayer])
 
@@ -12701,6 +13459,106 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [data, findOpenAmmCycle, getLogLayer, getNextAmmCycleNumber, oid, profile.role, profile.username])
 
 
+  const recordIaEvaluationEvent = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>, changedFieldNames: string[], eventCode: 'ISTRUTTORIA_CONFORME' | 'ISTRUTTORIA_NON_CONFORME', userNote = '') => {
+    const parentGlobalId = String(
+      pickAttrCI(nextAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
+      pickAttrCI(prevAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
+      pickAttrCI(data, ['GlobalID', 'globalid', 'GLOBALID']) ||
+      ''
+    ).trim()
+    if (!parentGlobalId || oid == null) return 0
+    const logLayer = await getLogLayer()
+    if (!logLayer?.applyEdits) return 0
+    const now = Date.now()
+    const roleForLog = 'IA'
+    const username = String(profile.username || '').trim()
+    const isNonConforme = eventCode === 'ISTRUTTORIA_NON_CONFORME'
+    const rimandoNote = String(userNote || '').trim()
+    const destUsername = isNonConforme ? await loadUniqueAmmRoleUsername('RIA', 'AMM') : ''
+    const logFields = (logLayer.fields || []).map((f: any) => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
+    const delta = buildAuditDeltaMaps(prevAttrs, nextAttrs, changedFieldNames)
+    const openFeature = await findOpenAmmCycle(parentGlobalId, roleForLog)
+    const cycleNumber = Number(openFeature?.attributes?.numero_ciclo_ruolo || 0) || await getNextAmmCycleNumber(parentGlobalId, roleForLog)
+    const dtApertura = Number(openFeature?.attributes?.dt_apertura || pickAttrCI(nextAttrs, ['dt_presa_in_carico_IA', 'dt_stato_IA']) || now)
+
+    // L'esito CONFORME non conclude il lavoro dell'IA: la pratica resta presso IA
+    // per la predisposizione della determinazione e il ciclo si chiudera' soltanto
+    // con la successiva trasmissione del fascicolo al RIA.
+    //
+    // L'esito NON CONFORME, invece, comporta nello stesso gesto il rimando al RIA:
+    // in quel caso il ciclo IA si chiude qui e registra anche mittente, destinatario
+    // e motivazione del rimando. Non viene creato un secondo ciclo duplicato.
+    const existingAttrs = openFeature?.attributes || null
+    const existingOld = existingAttrs ? parseJsonObject(existingAttrs.valori_prima_json) : {}
+    const existingNew = existingAttrs ? parseJsonObject(existingAttrs.valori_dopo_json) : {}
+    const merged = mergeAuditCycleMaps(existingOld, existingNew, delta.oldMap, delta.newMap)
+    const mergedNum = merged.fields.length
+
+    const commonAttrs: Record<string, any> = {
+      parent_globalid: parentGlobalId,
+      parent_objectid: oid,
+      numero_ciclo_ruolo: cycleNumber,
+      ruolo_competente: roleForLog,
+      utente_operatore: username || existingAttrs?.utente_operatore || '',
+      evento_apertura: existingAttrs?.evento_apertura || 'PRESA_IN_CARICO',
+      dt_apertura: dtApertura,
+      area: 'AMM',
+      settore: existingAttrs?.settore || 'CR',
+      fase: roleForLog,
+      num_campi_modificati: mergedNum,
+      campi_modificati: mergedNum ? merged.fields.join(', ') : '',
+      valori_prima_json: mergedNum ? JSON.stringify(merged.oldMap) : '',
+      valori_dopo_json: mergedNum ? JSON.stringify(merged.newMap) : '',
+      session_id: existingAttrs?.session_id || `ia-esito-${now}-${Math.random().toString(36).slice(2, 8)}`
+    }
+
+    const eventAttrs: Record<string, any> = isNonConforme
+      ? {
+          stato_record: 'CHIUSO',
+          evento_chiusura: 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE',
+          dt_chiusura: now,
+          ruolo_destinatario: 'RIA',
+          utente_destinatario: destUsername,
+          note_chiusura: rimandoNote,
+          riepilogo_ciclo: 'Istruttoria rimandata per integrazione.'
+        }
+      : {
+          // Non valorizziamo evento/dt di chiusura: il ciclo resta realmente aperto.
+          stato_record: existingAttrs?.stato_record && String(existingAttrs.stato_record).toUpperCase() !== 'CHIUSO'
+            ? existingAttrs.stato_record
+            : 'APERTO',
+          evento_chiusura: '',
+          dt_chiusura: null,
+          ruolo_destinatario: '',
+          utente_destinatario: '',
+          note_chiusura: '',
+          riepilogo_ciclo: 'Istruttoria conforme.'
+        }
+
+    const baseAttrs = filterAttrsForLayer({ ...commonAttrs, ...eventAttrs }, logFields)
+    try {
+      let res: any
+      let editResult: any
+      if (existingAttrs) {
+        const updateAttrs = {
+          ...baseAttrs,
+          [String(logLayer.objectIdField || 'OBJECTID')]: getLogObjectIdValue(existingAttrs, logLayer)
+        }
+        res = await logLayer.applyEdits({ updateFeatures: [{ attributes: updateAttrs }] })
+        editResult = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
+      } else {
+        res = await logLayer.applyEdits({ addFeatures: [{ attributes: baseAttrs }] })
+        editResult = res?.addFeatureResults?.[0] || res?.addResults?.[0] || null
+      }
+      if (editResult?.error) throw new Error(editResult.error.message || JSON.stringify(editResult.error))
+      try { window.dispatchEvent(new CustomEvent('gii-log-eventi-cicli-changed', { detail: { source: 'gii-editing-amm-esito-ia', oid, role: roleForLog, eventCode: isNonConforme ? 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE' : eventCode, ts: now } })) } catch {}
+      return 1
+    } catch (e) {
+      console.warn('[GII_LOG_EVENTI_CICLI] Errore registrazione esito IA:', e)
+      return 0
+    }
+  }, [data, findOpenAmmCycle, getLogLayer, getNextAmmCycleNumber, loadUniqueAmmRoleUsername, oid, profile.username])
+
   const closeIaBozzaDeterminazioneCycle = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>, changedFieldNames: string[], options?: { integrationReturn?: boolean }) => {
     const parentGlobalId = String(
       pickAttrCI(nextAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
@@ -12725,8 +13583,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const num = Object.keys(delta.oldMap).length
     const integrationReturn = options?.integrationReturn === true
     const eventoChiusura = integrationReturn ? 'ESITO_INTEGRAZIONE_TRASMESSO' : 'FASCICOLO_TRASMESSO_VERIFICA'
-    const noteChiusura = integrationReturn
-      ? 'Esito integrazione trasmesso al Responsabile dell’istruttoria amministrativa.'
+    // Il riepilogo automatico appartiene al log strutturato; note_chiusura e'
+    // riservato esclusivamente a eventuali annotazioni espresse dall'utente.
+    const riepilogoChiusura = integrationReturn
+      ? 'Esito integrazione trasmesso.'
       : 'Fascicolo trasmesso al Responsabile dell’istruttoria amministrativa per la verifica.'
     const baseAttrs: Record<string, any> = {
       parent_globalid: parentGlobalId,
@@ -12742,12 +13602,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       fase: roleForLog,
       ruolo_destinatario: 'RIA',
       utente_destinatario: destUsername,
-      note_chiusura: noteChiusura,
+      note_chiusura: '',
       num_campi_modificati: num,
       campi_modificati: num > 0 ? Object.keys(delta.oldMap).join(', ') : '',
       valori_prima_json: num > 0 ? JSON.stringify(delta.oldMap) : '',
       valori_dopo_json: num > 0 ? JSON.stringify(delta.newMap) : '',
-      riepilogo_ciclo: noteChiusura
+      riepilogo_ciclo: riepilogoChiusura
     }
 
     try {
@@ -12810,8 +13670,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const num = Object.keys(delta.oldMap).length
     const integrationReturn = options?.integrationReturn === true
     const eventoChiusura = integrationReturn ? 'ESITO_INTEGRAZIONE_TRASMESSO' : 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA'
-    const noteChiusura = integrationReturn
-      ? 'Esito integrazione trasmesso al Responsabile dell’istruttoria amministrativa.'
+    // Il riepilogo automatico appartiene al log strutturato; note_chiusura e'
+    // riservato esclusivamente a eventuali annotazioni espresse dall'utente.
+    const riepilogoChiusura = integrationReturn
+      ? 'Esito integrazione trasmesso.'
       : 'Atto di accertamento trasmesso al Responsabile dell’istruttoria amministrativa per la verifica.'
     const baseAttrs: Record<string, any> = {
       parent_globalid: parentGlobalId,
@@ -12827,12 +13689,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       fase: roleForLog,
       ruolo_destinatario: 'RIA',
       utente_destinatario: destUsername,
-      note_chiusura: noteChiusura,
+      note_chiusura: '',
       num_campi_modificati: num,
       campi_modificati: num > 0 ? Object.keys(delta.oldMap).join(', ') : '',
       valori_prima_json: num > 0 ? JSON.stringify(delta.oldMap) : '',
       valori_dopo_json: num > 0 ? JSON.stringify(delta.newMap) : '',
-      riepilogo_ciclo: noteChiusura
+      riepilogo_ciclo: riepilogoChiusura
     }
 
     try {
@@ -12919,6 +13781,76 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [data, getAttivitaLayer, oid])
 
 
+  const createRiaIaNonConformitaActivity = React.useCallback(async (overrideAttrs: Record<string, any>) => {
+    try {
+      const layer = await getAttivitaLayer()
+      if (!layer?.applyEdits) return
+      const now = Date.now()
+      const overrideHasGlobalId = !!String(pickAttrCI(overrideAttrs || {}, ['globalid', 'GlobalID', 'GLOBALID', 'global_id']) || '').trim()
+      const merged = overrideHasGlobalId ? { ...(overrideAttrs || {}) } : { ...(data || {}), ...(overrideAttrs || {}) }
+      const parentGlobalId = String(pickAttrCI(merged, ['globalid', 'GlobalID', 'GLOBALID', 'global_id']) || '').trim()
+      if (!parentGlobalId) return
+      const oidFromMerged = pickAttrCI(merged, ['OBJECTID', 'ObjectID', 'ObjectId', 'objectId', 'objectid'])
+      const oidNumber = Number.isFinite(Number(oidFromMerged)) ? Number(oidFromMerged) : (oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null)
+      const numeroRapporto = getReportCode(merged, oidNumber)
+      const destUsername = await loadUniqueAmmRoleUsername('RIA', 'AMM')
+      const mittente = String(profile.fullName || profile.username || 'Istruttore amministrativo').trim()
+      const activityEvent = 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE'
+      const key = `${parentGlobalId}|PRESA_IN_CARICO|${activityEvent}|RIA|AMM|CR|${destUsername}`
+      const attrs: Record<string, any> = {
+        chiave_attivita: key,
+        parent_globalid: parentGlobalId,
+        parent_objectid: oidNumber,
+        numero_rapporto: numeroRapporto,
+        tipo_attivita: 'PRESA_IN_CARICO',
+        sottotipo_attivita: activityEvent,
+        titolo: 'Richiesta integrazione ricevuta',
+        messaggio: `Richiesta di integrazione per la pratica n. ${numeroRapporto || '—'} ricevuta.\nMittente: ${mittente}`,
+        destinatario_ruolo: 'RIA',
+        destinatario_area: 'AMM',
+        destinatario_settore: 'CR',
+        destinatario_ufficio_id: null,
+        destinatario_ufficio_zona: null,
+        destinatario_username: destUsername || null,
+        origine_evento: activityEvent,
+        priorita: 'INFO',
+        data_attivazione: now,
+        creato_il: now,
+        creato_da: String(profile.username || ''),
+        aggiornato_il: now,
+        aggiornato_da: String(profile.username || '')
+      }
+      const activityFields = (layer.fields || []).map((f: any) => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
+      const cleanAttrs = filterAttrsForLayer(attrs, activityFields)
+      await deleteCurrentAmmActivitiesForRole('IA', merged)
+      await deleteCurrentAmmActivitiesForRole('RIA', merged, key)
+      const chiaveField = realFieldName(activityFields, 'chiave_attivita') || 'chiave_attivita'
+      const chiaveValue = cleanAttrs[chiaveField]
+      let existingOid: any = null
+      if (layer.queryFeatures && chiaveValue) {
+        try {
+          const q = layer.createQuery ? layer.createQuery() : {}
+          q.where = `${chiaveField} = ${sqlQuote(String(chiaveValue))}`
+          q.outFields = ['*']
+          q.returnGeometry = false
+          q.num = 1
+          const found = await layer.queryFeatures(q)
+          const existing = found?.features?.[0]?.attributes || null
+          existingOid = existing ? pickAttrCI(existing, [String(layer.objectIdField || 'OBJECTID'), 'OBJECTID', 'objectid', 'ObjectId', 'objectId']) : null
+        } catch {}
+      }
+      if (existingOid != null) {
+        const oidField = String(layer.objectIdField || 'OBJECTID')
+        await layer.applyEdits({ updateFeatures: [{ attributes: { ...cleanAttrs, [oidField]: existingOid } }] })
+      } else {
+        await layer.applyEdits({ addFeatures: [{ attributes: cleanAttrs }] })
+      }
+      try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { source: 'gii-editing-amm-non-conformita-rimando-ria', key, oid, ts: now } })) } catch {}
+    } catch (e) {
+      console.warn('[GII_ATTIVITA_CORRENTI] Errore creazione attività RIA da non conformità IA:', e)
+    }
+  }, [data, deleteCurrentAmmActivitiesForRole, getAttivitaLayer, oid, profile.fullName, profile.username])
+
   const createRiaBozzaDeterminazioneActivity = React.useCallback(async (overrideAttrs: Record<string, any>, options?: { integrationReturn?: boolean }) => {
     try {
       const layer = await getAttivitaLayer()
@@ -12945,7 +13877,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         numero_rapporto: numeroRapporto,
         tipo_attivita: 'PRESA_IN_CARICO',
         sottotipo_attivita: activityEvent,
-        titolo: options?.integrationReturn ? 'Esito integrazione ricevuto' : 'Fascicolo ricevuto',
+        titolo: options?.integrationReturn ? 'Esito integrazione ricevuto' : 'Nuovo fascicolo ricevuto',
         messaggio: options?.integrationReturn
           ? `Esito dell’integrazione della pratica n. ${numeroRapporto || '—'} ricevuto.\nMittente: ${mittente}`
           : `Fascicolo della pratica n. ${numeroRapporto || '—'} ricevuto.\nMittente: ${mittente}`,
@@ -13070,9 +14002,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [data, deleteCurrentAmmActivitiesForRole, getAttivitaLayer, oid, profile.fullName, profile.username])
 
   const handleApponiAttestazioneIa = React.useCallback(async (noteInput: string) => {
-    setPendingAttestationText(null)
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
-      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di apporre il visto di conformità.' })
+      setDialog({ kind: 'warn', title: 'Nessuna istruttoria selezionata', text: 'Selezionare un’istruttoria prima di registrare l’esito.' })
       return
     }
     if (!active?.ds) {
@@ -13084,7 +14015,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return
     }
     if (!canEdit) {
-      setDialog({ kind: 'warn', title: 'Scheda in sola lettura', text: 'La pratica non è attualmente modificabile dal profilo corrente.' })
+      setDialog({ kind: 'warn', title: 'Scheda in sola lettura', text: 'L’istruttoria non è attualmente modificabile dal profilo corrente.' })
       return
     }
 
@@ -13101,7 +14032,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const idName = realFieldName(fields, active.idFieldName) || active.idFieldName || 'OBJECTID'
       const base = { ...(initialDraft || {}), ...(draft || {}) }
       if (isDeterminazioneAdottata(base)) {
-        setDialog({ kind: 'warn', title: 'Flusso bloccato', text: 'La determinazione risulta già approvata/adottata. Non è più possibile riapporre il visto o riaprire il flusso di approvazione della Proposta.' })
+        setDialog({ kind: 'warn', title: 'Flusso bloccato', text: 'La determinazione risulta già approvata/adottata. Non è più possibile modificare l’esito dell’istruttoria o riaprire il flusso di approvazione della Proposta.' })
         return
       }
       const now = Date.now()
@@ -13110,14 +14041,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         const real = realFieldName(fields, name)
         if (real) attrs[real] = value
       }
-      const defaultAttestationNote = 'A seguito della verifica svolta, si attesta la conformità della pratica sotto il profilo istruttorio-amministrativo.'
-      const requestedAttestationNote = String(noteInput || '').trim()
-      const note = /motivazione\s+del\s+rimando|integrazion|rettific/i.test(requestedAttestationNote)
-        ? defaultAttestationNote
-        : (requestedAttestationNote || defaultAttestationNote)
       put('esito_IA', 2)
       put('dt_esito_IA', now)
-      put('note_IA', note)
+      // note_IA ha un solo significato: motivazione della non conformità.
+      // Un esito conforme non richiede né genera una nota automatica.
+      put('note_IA', null)
 
       // Ogni nuovo visto apre la fase di predisposizione della bozza del ciclo
       // corrente. È indispensabile riportare esplicitamente lo stato a BOZZA:
@@ -13141,12 +14069,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       put('protocollo_fascicolo_numero', null)
       put('protocollo_fascicolo_data', null)
 
-      // Si azzerano soltanto i metadati della vecchia bozza. NON va azzerato
-      // determinazione_stato, che poche righe sopra è stato impostato a BOZZA.
-      // Lo stato apre il nuovo ciclo, mentre data/autore verranno valorizzati soltanto
-      // dalla successiva generazione effettiva del Word.
-      put('dt_bozza_determinazione', null)
-      put('bozza_determinazione_da', null)
+      // Non cancelliamo data/autore dell'eventuale bozza precedente: la loro data,
+      // confrontata con dt_esito_IA, è il marker strutturale che consente di riconoscere
+      // la versione superata come "Da rigenerare" anche dopo un refresh. La nuova
+      // generazione sovrascriverà normalmente entrambi i metadati.
 
       // Il visto non trasferisce ancora la pratica: il Istruttore amministrativo
       // deve predisporre/caricare la bozza e poi trasmettere il fascicolo istruttorio
@@ -13157,7 +14083,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         const liveAttrs = await queryCurrentLayerAttrsByOid(layer, idName, Number(oid))
         if (liveAttrs && Object.keys(liveAttrs).length) prevRecordAttrs = liveAttrs
       } catch (e) {
-        console.warn('[GII_LOG_EVENTI_CICLI] Impossibile rileggere il record amministrativo prima del visto di conformità:', e)
+        console.warn('[GII_LOG_EVENTI_CICLI] Impossibile rileggere il record amministrativo prima della registrazione dell’esito:', e)
       }
 
       const cleanAttrs = filterAttrsForLayer(attrs, fields)
@@ -13179,22 +14105,121 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const changedFieldNames = Object.keys(cleanAttrs).filter(k => k !== idName)
       const nextRecordAttrs = { ...prevRecordAttrs, ...cleanAttrs }
       await upsertAmmCycleAudit(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
+      await recordIaEvaluationEvent(prevRecordAttrs, nextRecordAttrs, changedFieldNames, 'ISTRUTTORIA_CONFORME')
       await deleteCurrentAmmActivitiesForRole('RIA', nextRecordAttrs)
       if (operationContextIsCurrent()) await refreshDs(active.ds, props.id)
       if (!operationContextIsCurrent()) return
       const next = { ...nextRecordAttrs }
       setInitialDraft(next)
       setDraft(next)
-      setDialog({ kind: 'ok', title: 'Visto apposto', text: 'Visto apposto. Predisporre la determinazione.' })
+      setDialog({ kind: 'ok', title: 'Istruttoria conforme', text: 'Esito registrato. Predisporre la determinazione.' })
       try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-attestazione-conformita' } })) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: Number(oid), source: 'gii-editing-amm-attestazione-conformita', ts: Date.now() } })) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { oid: Number(oid), source: 'gii-editing-amm-attestazione-conformita', ts: Date.now() } })) } catch {}
     } catch (e: any) {
-      if (operationContextIsCurrent()) setDialog({ kind: 'err', title: 'Errore visto di conformità', text: e?.message || String(e) })
+      if (operationContextIsCurrent()) setDialog({ kind: 'err', title: 'Errore registrazione esito', text: e?.message || String(e) })
     } finally {
       if (operationContextIsCurrent()) setSaving(false)
     }
-  }, [active, automaticValues, canEdit, configuredDs, configuredDsState, deleteCurrentAmmActivitiesForRole, hasSelection, initialDraft, draft, layerFields, oid, profile.fullName, profile.role, profile.username, refreshDs, upsertAmmCycleAudit])
+  }, [active, automaticValues, canEdit, configuredDs, configuredDsState, deleteCurrentAmmActivitiesForRole, hasSelection, initialDraft, draft, layerFields, oid, profile.fullName, profile.role, profile.username, recordIaEvaluationEvent, refreshDs, upsertAmmCycleAudit])
+
+  const handleRegistraNonConformitaIa = React.useCallback(async (targetsRaw: readonly string[], motivationRaw: string) => {
+    if (!hasSelection || oid == null || !Number.isFinite(Number(oid)) || !active?.ds) return
+    if (String(profile.role || '').toUpperCase() !== 'IA' || !canEdit) return
+    const operationContextStamp = getGiiPracticeContextStamp()
+    const operationContextIsCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
+    if (!operationContextIsCurrent()) return
+    const targets = Array.from(new Set((targetsRaw || []).map(value => String(value || '').trim()).filter(Boolean)))
+    const motivation = String(motivationRaw || '').trim()
+    if (targets.length === 0) {
+      setDialog({ kind: 'warn', title: 'Oggetto del rimando richiesto', text: 'Selezionare almeno un oggetto del rimando prima di confermare.' })
+      return
+    }
+    if (!motivation) {
+      setDialog({ kind: 'warn', title: 'Motivazione richiesta', text: 'Indicare la motivazione del rimando prima di confermare.' })
+      return
+    }
+    const rimandoNote = buildAdministrativeRimandoNote(targets, motivation)
+    setSaving(true)
+    try {
+      const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
+      if (!layer?.applyEdits) throw new Error('Configurazione non disponibile. Contattare l’amministratore.')
+      if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
+      const fields = layer?.fields?.length ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false })) : layerFields
+      const idName = realFieldName(fields, active.idFieldName) || active.idFieldName || 'OBJECTID'
+      const layerUrl = normalizeEditLayerUrl(active.layerUrl || (configuredDsState as any)?.layerUrl || layer?.url || getDataSourceUrl(configuredDs))
+      const now = Date.now()
+      const attrs: Record<string, any> = { [idName]: Number(oid) }
+      const put = (name: string, value: any) => { const real = realFieldName(fields, name); if (real) attrs[real] = value }
+      put('esito_IA', 1)
+      put('dt_esito_IA', now)
+      put('note_IA', rimandoNote)
+      // La non conformità e il rimando al RIA sono confermati con la stessa azione.
+      // esito_IA conserva il giudizio; stato/routing rappresentano il passaggio procedurale.
+      put('stato_IA', 3)
+      put('dt_stato_IA', now)
+      put('stato_RIA', 1)
+      put('dt_stato_RIA', now)
+      put('dt_presa_in_carico_RIA', null)
+      put('esito_RIA', null)
+      put('dt_esito_RIA', null)
+      put('note_RIA', null)
+      put('GII_da', 'IA-AMM')
+      put('GII_a', 'RIA')
+      put('GII_dt', now)
+      put('GII_trasm', 1)
+      put('GII_rim', 1)
+      put('GII_arch', 0)
+      // Il cambio verso NON CONFORME invalida la versione documentale preparata.
+      // Manteniamo data/autore dell'eventuale bozza precedente come marker temporale
+      // strutturale: se l'IA tornerà a CONFORME, dt_bozza_determinazione < dt_esito_IA
+      // farà risultare la bozza "Da rigenerare".
+      put('determinazione_stato', null)
+      put('protocollo_fascicolo_numero', null)
+      put('protocollo_fascicolo_data', null)
+      let prevRecordAttrs = { ...(initialDraft || {}) }
+      try {
+        const liveAttrs = await queryCurrentLayerAttrsByOid(layer, idName, Number(oid))
+        if (liveAttrs && Object.keys(liveAttrs).length) prevRecordAttrs = liveAttrs
+      } catch {}
+      const cleanAttrs = filterAttrsForLayer(attrs, fields)
+      const res = await layer.applyEdits({ updateFeatures: [{ attributes: cleanAttrs }] })
+      const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
+      if (upd?.error) throw new Error(upd.error.message || JSON.stringify(upd.error))
+      const nextRecordAttrs = { ...prevRecordAttrs, ...cleanAttrs }
+      // La bozza PDF del precedente esito non deve restare utilizzabile come documento
+      // corrente dopo il cambio di valutazione. La copia locale eventualmente già
+      // scaricata non è gestibile dal browser, ma gli allegati persistiti sì.
+      await deleteBozzaDeterminazioneAttachments(layer, Number(oid), layerUrl)
+      const changedFieldNames = Object.keys(cleanAttrs).filter(k => k !== idName)
+      await upsertAmmCycleAudit(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
+      await recordIaEvaluationEvent(prevRecordAttrs, nextRecordAttrs, changedFieldNames, 'ISTRUTTORIA_NON_CONFORME', rimandoNote)
+      await createRiaIaNonConformitaActivity(nextRecordAttrs)
+      try {
+        sessionStorage.setItem('GII_AFTER_WORKFLOW_NAV', JSON.stringify(stampGiiPracticePayload({
+          oid: Number(oid),
+          source: 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE',
+          targetRoleTab: 'attesa_altri',
+          ts: Date.now()
+        }, operationContextStamp)))
+      } catch {}
+      if (operationContextIsCurrent()) await refreshDs(active.ds, props.id)
+      if (!operationContextIsCurrent()) return
+      setInitialDraft(nextRecordAttrs)
+      setDraft(nextRecordAttrs)
+      setIaIntegrationRimandoDialogOpen(false)
+      setIaIntegrationRimandoTargets([])
+      setIaIntegrationRimandoMotivation('')
+      setDialog({ kind: 'ok', title: 'Istruttoria rimandata per integrazione', text: 'Esito non conforme registrato e istruttoria rimandata al Responsabile dell’istruttoria amministrativa.' })
+      try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-non-conformita-rimando-ria', ts: now } })) } catch {}
+      try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: Number(oid), source: 'gii-editing-amm-non-conformita-rimando-ria', ts: now } })) } catch {}
+      try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { oid: Number(oid), source: 'gii-editing-amm-non-conformita-rimando-ria', ts: now } })) } catch {}
+    } catch (e: any) {
+      if (operationContextIsCurrent()) setDialog({ kind: 'err', title: 'Errore registrazione esito', text: e?.message || String(e) })
+    } finally {
+      if (operationContextIsCurrent()) setSaving(false)
+    }
+  }, [active, canEdit, configuredDs, configuredDsState, createRiaIaNonConformitaActivity, hasSelection, initialDraft, layerFields, oid, profile.role, recordIaEvaluationEvent, refreshDs, upsertAmmCycleAudit])
 
   const handleUndoAttestazioneIa = React.useCallback(async () => {
     setPendingUndoAttestation(false)
@@ -13207,6 +14232,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const handleReset = () => {
     setDraft({ ...(initialDraft || {}) })
+    setPendingAmmAttachmentRotations({})
+    setAmmPreviewRotationDeg(0)
   }
 
 
@@ -13214,7 +14241,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const current = source || {}
     const issues: string[] = []
     if (tipoAttoAmmPrevedeVerbale(current) && !hasAdminValue(verbaleNumberValue(current))) issues.push('Atto di accertamento: numero interno non disponibile.')
-    if (!hasAdminValue(pickAttrCI(current, ['esito_IA'])) || !hasAdminValue(pickAttrCI(current, ['note_IA', 'note_atto_amm']))) issues.push('Esito verifica dell’Istruttore amministrativo: esito o note non ancora acquisiti.')
+    const completionEsitoIa = parseNumberInput(pickAttrCI(current, ['esito_IA']))
+    if (completionEsitoIa !== 1 && completionEsitoIa !== 2) issues.push('Esito dell’Istruttore amministrativo non ancora acquisito.')
+    if (completionEsitoIa === 1 && !hasAdminValue(pickAttrCI(current, ['note_IA']))) issues.push('Motivazione del rimando dell’Istruttore amministrativo non acquisita.')
     const protocolloNumero = pickAttrCI(current, ['protocollo_atto_accertamento_numero'])
     const protocolloData = pickAttrCI(current, ['protocollo_atto_accertamento_data'])
     const notificaTipo = pickAttrCI(current, ['notifica_tipo'])
@@ -13303,7 +14332,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const handleGenerateBozzaDeterminazioneWord = async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
-      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di generare la bozza Word della determinazione.' })
+      setDialog({ kind: 'warn', title: 'Nessuna istruttoria selezionata', text: 'Selezionare un’istruttoria prima di generare la bozza Word della determinazione.' })
       return
     }
     if (!active?.ds) {
@@ -13325,7 +14354,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     const esitoIa = parseNumberInput(pickAttrCI(base, ['esito_IA']))
     if (esitoIa !== 2) {
-      setDialog({ kind: 'warn', title: 'Visto mancante', text: 'Apporre il visto di conformità prima di generare la bozza di determinazione.' })
+      setDialog({ kind: 'warn', title: 'Esito istruttoria', text: 'L’istruttoria deve risultare conforme prima di generare la bozza di determinazione.' })
       return
     }
     const propostaApprovataRia = isPropostaContestazioneApprovedByRia(base)
@@ -13427,7 +14456,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const handleDeleteBozzaDeterminazione = async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
-      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di eliminare il PDF.' })
+      setDialog({ kind: 'warn', title: 'Nessuna istruttoria selezionata', text: 'Selezionare un’istruttoria prima di eliminare il PDF.' })
       return false
     }
     if (!active?.ds) {
@@ -13502,7 +14531,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setDialog({
         kind: 'ok',
         title: 'Bozza PDF eliminata',
-        text: 'Il PDF è stato eliminato. Il Word di lavoro, il visto e lo stato della pratica restano invariati; è possibile generare nuovamente il Word oppure caricare un nuovo PDF.'
+        text: 'Il PDF è stato eliminato. Il Word di lavoro, l’esito dell’istruttoria e lo stato della pratica restano invariati; è possibile generare nuovamente il Word oppure caricare un nuovo PDF.'
       })
       try {
         window.dispatchEvent(new CustomEvent('gii:record-updated', {
@@ -13526,7 +14555,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const handleTransmitBozzaDeterminazioneRia = async (confirmed = false) => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
-      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di trasmettere il fascicolo.' })
+      setDialog({ kind: 'warn', title: 'Nessuna istruttoria selezionata', text: 'Selezionare un’istruttoria prima di trasmettere il fascicolo.' })
       return
     }
     if (!active?.ds) {
@@ -13574,7 +14603,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
       const esitoIa = parseNumberInput(pickAttrCI(base, ['esito_IA']))
       if (esitoIa !== 2) {
-        setDialog({ kind: 'warn', title: 'Visto mancante', text: 'Apporre il visto di conformità prima di trasmettere il fascicolo al Responsabile dell’istruttoria amministrativa.' })
+        setDialog({ kind: 'warn', title: 'Esito istruttoria', text: 'L’istruttoria deve risultare conforme prima di trasmettere il fascicolo al Responsabile dell’istruttoria amministrativa.' })
         return
       }
       const propostaGiaApprovataRia = isPropostaContestazioneApprovedByRia(base)
@@ -13651,9 +14680,23 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       } catch (e) {
         console.warn('[GII_LOG_EVENTI_CICLI] Impossibile rileggere il record amministrativo prima della trasmissione bozza determinazione:', e)
       }
-      const isRiaIntegrationReturn =
+      const prevGiiDest = String(pickAttrCI(prevRecordAttrs, ['GII_a', 'gii_a']) || '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
+      const prevGiiRimando = Number(pickAttrCI(prevRecordAttrs, ['GII_rim', 'gii_rim']))
+      const parentGlobalIdForWorkflow = String(
+        pickAttrCI(prevRecordAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
+        pickAttrCI(base, ['GlobalID', 'globalid', 'GLOBALID']) ||
+        ''
+      ).trim()
+      const structuredRiaFascicoloIntegrationReturn = parentGlobalIdForWorkflow
+        ? await getRiaToIaDocumentIntegrationState(parentGlobalIdForWorkflow, 'FASCICOLO_RIMANDATO_INTEGRAZIONE')
+        : null
+      const legacyRiaFascicoloIntegrationReturn =
         Number(pickAttrCI(prevRecordAttrs, ['esito_RIA', 'ESITO_RIA'])) === 3 ||
-        Number(pickAttrCI(prevRecordAttrs, ['stato_RIA', 'STATO_RIA'])) === 3
+        Number(pickAttrCI(prevRecordAttrs, ['stato_RIA', 'STATO_RIA'])) === 3 ||
+        (prevGiiRimando === 1 && (prevGiiDest === 'IA' || prevGiiDest === 'IA-AMM'))
+      const isRiaIntegrationReturn = structuredRiaFascicoloIntegrationReturn !== null
+        ? structuredRiaFascicoloIntegrationReturn
+        : legacyRiaFascicoloIntegrationReturn
 
       const cleanAttrs = filterAttrsForLayer(attrs, fields)
       if (!isGiiPracticeContextStampCurrent(operationContextStamp)) return
@@ -13677,7 +14720,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       try {
         sessionStorage.setItem('GII_AFTER_WORKFLOW_NAV', JSON.stringify(stampGiiPracticePayload({
           oid: Number(oid),
-          source: 'FASCICOLO_TRASMESSO_VERIFICA',
+          source: isRiaIntegrationReturn ? 'ESITO_INTEGRAZIONE_TRASMESSO' : 'FASCICOLO_TRASMESSO_VERIFICA',
           targetRoleTab: 'attesa_altri',
           ts: Date.now()
         }, operationContextStamp)))
@@ -13712,7 +14755,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const handlePrepareEmailProtocollo = React.useCallback(async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
-      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di preparare l’e-mail.' })
+      setDialog({ kind: 'warn', title: 'Nessuna istruttoria selezionata', text: 'Selezionare un’istruttoria prima di preparare l’e-mail.' })
       return
     }
     if (!canEdit) {
@@ -13816,7 +14859,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const handlePrepareEmailDirettore = React.useCallback(async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
-      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di preparare l’e-mail.' })
+      setDialog({ kind: 'warn', title: 'Nessuna istruttoria selezionata', text: 'Selezionare un’istruttoria prima di preparare l’e-mail.' })
       return
     }
     if (!canEdit) {
@@ -13939,7 +14982,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const handleGenerateAttoContestazioneWord = React.useCallback(async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
-      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di generare la bozza Word dell’Atto.' })
+      setDialog({ kind: 'warn', title: 'Nessuna istruttoria selezionata', text: 'Selezionare un’istruttoria prima di generare la bozza Word dell’Atto.' })
       return
     }
     if (!canEdit || !(currentRole === 'IA' || currentRole === 'ADMIN')) {
@@ -14079,7 +15122,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const handleTransmitAttoContestazioneRia = React.useCallback(async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
-      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di trasmettere l’Atto.' })
+      setDialog({ kind: 'warn', title: 'Nessuna istruttoria selezionata', text: 'Selezionare un’istruttoria prima di trasmettere l’Atto.' })
       return
     }
     if (!canEdit || !(currentRole === 'IA' || currentRole === 'ADMIN')) {
@@ -14108,9 +15151,23 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         const current = await queryCurrentLayerAttrsByOid(layer, idName, Number(oid))
         if (current && Object.keys(current).length) liveAttrs = current
       } catch {}
-      const isRiaIntegrationReturn =
+      const liveGiiDest = String(pickAttrCI(liveAttrs, ['GII_a', 'gii_a']) || '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
+      const liveGiiRimando = Number(pickAttrCI(liveAttrs, ['GII_rim', 'gii_rim']))
+      const parentGlobalIdForAttoWorkflow = String(
+        pickAttrCI(liveAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
+        pickAttrCI(initialDraft || {}, ['GlobalID', 'globalid', 'GLOBALID']) ||
+        ''
+      ).trim()
+      const structuredRiaAttoIntegrationReturn = parentGlobalIdForAttoWorkflow
+        ? await getRiaToIaDocumentIntegrationState(parentGlobalIdForAttoWorkflow, 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE')
+        : null
+      const legacyRiaAttoIntegrationReturn =
         Number(pickAttrCI(liveAttrs, ['esito_RIA', 'ESITO_RIA'])) === 3 ||
-        Number(pickAttrCI(liveAttrs, ['stato_RIA', 'STATO_RIA'])) === 3
+        Number(pickAttrCI(liveAttrs, ['stato_RIA', 'STATO_RIA'])) === 3 ||
+        (liveGiiRimando === 1 && (liveGiiDest === 'IA' || liveGiiDest === 'IA-AMM'))
+      const isRiaIntegrationReturn = structuredRiaAttoIntegrationReturn !== null
+        ? structuredRiaAttoIntegrationReturn
+        : legacyRiaAttoIntegrationReturn
       if (!isDeterminazioneAdottata(liveAttrs)) throw new Error('La determinazione adottata non risulta registrata.')
       if (attoContestazioneWorkflowState(liveAttrs) !== 'BOZZA') throw new Error('L’Atto non è nella fase di predisposizione.')
 
@@ -14196,7 +15253,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const handlePrepareEmailAttoDirettore = React.useCallback(async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
-      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di predisporre l’e-mail dell’Atto di accertamento.' })
+      setDialog({ kind: 'warn', title: 'Nessuna istruttoria selezionata', text: 'Selezionare un’istruttoria prima di predisporre l’e-mail dell’Atto di accertamento.' })
       return
     }
     if (!canEdit || !(currentRole === 'IA' || currentRole === 'ADMIN')) {
@@ -14274,7 +15331,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const handlePrepareEmailAttoProtocollo = React.useCallback(async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
-      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di predisporre l’e-mail al protocollo.' })
+      setDialog({ kind: 'warn', title: 'Nessuna istruttoria selezionata', text: 'Selezionare un’istruttoria prima di predisporre l’e-mail al protocollo.' })
       return
     }
     if (!canEdit || !(currentRole === 'IA' || currentRole === 'ADMIN')) {
@@ -14453,7 +15510,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const handleSave = async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
-      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di salvare.' })
+      setDialog({ kind: 'warn', title: 'Nessuna istruttoria selezionata', text: 'Selezionare un’istruttoria prima di salvare.' })
       return
     }
     if (!active?.ds) {
@@ -14492,7 +15549,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const before = pickAttrCI(initialDraft, [real, name])
       if (!sameDraftValue(before, value, name)) attrs[real] = value == null || value === '' ? null : value
     })
-    if (!Object.keys(attrs).length && !determinationIsDirty) {
+    if (!Object.keys(attrs).length && !determinationIsDirty && !hasPendingAmmAttachmentRotations) {
       setDialog({ kind: 'warn', title: 'Nessuna modifica', text: 'Non risultano modifiche da salvare.' })
       return
     }
@@ -14607,23 +15664,33 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         determinationSaveMeta = { derivedAccertamentoNumber, wasAlreadyAdopted }
       }
       let prevRecordAttrs = { ...(initialDraft || {}) }
-      try {
-        const liveAttrs = await queryCurrentLayerAttrsByOid(layer, idName, Number(oid))
-        if (liveAttrs && Object.keys(liveAttrs).length) prevRecordAttrs = liveAttrs
-      } catch (e) {
-        console.warn('[GII_LOG_EVENTI_CICLI] Impossibile rileggere il record amministrativo prima del salvataggio:', e)
+      const hasAttributeUpdates = Object.keys(attrs).length > 0
+      if (hasAttributeUpdates) {
+        try {
+          const liveAttrs = await queryCurrentLayerAttrsByOid(layer, idName, Number(oid))
+          if (liveAttrs && Object.keys(liveAttrs).length) prevRecordAttrs = liveAttrs
+        } catch (e) {
+          console.warn('[GII_LOG_EVENTI_CICLI] Impossibile rileggere il record amministrativo prima del salvataggio:', e)
+        }
+        const cleanAttrs = filterAttrsForLayer({ [idName]: Number(oid), ...attrs }, fields)
+        if (!operationContextIsCurrent()) return
+        const res = await layer.applyEdits({ updateFeatures: [{ attributes: cleanAttrs }] })
+        const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
+        const err = upd?.error
+        const ok = !err && (upd?.success === true || upd?.objectId != null || upd?.success == null)
+        if (!ok) {
+          const detail = err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res)
+          throw new Error(detail)
+        }
+        await upsertAmmCycleAudit(prevRecordAttrs, { ...prevRecordAttrs, ...attrs }, Object.keys(attrs))
       }
-      const cleanAttrs = filterAttrsForLayer({ [idName]: Number(oid), ...attrs }, fields)
-      if (!operationContextIsCurrent()) return
-      const res = await layer.applyEdits({ updateFeatures: [{ attributes: cleanAttrs }] })
-      const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
-      const err = upd?.error
-      const ok = !err && (upd?.success === true || upd?.objectId != null || upd?.success == null)
-      if (!ok) {
-        const detail = err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res)
-        throw new Error(detail)
+      if (hasPendingAmmAttachmentRotations) {
+        const attachmentLayerUrl = normalizeEditLayerUrl(layer?.url || active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
+        await persistAmmAttachmentRotations({ layer, oid: Number(oid), layerUrl: attachmentLayerUrl, rotations: pendingAmmAttachmentRotations })
+        setPendingAmmAttachmentRotations({})
+        setAmmPreviewRotationDeg(0)
+        setLiveRefreshVersion(value => value + 1)
       }
-      await upsertAmmCycleAudit(prevRecordAttrs, { ...prevRecordAttrs, ...attrs }, Object.keys(attrs))
       if (operationContextIsCurrent()) await refreshDs(active.ds, props.id)
       if (!operationContextIsCurrent()) return
       const next = { ...(initialDraft || {}), ...attrs }
@@ -14639,6 +15706,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           title: determinationSaveMeta.wasAlreadyAdopted ? 'Dati determina aggiornati' : 'Determina registrata',
           text: `${determinationSaveMeta.wasAlreadyAdopted ? 'I dati della determinazione sono stati aggiornati' : 'La determinazione adottata è stata registrata'}. Numero Atto di accertamento assegnato automaticamente: ${determinationSaveMeta.derivedAccertamentoNumber}.`
         })
+      } else if (hasPendingAmmAttachmentRotations && !Object.keys(attrs).length) {
+        setDialog({ kind: 'ok', title: 'Allegato aggiornato', text: 'Orientamento dell’allegato salvato.' })
       } else {
         setDialog({ kind: 'ok', title: 'Bozza salvata', text: 'Dati amministrativi salvati.' })
       }
@@ -14722,24 +15791,42 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   // - contenitore tab = flex child a tutta altezza disponibile;
   // - schede ordinarie = scroll verticale interno;
   // - schede full-height, come Anteprima e Allegati = nessuno scroll generale, layout interno a tutta altezza.
+  const safeTabPx = React.useCallback((value: any, fallback = 0, min = 0, max = 80): number => {
+    const n = Number(value)
+    if (!Number.isFinite(n)) return fallback
+    return Math.max(min, Math.min(max, n))
+  }, [])
+
+  // Stesso contenitore esterno delle schede del gii-editing-tec.
+  // I viewer Allegati e Fascicolo non fanno eccezione: restano full-height,
+  // ma rispettano gli stessi padding della restante maschera.
+  const tabPadding = React.useMemo(() => ({
+    top: safeTabPx((cfg as any).tabPaddingTop, Number((defaultConfig as any).tabPaddingTop ?? 12), 0, 80),
+    right: safeTabPx((cfg as any).tabPaddingRight, Number((defaultConfig as any).tabPaddingRight ?? 2), 0, 80),
+    bottom: safeTabPx((cfg as any).tabPaddingBottom, Number((defaultConfig as any).tabPaddingBottom ?? 2), 0, 80),
+    left: safeTabPx((cfg as any).tabPaddingLeft, Number((defaultConfig as any).tabPaddingLeft ?? 2), 0, 80)
+  }), [cfg, safeTabPx])
+
   const baseTabContentStyle: React.CSSProperties = {
     flex: '1 1 auto',
-    minHeight: 0
+    minHeight: 0,
+    boxSizing: 'border-box',
+    paddingTop: tabPadding.top,
+    paddingRight: tabPadding.right,
+    paddingBottom: tabPadding.bottom,
+    paddingLeft: tabPadding.left
   }
 
   const activeContentStyle: React.CSSProperties = (activeAmmSection === 'anteprima' || activeAmmSection === 'allegati')
     ? {
         ...baseTabContentStyle,
-        overflow: 'hidden',
-        padding: 0
+        overflow: 'hidden'
       }
     : {
         ...baseTabContentStyle,
         overflowY: 'auto',
         overflowX: 'hidden',
-        overscrollBehavior: 'contain',
-        scrollbarGutter: 'stable',
-        padding: '12px 2px 2px 2px'
+        overscrollBehavior: 'contain'
       }
 
   const editBtnBase: React.CSSProperties = {
@@ -14747,7 +15834,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     borderRadius: 8,
     border: 'none',
     fontWeight: 700,
-    fontSize: adminFieldFontSize(adminStyle),
+    fontSize: 13,
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -14861,15 +15948,47 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       })}
 
       {dialog && <BlockingDialog kind={dialog.kind} title={dialog.title} text={dialog.text} onClose={() => setDialog(null)} />}
-      {pendingAttestationText != null && (
-        <AttestationConfirmDialog
-          note={pendingAttestationText}
+      {iaOutcomeDialogOpen && (
+        <IaOutcomeDialog
+          outcome={iaOutcomeChoice}
+          currentOutcome={currentIaOutcomeChoice(viewData || {})}
           saving={saving}
-          onCancel={() => setPendingAttestationText(null)}
+          onChange={setIaOutcomeChoice}
+          onCancel={() => {
+            setIaOutcomeDialogOpen(false)
+            setIaOutcomeChoice('')
+          }}
           onConfirm={() => {
-            const note = pendingAttestationText
-            setPendingAttestationText(null)
-            handleApponiAttestazioneIa(note)
+            const outcome = iaOutcomeChoice
+            if (!outcome) return
+            setIaOutcomeDialogOpen(false)
+            setIaOutcomeChoice('')
+            if (outcome === 'CONFORME') {
+              void handleApponiAttestazioneIa('')
+              return
+            }
+            setIaIntegrationRimandoTargets([])
+            setIaIntegrationRimandoMotivation('')
+            setIaIntegrationRimandoDialogOpen(true)
+          }}
+        />
+      )}
+      {iaIntegrationRimandoDialogOpen && (
+        <IaIntegrationRimandoDialog
+          targets={iaIntegrationRimandoTargets}
+          motivation={iaIntegrationRimandoMotivation}
+          saving={saving}
+          onTargetsChange={setIaIntegrationRimandoTargets}
+          onMotivationChange={setIaIntegrationRimandoMotivation}
+          onCancel={() => {
+            if (saving) return
+            setIaIntegrationRimandoDialogOpen(false)
+            setIaIntegrationRimandoTargets([])
+            setIaIntegrationRimandoMotivation('')
+          }}
+          onConfirm={() => {
+            if (saving || iaIntegrationRimandoTargets.length === 0 || !String(iaIntegrationRimandoMotivation || '').trim()) return
+            void handleRegistraNonConformitaIa(iaIntegrationRimandoTargets, iaIntegrationRimandoMotivation)
           }}
         />
       )}
@@ -15056,7 +16175,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     role={currentRole}
                     saving={saving}
                     onChange={onFieldChange}
-                    onApplyAttestation={setPendingAttestationText}
+                    onManageOutcome={() => {
+                      setIaOutcomeChoice(currentIaOutcomeChoice(viewData || {}))
+                      setIaOutcomeDialogOpen(true)
+                    }}
                     onUndoAttestation={() => setPendingUndoAttestation(true)}
                     onGenerateBozzaDeterminazioneWord={handleGenerateBozzaDeterminazioneWord}
                     onDeleteBozzaDeterminazione={handleDeleteBozzaDeterminazione}
@@ -15104,7 +16226,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     onChange={onFieldChange}
                     actionBarTarget={verificationActionBarTarget}
                     vistoActionPending={false}
-                    onApplyAttestation={setPendingAttestationText}
+                    manageOutcomeEnabled={false}
+                    onManageOutcome={() => {
+                      setIaOutcomeChoice(currentIaOutcomeChoice(viewData || {}))
+                      setIaOutcomeDialogOpen(true)
+                    }}
                     onGenerateBozzaDeterminazioneWord={handleGenerateBozzaDeterminazioneWord}
                     onDeleteBozzaDeterminazione={handleDeleteBozzaDeterminazione}
                     onTransmitBozzaDeterminazioneRia={handleTransmitBozzaDeterminazioneRia}
@@ -15164,50 +16290,69 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 <DefinizionePraticaSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} />
               )}
 
-              {activeAmmSection === 'allegati' && (
-                <AllegaiaSection
-                  oid={oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null}
-                  ds={(active as any)?.ds}
-                  layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}
-                  canEdit={canEdit}
-                  selectedAttachmentId={ammPreviewAttachment?.id ?? null}
-                  onSelectedAttachmentChange={(item) => {
-                    setAmmPreviewRotationDeg(0)
-                    setAmmPreviewAttachment(item ? { id: Number(item.id), name: item.name, contentType: item.contentType } : null)
-                  }}
-                  rotationDeg={ammPreviewRotationDeg}
-                  onRotateLeft={() => setAmmPreviewRotationDeg(v => v - 90)}
-                  onRotateRight={() => setAmmPreviewRotationDeg(v => v + 90)}
-                  onRotationConfirmed={() => setAmmPreviewRotationDeg(0)}
-                  practiceContextRevision={practiceContextRevision}
-                />
+              {hasSelection && oid != null && Number.isFinite(Number(oid)) && (
+                <div style={{ display: activeAmmSection === 'allegati' ? 'flex' : 'none', flexDirection: 'column', minHeight: 0, height: '100%' }}>
+                  <AllegaiaSection
+                    oid={Number(oid)}
+                    ds={(active as any)?.ds}
+                    layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}
+                    canEdit={canEdit}
+                    selectedAttachmentId={ammPreviewAttachment?.id ?? null}
+                    onSelectedAttachmentChange={(item) => {
+                      if (!item) {
+                        setAmmPreviewAttachment(null)
+                        setAmmPreviewRotationDeg(0)
+                        return
+                      }
+                      const id = Number(item.id)
+                      setAmmPreviewAttachment({ id, name: item.name, contentType: item.contentType, readOnly: !!(item as any).readOnly })
+                      setAmmPreviewRotationDeg(Number(pendingAmmAttachmentRotations[id] || 0))
+                    }}
+                    rotationDeg={ammPreviewRotationDeg}
+                    onRotateLeft={() => {
+                      setAmmPreviewRotationDeg(value => value - 90)
+                      const selected = ammPreviewAttachment
+                      if (selected && !selected.readOnly) setPendingAmmAttachmentRotations(prev => ({ ...prev, [selected.id]: Number(prev[selected.id] || 0) - 90 }))
+                    }}
+                    onRotateRight={() => {
+                      setAmmPreviewRotationDeg(value => value + 90)
+                      const selected = ammPreviewAttachment
+                      if (selected && !selected.readOnly) setPendingAmmAttachmentRotations(prev => ({ ...prev, [selected.id]: Number(prev[selected.id] || 0) + 90 }))
+                    }}
+                    onRotationConfirmed={() => setAmmPreviewRotationDeg(0)}
+                    practiceContextRevision={practiceContextRevision}
+                    refreshKey={liveRefreshVersion}
+                  />
+                </div>
               )}
 
-              {activeAmmSection === 'anteprima' && (
-                <FascicoloAmmPreviewSection
-                  data={viewData || {}}
-                  liveRefreshVersion={liveRefreshVersion}
-                  role={currentRole}
-                  nsConfig={{
-                    detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || ''),
-                    parametriUrl: String((cfg as any).nsParametriUrl || ''),
-                    parametroCode: String((cfg as any).nsParametroCode || 'SPESE_GENERALI_PERC')
-                  }}
-                  hasSelection={hasSelection}
-                  oid={oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null}
-                  ds={(active as any)?.ds}
-                  idFieldName={String((active as any)?.idFieldName || 'OBJECTID')}
-                  layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}
-                  viewerBackgroundColor={String((cfg as any).anteprimaViewerBg || '#282828')}
-                  pdfHeaderBackgroundColor={String((cfg as any).anteprimaPdfHeaderBg || '#282828')}
-                  pdfPageAreaBackgroundColor={String((cfg as any).anteprimaPdfAreaBg || '#282828')}
-                  pdfThumbnailsBackgroundColor={String((cfg as any).anteprimaPdfThumbnailsBg || '#1f1f1f')}
-                  pdfToolbarBackgroundColor={String((cfg as any).anteprimaPdfToolbarBg || '#3c3c3c')}
-                  sidebarBackgroundColor={String((cfg as any).anteprimaSidebarBg || '#eef4fb')}
-                  sidebarBorderColor={String((cfg as any).anteprimaSidebarBorderColor || '#b8c7d9')}
-                  sidebarBorderWidth={Number((cfg as any).anteprimaSidebarBorderWidth ?? 1)}
-                  borderRadius={Number(adminStyle.formCardBorderRadius ?? 8)}
-                />
+              {hasSelection && oid != null && Number.isFinite(Number(oid)) && (activeAmmSection === 'anteprima' || persistentAnteprimaOid === Number(oid)) && (
+                <div style={{ display: activeAmmSection === 'anteprima' ? 'block' : 'none', width: '100%', height: '100%', minHeight: 0 }}>
+                  <FascicoloAmmPreviewSection
+                    data={viewData || {}}
+                    liveRefreshVersion={liveRefreshVersion}
+                    role={currentRole}
+                    nsConfig={{
+                      detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || ''),
+                      parametriUrl: String((cfg as any).nsParametriUrl || ''),
+                      parametroCode: String((cfg as any).nsParametroCode || 'SPESE_GENERALI_PERC')
+                    }}
+                    hasSelection={hasSelection}
+                    oid={Number(oid)}
+                    ds={(active as any)?.ds}
+                    idFieldName={String((active as any)?.idFieldName || 'OBJECTID')}
+                    layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}
+                    viewerBackgroundColor={String((cfg as any).anteprimaViewerBg || '#282828')}
+                    pdfHeaderBackgroundColor={String((cfg as any).anteprimaPdfHeaderBg || '#282828')}
+                    pdfPageAreaBackgroundColor={String((cfg as any).anteprimaPdfAreaBg || '#282828')}
+                    pdfThumbnailsBackgroundColor={String((cfg as any).anteprimaPdfThumbnailsBg || '#1f1f1f')}
+                    pdfToolbarBackgroundColor={String((cfg as any).anteprimaPdfToolbarBg || '#3c3c3c')}
+                    sidebarBackgroundColor={String((cfg as any).anteprimaSidebarBg || '#eef4fb')}
+                    sidebarBorderColor={String((cfg as any).anteprimaSidebarBorderColor || '#b8c7d9')}
+                    sidebarBorderWidth={Number((cfg as any).anteprimaSidebarBorderWidth ?? 1)}
+                    borderRadius={Number(adminStyle.formCardBorderRadius ?? 8)}
+                  />
+                </div>
               )}
             </div>
 

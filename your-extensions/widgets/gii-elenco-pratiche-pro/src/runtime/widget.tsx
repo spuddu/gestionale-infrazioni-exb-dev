@@ -3604,6 +3604,32 @@ export default function Widget(props: Props) {
     return iaPresaMs === null || iaPresaMs < lastRiaMs;
   };
 
+  const isCurrentIaToRiaBozzaTransmissionLog = (log: LogEntry | null): boolean => {
+    if (!log) return false;
+    const logRole = normalizeWorkflowRole(log.ruolo);
+    const logDest = normalizeWorkflowRole(log.ruoloDest);
+    const logEvent = String(log.evento || "").trim().toUpperCase();
+    return (
+      logRole === "IA" &&
+      logDest === "RIA" &&
+      (logEvent === "FASCICOLO_TRASMESSO_VERIFICA" ||
+        logEvent === "ESITO_INTEGRAZIONE_TRASMESSO")
+    );
+  };
+
+  // determinazione_stato = TRASMESSA_RIA descrive la posizione documentale
+  // della bozza, ma non deve oscurare un movimento procedurale successivo.
+  // La rappresentazione speciale IA -> RIA resta quindi valida solo finche'
+  // il LOG corrente e' ancora quella trasmissione. Se il LOG non e' ancora
+  // disponibile, manteniamo il fallback documentale per evitare un vuoto
+  // temporaneo subito dopo la trasmissione della bozza.
+  const shouldUseBozzaDeterminazioneTrasmissionDisplay = (d: any): boolean => {
+    if (!isBozzaDeterminazioneTrasmessaRia(d)) return false;
+    const log = getLogForRecord(d);
+    if (!log) return true;
+    return isCurrentIaToRiaBozzaTransmissionLog(log);
+  };
+
   const getBozzaDeterminazioneTrasmissionDisplay = (d: any) => {
     const iaUser = String(
       pickField(d, "bozza_determinazione_da") ??
@@ -3611,7 +3637,21 @@ export default function Widget(props: Props) {
       "",
     ).trim();
     const riaUser = "";
+
+    // determinazione_stato = TRASMESSA_RIA descrive soltanto la posizione
+    // documentale del fascicolo e non distingue il primo invio dal ritorno di
+    // un'integrazione. Quando il LOG corrente contiene gia' la trasmissione
+    // IA -> RIA, l'oggetto/stato dell'Elenco deve quindi derivare dall'evento
+    // reale, senza essere forzato a FASCICOLO_TRASMESSO_VERIFICA.
+    // Il fallback fisso resta utile nel brevissimo intervallo in cui la feature
+    // e' stata aggiornata ma il nuovo evento non e' ancora disponibile nel LOG.
+    const log = getLogForRecord(d);
+    const logEvent = String(log?.evento || "").trim().toUpperCase();
+    const isCurrentIaToRiaTransmission = isCurrentIaToRiaBozzaTransmissionLog(log);
+
+    const logDt = isCurrentIaToRiaTransmission ? (log?.dt ?? null) : null;
     const dt =
+      logDt ??
       parseToMs(pickField(d, "dt_stato_RIA")) ??
       parseToMs(pickField(d, "dt_stato_IA")) ??
       parseToMs(pickField(d, "dt_bozza_determinazione")) ??
@@ -3619,7 +3659,9 @@ export default function Widget(props: Props) {
     return {
       mittente: formatPersona("IA", "AMM", "CR", iaUser, utentiMapRef.current),
       destinatario: formatPersonaDest("RIA", "AMM", "CR", riaUser, utentiMapRef.current),
-      causale: "FASCICOLO TRASMESSO PER VERIFICA",
+      causale: isCurrentIaToRiaTransmission
+        ? formatCausale(logEvent)
+        : "FASCICOLO TRASMESSO PER VERIFICA",
       dataMs: dt,
       data: dt ? formatDateIt(dt) : "—",
     };
@@ -4451,7 +4493,7 @@ export default function Widget(props: Props) {
     const isDestinatarioRole = field === V_PROSSIMA_RUOLO;
     if (!isMittenteRole && !isDestinatarioRole) return "";
 
-    if (isBozzaDeterminazioneTrasmessaRia(d)) {
+    if (shouldUseBozzaDeterminazioneTrasmissionDisplay(d)) {
       const display = getBozzaDeterminazioneTrasmissionDisplay(d);
       return getPersonaDisplayParts(
         isMittenteRole ? display.mittente : display.destinatario,
@@ -4490,7 +4532,7 @@ export default function Widget(props: Props) {
     if (isNumeroAttoVirtualField(field)) return getNumeroVerbaleDisplay(r);
     if (field === V_ULTIMO) return computeUltimoAggMs(d);
     if (field === V_PROSSIMA) {
-      if (isBozzaDeterminazioneTrasmessaRia(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).destinatario;
+      if (shouldUseBozzaDeterminazioneTrasmissionDisplay(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).destinatario;
       const log = getLogForRecord(d);
       return log?.ruoloDest
         ? formatPersonaDest(
@@ -4503,7 +4545,7 @@ export default function Widget(props: Props) {
         : "";
     }
     if (field === V_MITTENTE) {
-      if (isBozzaDeterminazioneTrasmessaRia(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).mittente;
+      if (shouldUseBozzaDeterminazioneTrasmissionDisplay(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).mittente;
       const log = getLogForRecord(d);
       return log
         ? formatPersona(
@@ -4516,7 +4558,7 @@ export default function Widget(props: Props) {
         : "";
     }
     if (field === V_CAUSALE) {
-      if (isBozzaDeterminazioneTrasmessaRia(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).causale;
+      if (shouldUseBozzaDeterminazioneTrasmissionDisplay(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).causale;
       if (isInitialItDraft(d)) return "BOZZA";
       const log = getLogForRecord(d);
       if (log) return formatCausaleForLog(log, d);
@@ -4527,7 +4569,7 @@ export default function Widget(props: Props) {
       // (presa in carico, rimando, trasmissione, esito), non solo la data del LOG
       // usato per le colonne Stato/Mittente/Destinatario. Altrimenti, se il LOG
       // informativo resta quello di un ciclo precedente, l'ordinamento rimane congelato.
-      if (isBozzaDeterminazioneTrasmessaRia(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).dataMs ?? computeUltimoAggMs(d) ?? 0;
+      if (shouldUseBozzaDeterminazioneTrasmissionDisplay(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).dataMs ?? computeUltimoAggMs(d) ?? 0;
       return computeUltimoAggMs(d) ?? 0;
     }
     return d[field];
@@ -6049,6 +6091,15 @@ export default function Widget(props: Props) {
       word-break: normal;
     }
 
+    .ufficioOrigineCell {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+      line-height: 1.2;
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
+
     .personaCell {
       min-width: 0;
       width: 100%;
@@ -6833,7 +6884,7 @@ export default function Widget(props: Props) {
                       let destinatario: string;
                       let causaleVal: string;
                       let dataMsgVal: string;
-                      if (isBozzaDeterminazioneTrasmessaRia(d)) {
+                      if (shouldUseBozzaDeterminazioneTrasmissionDisplay(d)) {
                         const bozzaDisplay = getBozzaDeterminazioneTrasmissionDisplay(d);
                         mittenteVal = bozzaDisplay.mittente;
                         destinatario = bozzaDisplay.destinatario;
@@ -7359,10 +7410,12 @@ export default function Widget(props: Props) {
                               );
                             }
                             const val = txt(d[f]);
+                            const isUfficioOrigine =
+                              fl === fieldUfficio.toLowerCase();
                             return (
                               <div
                                 key={col.id}
-                                className={ci === 0 ? "cell first" : "cell"}
+                                className={`${ci === 0 ? "cell first" : "cell"}${isUfficioOrigine ? " ufficioOrigineCell" : ""}`}
                                 title={val}
                               >
                                 {val}

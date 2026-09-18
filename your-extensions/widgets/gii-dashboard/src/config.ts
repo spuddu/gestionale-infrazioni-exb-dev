@@ -13,6 +13,15 @@ export interface Config {
   cardBorder: string
   textColor: string
   mutedColor: string
+  outerPaddingTop: number
+  outerPaddingRight: number
+  outerPaddingBottom: number
+  outerPaddingLeft: number
+  panelPaddingTop: number
+  panelPaddingRight: number
+  panelPaddingBottom: number
+  panelPaddingLeft: number
+  cardRadius: number
 }
 
 export const defaultConfig: Config = {
@@ -27,7 +36,16 @@ export const defaultConfig: Config = {
   cardBg: 'rgba(255,255,255,0.08)',
   cardBorder: 'rgba(255,255,255,0.14)',
   textColor: '#ffffff',
-  mutedColor: 'rgba(255,255,255,0.70)'
+  mutedColor: 'rgba(255,255,255,0.70)',
+  outerPaddingTop: 14,
+  outerPaddingRight: 14,
+  outerPaddingBottom: 14,
+  outerPaddingLeft: 14,
+  panelPaddingTop: 16,
+  panelPaddingRight: 16,
+  panelPaddingBottom: 16,
+  panelPaddingLeft: 16,
+  cardRadius: 14
 }
 
 export type IMConfig = ImmutableObject<Config>

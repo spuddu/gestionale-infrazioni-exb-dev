@@ -127,6 +127,12 @@ export interface Config {
   formCardHeaderPaddingY: number
   formCardBodyPadding: number
 
+  // Padding contenuto schede (contenitore esterno di tutte le tab).
+  tabPaddingTop: number
+  tabPaddingRight: number
+  tabPaddingBottom: number
+  tabPaddingLeft: number
+
   // Barra Azioni della scheda Verifica istruttoria.
   actionBarBg: string
   actionBarBorderColor: string
@@ -289,6 +295,12 @@ export const defaultConfig: Config = {
   formCardHeaderPaddingX: 10,
   formCardHeaderPaddingY: 7,
   formCardBodyPadding: 10,
+
+  // Stessi valori predefiniti del gii-editing-tec.
+  tabPaddingTop: 12,
+  tabPaddingRight: 2,
+  tabPaddingBottom: 2,
+  tabPaddingLeft: 2,
 
   actionBarBg: '#ffffff',
   actionBarBorderColor: '#e5e7eb',

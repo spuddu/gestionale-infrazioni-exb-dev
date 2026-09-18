@@ -243,6 +243,10 @@ export type GiiAttachmentViewerProps<T extends GiiAttachmentViewerItem = GiiAtta
   onRotateLeft?: (item: T) => void
   onRotateRight?: (item: T) => void
   onConfirmRotation?: (item: T) => void | Promise<void>
+  showPreviewCaption?: boolean
+  rotationControlsPosition?: 'top' | 'bottom'
+  showConfirmRotation?: boolean
+  bodyPadding?: number
   formatBytes?: (size?: number) => string
   labelFontSize?: number
   headerFontSize?: number
@@ -644,7 +648,7 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
       }
     })()
     return () => { cancelled = true }
-  }, [selected?.id, selected?.url, selected?.previewUrl, props.buildPreviewUrl])
+  }, [selected?.id, selected?.url, selected?.previewUrl, (selected as any)?.__pendingFile, props.buildPreviewUrl])
 
   React.useEffect(() => {
     return () => {
@@ -672,6 +676,14 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
   const canConfirmInternalRotation = !props.onConfirmRotation && !!props.onReplace && canEdit && !itemEditDisabled(selected) && normalizedRotationDeg !== 0
   const confirmRotationDisabled = effectiveRotationBusy || normalizedRotationDeg === 0 || !(canConfirmExternalRotation || canConfirmInternalRotation)
   const uploadTitle = String(props.uploadLabel || 'Carica allegato')
+  const showPreviewCaption = props.showPreviewCaption === true
+  const rotationControlsPosition = props.rotationControlsPosition === 'bottom' ? 'bottom' : 'top'
+  const showConfirmRotation = props.showConfirmRotation !== false
+  const bodyPadding = props.bodyPadding == null ? null : Math.max(0, Number(props.bodyPadding) || 0)
+  const selectedIndex = selected ? items.findIndex((it: any) => String(it?.id) === String(selected.id)) : -1
+  const previewCaption = selected
+    ? `${selectedIndex >= 0 ? `Allegato ${selectedIndex + 1} • ` : ''}${selected.name || `Allegato ${selectedIndex + 1}`}`
+    : 'Anteprima allegato'
 
   const rotateLeft = React.useCallback(() => {
     if (!selectedCanRotate) return
@@ -705,6 +717,16 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
     }
   }, [confirmRotationDisabled, normalizedRotationDeg, previewUrl, props.onConfirmRotation, props.onReplace, selected, selectedCanRotate])
 
+  const rotationControls = selectedCanRotate && previewUrl ? (
+    <div style={{ flex: '0 0 auto', minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '5px 10px', boxSizing: 'border-box', background: '#282828', borderTop: rotationControlsPosition === 'bottom' ? '1px solid rgba(255,255,255,0.12)' : undefined, borderBottom: rotationControlsPosition === 'top' ? '1px solid rgba(255,255,255,0.12)' : undefined }}>
+      <button type='button' disabled={effectiveRotationBusy} onClick={rotateLeft} title='Ruota a sinistra' aria-label='Ruota a sinistra' style={{ width: 38, height: 34, borderRadius: 9, border: '1px solid rgba(255,255,255,0.28)', background: '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: effectiveRotationBusy ? 'not-allowed' : 'pointer', opacity: effectiveRotationBusy ? 0.55 : 1, fontSize: 24, fontWeight: 800, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}>↺</button>
+      {showConfirmRotation && (
+        <button type='button' disabled={confirmRotationDisabled} onClick={() => { void confirmRotation() }} title='Conferma orientamento' aria-label='Conferma orientamento' style={{ width: 38, height: 34, borderRadius: 9, border: !confirmRotationDisabled ? '1px solid #1a7f37' : '1px solid rgba(255,255,255,0.18)', background: !confirmRotationDisabled ? '#1a7f37' : '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: confirmRotationDisabled ? 'not-allowed' : 'pointer', opacity: effectiveRotationBusy ? 0.55 : (!confirmRotationDisabled ? 1 : 0.38), fontSize: 20, fontWeight: 900, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}>{effectiveRotationBusy ? '…' : '✓'}</button>
+      )}
+      <button type='button' disabled={effectiveRotationBusy} onClick={rotateRight} title='Ruota a destra' aria-label='Ruota a destra' style={{ width: 38, height: 34, borderRadius: 9, border: '1px solid rgba(255,255,255,0.28)', background: '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: effectiveRotationBusy ? 'not-allowed' : 'pointer', opacity: effectiveRotationBusy ? 0.55 : 1, fontSize: 24, fontWeight: 800, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}>↻</button>
+    </div>
+  ) : null
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', height: '100%', border: `1px solid ${props.headerBorderColor || '#c5d9f1'}`, borderRadius, background: '#fff', overflow: 'hidden' }}>
       {!oidAvailable ? (
@@ -712,8 +734,8 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
           {props.noOidMessage || 'Selezionare una pratica prima di consultare o caricare gli allegati.'}
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, flex: '1 1 auto', minHeight: 0, height: '100%', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'hidden', padding: 12, boxSizing: 'border-box' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, flex: '1 1 auto', minHeight: 0, height: '100%', overflow: 'hidden', padding: bodyPadding == null ? undefined : bodyPadding, boxSizing: 'border-box' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'hidden', padding: bodyPadding == null ? 12 : 0, boxSizing: 'border-box' }}>
             <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ fontWeight: 800, fontSize: Math.max(13, labelFontSize), color: props.innerHeaderColor || '#0f4c81' }}>Elenco allegati</div>
               {props.onUpload && (
@@ -825,15 +847,14 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
             )}
           </div>
 
-          <div style={{ background: '#282828', display: 'grid', gridTemplateRows: selectedCanRotate && previewUrl ? '34px minmax(0, 1fr)' : 'minmax(0, 1fr)', gap: selectedCanRotate && previewUrl ? 8 : 0, overflow: 'hidden', minHeight: 0, height: '100%' }}>
-            {selectedCanRotate && previewUrl && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-                <button type='button' disabled={effectiveRotationBusy} onClick={rotateLeft} title='Ruota a sinistra' aria-label='Ruota a sinistra' style={{ width: 38, height: 34, borderRadius: 9, border: '1px solid rgba(255,255,255,0.28)', background: '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: effectiveRotationBusy ? 'not-allowed' : 'pointer', opacity: effectiveRotationBusy ? 0.55 : 1, fontSize: 24, fontWeight: 800, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}>↺</button>
-                <button type='button' disabled={confirmRotationDisabled} onClick={() => { void confirmRotation() }} title='Conferma orientamento' aria-label='Conferma orientamento' style={{ width: 38, height: 34, borderRadius: 9, border: !confirmRotationDisabled ? '1px solid #1a7f37' : '1px solid rgba(255,255,255,0.18)', background: !confirmRotationDisabled ? '#1a7f37' : '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: confirmRotationDisabled ? 'not-allowed' : 'pointer', opacity: effectiveRotationBusy ? 0.55 : (!confirmRotationDisabled ? 1 : 0.38), fontSize: 20, fontWeight: 900, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}>{effectiveRotationBusy ? '…' : '✓'}</button>
-                <button type='button' disabled={effectiveRotationBusy} onClick={rotateRight} title='Ruota a destra' aria-label='Ruota a destra' style={{ width: 38, height: 34, borderRadius: 9, border: '1px solid rgba(255,255,255,0.28)', background: '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: effectiveRotationBusy ? 'not-allowed' : 'pointer', opacity: effectiveRotationBusy ? 0.55 : 1, fontSize: 24, fontWeight: 800, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}>↻</button>
+          <div style={{ background: '#282828', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0, height: '100%' }}>
+            {showPreviewCaption && (
+              <div style={{ flex: '0 0 auto', width: '100%', boxSizing: 'border-box', padding: '7px 14px', background: '#282828', borderBottom: '1px solid rgba(255,255,255,0.12)', color: '#fff', textAlign: 'center', lineHeight: 1.2 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{previewCaption}</div>
               </div>
             )}
-            <div style={{ minHeight: 0, width: '100%', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {rotationControlsPosition === 'top' && rotationControls}
+            <div style={{ flex: '1 1 0', minHeight: 0, width: '100%', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {!selected ? (
                 <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
               ) : previewLoading ? (
@@ -849,7 +870,7 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
                       <AnteprimaPdfViewer
                         url={previewUrl}
                         fileName={selected.name || 'allegato.pdf'}
-                        title={selected.name || 'allegato.pdf'}
+                        title={showPreviewCaption ? undefined : (selected.name || 'allegato.pdf')}
                         subtitle={undefined}
                         loading={false}
                         error={null}
@@ -864,6 +885,7 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
                 <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima PDF non disponibile per questo allegato. Se il file originale non è PDF o immagine, deve essere presente un PDF di anteprima associato.</div>
               )}
             </div>
+            {rotationControlsPosition === 'bottom' && rotationControls}
           </div>
         </div>
       )}

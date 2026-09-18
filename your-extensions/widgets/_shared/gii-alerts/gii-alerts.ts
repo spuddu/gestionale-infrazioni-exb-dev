@@ -1425,12 +1425,22 @@ function currentActivityToAlert (row: Record<string, any>): GiiAlertItem | null 
   const isInformativa = tipoAttivita === 'INFORMATIVA'
   const titoloRecord = String(attr(row, ['titolo']) || '').trim()
   const messageRecord = String(attr(row, ['messaggio']) || '').trim()
-  // Per le attività correnti il titolo viene già costruito dal workflow dal
-  // punto di vista del destinatario (es. "Istruttoria ricevuta per validazione").
-  // Non sostituirlo con il vecchio titolo generico di presa in carico.
-  const title = isInformativa
-    ? (titoloRecord || 'Comunicazione informativa')
-    : (titoloRecord || 'Attività da prendere in carico')
+  const sottotipoAttivita = normalizeAlertCode(attr(row, ['sottotipo_attivita']))
+  const origineEvento = normalizeAlertCode(attr(row, ['origine_evento']))
+  const isNuovaRilevazioneTrCs =
+    sottotipoAttivita === 'NUOVA_RILEVAZIONE' ||
+    origineEvento === 'NUOVA_RILEVAZIONE_SURVEY' ||
+    sottotipoAttivita.includes('NUOVA_RILEVAZIONE') ||
+    origineEvento.includes('NUOVA_RILEVAZIONE')
+  // Per le attività correnti il titolo salvato resta la fonte autorevole, con una
+  // sola eccezione strutturata: il primo ingresso Survey/TR → CS deve sempre
+  // essere esposto come "Nuova rilevazione ricevuta", anche per record già
+  // materializzati in passato con il vecchio titolo generico.
+  const title = isNuovaRilevazioneTrCs
+    ? 'Nuova rilevazione ricevuta'
+    : isInformativa
+      ? (titoloRecord || 'Comunicazione informativa')
+      : (titoloRecord || 'Attività da prendere in carico')
   const message = isInformativa
     ? (messageRecord || reportCode)
     : (messageRecord || reportCode)
