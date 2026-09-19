@@ -57,6 +57,7 @@ type GiiUserInfo = {
 type OggettoLegendInfo = {
   label: string;
   description: string;
+  detail?: string;
   color: string;
   x: number;
   y: number;
@@ -214,24 +215,27 @@ const OGGETTO_STATUS_BY_LABEL = new Map(
 const ALLOWED_OGGETTI = new Set(OGGETTO_STATUS_CATALOG.map((s) => s.label));
 
 const EVENTO_OGGETTO_LABELS: Record<string, string> = {
-  NUOVA_RILEVAZIONE_TRASMESSA: 'NUOVA RILEVAZIONE TRASMESSA',
-  ISTRUTTORIA_ASSEGNATA: 'ISTRUTTORIA ASSEGNATA',
-  ISTRUTTORIA_TRASMESSA_VERIFICA: 'ISTRUTTORIA TRASMESSA PER VERIFICA',
+  CREAZIONE: 'BOZZA',
+  NUOVA_RILEVAZIONE_TRASMESSA: 'RILEVAZIONE TRASMESSA',
+  ISTRUTTORIA_ASSEGNATA: 'ASSEGNATA',
+  ISTRUTTORIA_TRASMESSA_VERIFICA: 'ISTRUITA',
   INTEGRAZIONE_TRASMESSA_VERIFICA: 'ESITO INTEGRAZIONE TRASMESSO',
-  ISTRUTTORIA_VERIFICATA: 'ISTRUTTORIA VERIFICATA',
-  ISTRUTTORIA_TECNICA_VALIDATA: 'ISTRUTTORIA VALIDATA',
+  ISTRUTTORIA_VERIFICATA: 'VERIFICATA',
+  ISTRUTTORIA_TECNICA_VALIDATA: 'VALIDATA',
   INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA: 'ESITO INTEGRAZIONE TRASMESSO',
-  ISTRUTTORIA_TECNICA_APPROVATA: 'ISTRUTTORIA APPROVATA',
-  ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA: 'ISTRUTTORIA ASSEGNATA',
-  FASCICOLO_TRASMESSO_VERIFICA: 'FASCICOLO TRASMESSO PER VERIFICA',
-  ISTRUTTORIA_AMMINISTRATIVA_VALIDATA: 'ISTRUTTORIA VALIDATA',
-  ISTRUTTORIA_RIMANDATA_INTEGRAZIONE: 'ISTRUTTORIA RIMANDATA PER INTEGRAZIONE',
-  FASCICOLO_RIMANDATO_INTEGRAZIONE: 'FASCICOLO RIMANDATO PER INTEGRAZIONE',
+  ISTRUTTORIA_TECNICA_APPROVATA: 'APPROVATA',
+  ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA: 'ASSEGNATA',
+  FASCICOLO_TRASMESSO_VERIFICA: 'FASCICOLO TRASMESSO',
+  ISTRUTTORIA_AMMINISTRATIVA_VALIDATA: 'VALIDATA',
+  ISTRUTTORIA_RIMANDATA_INTEGRAZIONE: 'RIMANDATA',
+  ISTRUTTORIA_RIMANDATA_PER_INTEGRAZIONE: 'RIMANDATA',
+  FASCICOLO_RIMANDATO_INTEGRAZIONE: 'RIMANDATA',
   ESITO_INTEGRAZIONE_TRASMESSO: 'ESITO INTEGRAZIONE TRASMESSO',
   ESITO_INTEGRAZIONE_TECNICA_TRASMESSO: 'ESITO INTEGRAZIONE TRASMESSO',
-  ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA: 'ATTO DI ACCERTAMENTO TRASMESSO PER VERIFICA',
-  ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE: 'ATTO DI ACCERTAMENTO RIMANDATO PER INTEGRAZIONE',
-  ATTO_ACCERTAMENTO_APPROVATO: 'ATTO DI ACCERTAMENTO APPROVATO',
+  ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA: 'ATTO TRASMESSO',
+  ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE: 'RIMANDATA',
+  ATTO_ACCERTAMENTO_APPROVATO: 'ATTO APPROVATO',
+  ARCHIVIAZIONE: 'ARCHIVIATA',
   SANZIONE_NOTIFICATA: 'SANZIONE NOTIFICATA',
   VERBALE_NOTIFICATO: 'SANZIONE NOTIFICATA'
 };
@@ -996,16 +1000,16 @@ function migrateColumns(cfg: any): ColumnDef[] {
       field: V_FASE,
       width: 150,
     }),
-    take({ id: "col_causale", label: "Stato", field: V_CAUSALE, width: 250 }),
+    take({ id: "col_causale", label: "Stato pratica", field: V_CAUSALE, width: 250 }),
     take({
       id: "col_mittente",
-      label: "Mittente",
+      label: "Eseguito da",
       field: V_MITTENTE,
       width: 210,
     }),
     take({
       id: "col_prossima",
-      label: "Destinatario",
+      label: "Trasmesso a",
       field: V_PROSSIMA,
       width: 210,
     }),
@@ -3052,9 +3056,10 @@ export default function Widget(props: Props) {
           for (const f of features) {
             const a = f?.attributes;
             const pgid = normGid(a?.parent_globalid);
-            // Primo messaggio utile per ogni parent_globalid (ordinato DESC = più recente).
-            // La colonna Oggetto/Da/A deve rappresentare una trasmissione,
-            // non eventi tecnici come presa in carico o archiviazione.
+            // Primo evento procedimentale utile per ogni parent_globalid
+            // (ordinato DESC = più recente). Le colonne Stato pratica / Eseguito da /
+            // Trasmesso a ignorano i soli eventi tecnici che non cambiano lo stato
+            // della pratica, come la semplice presa in carico.
             const eventoLog = String(a?.evento_chiusura || "");
             if (pgid && isOggettoLogEvent(eventoLog)) {
               const dtRaw = a?.dt_chiusura;
@@ -3115,7 +3120,7 @@ export default function Widget(props: Props) {
   // Helper: leggi log entry per un record.
   // Durante il refresh del LOG non restituiamo il vecchio valore in cache:
   // meglio mostrare temporaneamente un trattino che un Oggetto provvisorio/superato
-  // (es. NUOVA RILEVAZIONE TRASMESSA o ISTRUTTORIA ASSEGNATA) destinato a cambiare
+  // (es. RILEVAZIONE TRASMESSA o ASSEGNATA) destinato a cambiare
   // dopo pochi istanti.
   const getLogForRecord = React.useCallback(
     (d: any): LogEntry | null => {
@@ -3282,8 +3287,9 @@ export default function Widget(props: Props) {
       ISTRUTTORIA_ASSEGNATA: ['ISTRUTTORIA_ASSEGNATA', 'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA'],
       ISTRUTTORIA_VALIDATA: ['ISTRUTTORIA_VALIDATA', 'ISTRUTTORIA_TECNICA_VALIDATA', 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA'],
       ISTRUTTORIA_APPROVATA: ['ISTRUTTORIA_APPROVATA', 'ISTRUTTORIA_TECNICA_APPROVATA'],
+      ISTRUTTORIA_RIMANDATA_INTEGRAZIONE: ['ISTRUTTORIA_RIMANDATA_INTEGRAZIONE', 'FASCICOLO_RIMANDATO_INTEGRAZIONE', 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE'],
       ESITO_INTEGRAZIONE_TRASMESSO: ['ESITO_INTEGRAZIONE_TRASMESSO', 'INTEGRAZIONE_TRASMESSA_VERIFICA', 'INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA', 'ESITO_INTEGRAZIONE_TECNICA_TRASMESSO'],
-      ISTRUTTORIA_RESPINTA: ['ISTRUTTORIA_RESPINTA', 'ISTRUTTORIA_TECNICA_RESPINTA']
+      ISTRUTTORIA_RESPINTA: ['ISTRUTTORIA_RESPINTA', 'ISTRUTTORIA_TECNICA_RESPINTA', 'RILEVAZIONE_RESPINTA']
     };
     return aliases[key] || [key];
   };
@@ -3314,47 +3320,152 @@ export default function Widget(props: Props) {
     return getLegacyOggettoAccentColor(status.key);
   };
 
-  const getOggettoLegendDescription = (oggetto: string): string => {
-    const o = normalizeOggettoLabel(oggetto);
-    if (o === 'BOZZA') return 'Rilevazione creata dall’Istruttore tecnico e non ancora trasmessa.';
-    if (o === 'NUOVA RILEVAZIONE TRASMESSA') return 'Nuova rilevazione trasmessa al Capo Settore.';
-    if (o === 'ISTRUTTORIA ASSEGNATA') return 'Istruttoria assegnata al soggetto che deve prenderla in carico.';
-    if (o === 'ISTRUTTORIA TRASMESSA PER VERIFICA') return 'Istruttoria completata dall’Istruttore tecnico e trasmessa per la verifica.';
-    if (o === 'ISTRUTTORIA VERIFICATA') return 'Verifica del Capo Settore conclusa positivamente.';
-    if (o === 'ISTRUTTORIA VALIDATA') return 'Validazione dell’istruttoria conclusa positivamente.';
-    if (o === 'ISTRUTTORIA APPROVATA') return 'Approvazione dell’istruttoria conclusa positivamente.';
-    if (o === 'FASCICOLO TRASMESSO PER VERIFICA') return 'Fascicolo amministrativo trasmesso al Responsabile per la verifica.';
+  const getWorkflowRoleSubject = (role: any): string => {
+    switch (normalizeWorkflowRole(role)) {
+      case "TR": return "Il Tecnico rilevatore";
+      case "IT": return "L’Istruttore tecnico";
+      case "CS": return "Il Capo Settore";
+      case "RIT": return "Il Responsabile dell’istruttoria tecnica";
+      case "DT": return "Il Direttore d’Area";
+      case "IA": return "L’Istruttore amministrativo";
+      case "RIA": return "Il Responsabile dell’istruttoria amministrativa";
+      case "DA": return "Il Direttore Area AA. GG. e P.F.";
+      default: return "Il soggetto competente";
+    }
+  };
 
-    if (o === 'ISTRUTTORIA RIMANDATA PER INTEGRAZIONE') return 'Istruttoria restituita al ruolo competente per integrazione o rettifica.';
-    if (o === 'FASCICOLO RIMANDATO PER INTEGRAZIONE') return 'Fascicolo restituito all’Istruttore amministrativo per integrazione o rettifica.';
-    if (o === 'ESITO INTEGRAZIONE TRASMESSO') return 'Esito dell’integrazione ritrasmesso al soggetto competente.';
-    if (o === 'ATTO DI ACCERTAMENTO TRASMESSO PER VERIFICA') return 'Atto di accertamento trasmesso al Responsabile per la verifica.';
-    if (o === 'ATTO DI ACCERTAMENTO RIMANDATO PER INTEGRAZIONE') return 'Atto di accertamento restituito per integrazione o rettifica.';
-    if (o === 'ATTO DI ACCERTAMENTO APPROVATO') return 'Atto di accertamento approvato dal Responsabile dell’istruttoria amministrativa.';
-    if (o.includes('RESPINTA')) return 'Rilevazione o istruttoria respinta.';
-    if (o.includes('NOTIFIC')) return 'Atto notificato.';
-    return 'Oggetto dell’ultimo evento registrato per la pratica.';
+  const getWorkflowRoleRecipient = (role: any): string => {
+    switch (normalizeWorkflowRole(role)) {
+      case "TR": return "al Tecnico rilevatore";
+      case "IT": return "all’Istruttore tecnico";
+      case "CS": return "al Capo Settore";
+      case "RIT": return "al Responsabile dell’istruttoria tecnica";
+      case "DT": return "al Direttore d’Area";
+      case "IA": return "all’Istruttore amministrativo";
+      case "RIA": return "al Responsabile dell’istruttoria amministrativa";
+      case "DA": return "al Direttore Area AA. GG. e P.F.";
+      default: return "al soggetto competente";
+    }
+  };
+
+  const getOggettoLegendDescription = (
+    oggetto: string,
+    log: LogEntry | null,
+    d: any,
+  ): string => {
+    const o = normalizeOggettoLabel(oggetto);
+    const evento = String(log?.evento || "").trim().toUpperCase();
+    const subject = getWorkflowRoleSubject(log?.ruolo);
+    const recipient = getWorkflowRoleRecipient(log?.ruoloDest);
+
+    if (o === "BOZZA")
+      return "La rilevazione è stata creata e non è ancora stata trasmessa.";
+
+    // Lo stesso evento tecnico può rappresentare il primo invio di una pratica
+    // creata direttamente da IT: in quel caso lo Stato pratica viene corretto a
+    // RILEVAZIONE TRASMESSA e anche la narrativa deve seguire lo stato mostrato.
+    if (o === "RILEVAZIONE TRASMESSA") {
+      if (log?.ruolo)
+        return `${subject} ha trasmesso la rilevazione ${recipient}.`;
+      return "La rilevazione è stata trasmessa dal Tecnico rilevatore al Capo Settore.";
+    }
+
+    if (o === "ASSEGNATA") {
+      if (evento === "ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA")
+        return `${subject} ha assegnato l’istruttoria ${recipient}.`;
+      return `${subject} ha assegnato l’istruttoria ${recipient}.`;
+    }
+
+    if (o === "ISTRUITA")
+      return `${subject} ha istruito la pratica e l’ha trasmessa ${recipient}.`;
+
+    if (o === "VERIFICATA")
+      return `${subject} ha verificato l’istruttoria e l’ha trasmessa ${recipient}.`;
+
+    if (o === "VALIDATA") {
+      if (evento === "ISTRUTTORIA_AMMINISTRATIVA_VALIDATA")
+        return `${subject} ha validato l’istruttoria amministrativa e l’ha trasmessa ${recipient}.`;
+      return `${subject} ha validato l’istruttoria tecnica e l’ha trasmessa ${recipient}.`;
+    }
+
+    if (o === "APPROVATA")
+      return `${subject} ha approvato l’istruttoria tecnica e l’ha trasmessa ${recipient} per l’avvio della fase amministrativa.`;
+
+    if (o === "FASCICOLO TRASMESSO")
+      return `${subject} ha trasmesso l’intero fascicolo ${recipient} per la verifica.`;
+
+    if (o === "RIMANDATA") {
+      if (evento === "FASCICOLO_RIMANDATO_INTEGRAZIONE")
+        return `${subject} ha rimandato il fascicolo ${recipient} per integrazioni o chiarimenti.`;
+      if (evento === "ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE")
+        return `${subject} ha rimandato l’Atto di accertamento ${recipient} per integrazioni o chiarimenti.`;
+      return `${subject} ha rimandato l’istruttoria ${recipient} per integrazioni o chiarimenti.`;
+    }
+
+    if (o === "ESITO INTEGRAZIONE TRASMESSO")
+      return `${subject} ha trasmesso ${recipient} l’esito dell’integrazione richiesta.`;
+
+    if (o === "ATTO TRASMESSO")
+      return `${subject} ha trasmesso l’Atto di accertamento ${recipient} per la verifica.`;
+
+    if (o === "ATTO APPROVATO")
+      return `${subject} ha approvato l’Atto di accertamento e l’ha trasmesso ${recipient}.`;
+
+    if (o === "RESPINTA") {
+      const ruolo = normalizeWorkflowRole(log?.ruolo);
+      const itAssigned = String(pickField(d, "it_assegnato_username") ?? "").trim();
+      const itTouched = hasWorkflowValue(pickField(d, "stato_IT"));
+      const objectLabel = ruolo === "CS" && !itAssigned && !itTouched ? "la rilevazione" : "l’istruttoria";
+      return `${subject} ha respinto ${objectLabel}.`;
+    }
+
+    if (o === "ARCHIVIATA")
+      return `${subject} ha archiviato la pratica.`;
+
+    if (o === "SANZIONE NOTIFICATA")
+      return "La sanzione è stata notificata.";
+
+    return "Stato risultante dall’ultimo evento procedimentale registrato per la pratica.";
+  };
+
+  const getOggettoLegendDocumentDetail = (d: any): string => {
+    const stato = String(pickField(d, "determinazione_stato") ?? "")
+      .trim()
+      .toUpperCase();
+    const numero = String(pickField(d, "determinazione_numero") ?? "").trim();
+    const dataRaw = pickField(d, "determinazione_data");
+    const dataMs = parseToMs(dataRaw);
+    const data = dataMs !== null ? formatDateOnlyIt(dataMs) : "";
+    const adopted = stato === "ADOTTATA" || (!!numero && !!data);
+    if (!adopted) return "";
+
+    const parts: string[] = ["Determinazione adottata"];
+    if (data) parts.push(`il ${data}`);
+    if (numero) parts.push(`n. ${numero}`);
+    return `${parts.join(" · ")}.`;
   };
 
   const showOggettoLegend = (
     target: HTMLElement,
     oggetto: string,
     color: string,
-    autoClose = false,
+    options?: { log?: LogEntry | null; data?: any; autoClose?: boolean },
   ) => {
     if (oggettoLegendTouchTimerRef.current != null) {
       window.clearTimeout(oggettoLegendTouchTimerRef.current);
       oggettoLegendTouchTimerRef.current = null;
     }
     const rect = target.getBoundingClientRect();
+    const d = options?.data || {};
     setOggettoLegendInfo({
       label: normalizeOggettoLabel(oggetto),
-      description: getOggettoLegendDescription(oggetto),
+      description: getOggettoLegendDescription(oggetto, options?.log || null, d),
+      detail: getOggettoLegendDocumentDetail(d) || undefined,
       color,
       x: rect.right + 10,
       y: rect.top,
     });
-    if (autoClose) {
+    if (options?.autoClose) {
       oggettoLegendTouchTimerRef.current = window.setTimeout(() => {
         setOggettoLegendInfo(null);
         oggettoLegendTouchTimerRef.current = null;
@@ -3661,7 +3772,7 @@ export default function Widget(props: Props) {
       destinatario: formatPersonaDest("RIA", "AMM", "CR", riaUser, utentiMapRef.current),
       causale: isCurrentIaToRiaTransmission
         ? formatCausale(logEvent)
-        : "FASCICOLO TRASMESSO PER VERIFICA",
+        : "FASCICOLO TRASMESSO",
       dataMs: dt,
       data: dt ? formatDateIt(dt) : "—",
     };
@@ -4146,7 +4257,7 @@ export default function Widget(props: Props) {
     // it_assegnato_da e dt_assegnazione_it con lo stesso IT creatore: non e'
     // una assegnazione CS -> IT. Se un vecchio record di test e' stato chiuso
     // con ISTRUTTORIA_TRASMESSA_VERIFICA, l'Elenco deve comunque rappresentare
-    // correttamente il primo invio IT -> CS come NUOVA RILEVAZIONE TRASMESSA.
+    // correttamente il primo invio IT -> CS come RILEVAZIONE TRASMESSA.
     if (evento === 'ISTRUTTORIA_TRASMESSA_VERIFICA') {
       const ruolo = normalizeWorkflowRole(log.ruolo);
       const destinatario = normalizeWorkflowRole(log.ruoloDest);
@@ -4158,19 +4269,11 @@ export default function Widget(props: Props) {
       const selfCreatedIt = origineIt && !!itAssignee && !!itAssigner && itAssignee === itAssigner;
       const numeroRapporto = pickOfficialRapportoNumber(d);
       if (ruolo === 'IT' && destinatario === 'CS' && selfCreatedIt && !numeroRapporto) {
-        return normalizeOggettoLabel('NUOVA RILEVAZIONE TRASMESSA');
+        return normalizeOggettoLabel('RILEVAZIONE TRASMESSA');
       }
     }
 
-    if (evento === 'RESPINTA') {
-      const ruolo = normalizeWorkflowRole(log.ruolo);
-      if (ruolo === 'CS') {
-        const tiAssigned = String(pickField(d, 'it_assegnato_username') ?? '').trim();
-        const tiWorkflowTouched = hasRuoloData(d, 'IT');
-        return normalizeOggettoLabel(tiAssigned || tiWorkflowTouched ? 'ISTRUTTORIA RESPINTA' : 'RILEVAZIONE RESPINTA');
-      }
-      return normalizeOggettoLabel('ISTRUTTORIA RESPINTA');
-    }
+    if (evento === 'RESPINTA') return normalizeOggettoLabel('RESPINTA');
     return formatCausale(evento);
   }
 
@@ -4562,7 +4665,7 @@ export default function Widget(props: Props) {
       if (isInitialItDraft(d)) return "BOZZA";
       const log = getLogForRecord(d);
       if (log) return formatCausaleForLog(log, d);
-      return shouldUseInitialOggettoFallback(d) ? "NUOVA RILEVAZIONE TRASMESSA" : "";
+      return shouldUseInitialOggettoFallback(d) ? "RILEVAZIONE TRASMESSA" : "";
     }
     if (field === V_DATA_MSG) {
       // "Ultimo agg." deve rappresentare l'ultimo movimento effettivo della pratica
@@ -6208,7 +6311,7 @@ export default function Widget(props: Props) {
               type="button"
               className="hdrBtn hdrBtnMyStatePart"
               onClick={() => toggleSort(p.field)}
-              title={`Ordina per ${p.label}. Click successivi: crescente, decrescente, rimuovi ordinamento.`}
+              title="Click: ordina in modalità multipla. Terzo clic: rimuove ordinamento."
             >
               <span>{p.label}</span>
               {renderSortBadge(p.field)}
@@ -6224,7 +6327,7 @@ export default function Widget(props: Props) {
                     : V_PROSSIMA_RUOLO,
                 )
               }
-              title={`Ordina per ruolo ${p.label.toLowerCase()}. Click successivi: crescente, decrescente, rimuovi ordinamento.`}
+              title="Click: ordina in modalità multipla. Terzo clic: rimuove ordinamento."
             >
               <span>Ruolo</span>
               {renderSortBadge(
@@ -6255,6 +6358,11 @@ export default function Widget(props: Props) {
   const maskInnerPadding = Number.isFinite(Number(cfg.maskInnerPadding))
     ? Number(cfg.maskInnerPadding)
     : 8;
+  const generalMaskBg = String(cfg.generalMaskBg ?? "#ffffff");
+  const generalMaskRadius = Number.isFinite(Number(cfg.generalMaskRadius))
+    ? Number(cfg.generalMaskRadius)
+    : 20;
+
   const maskBg = String(cfg.maskBg ?? "#ffffff");
   const maskBorderColor = String(cfg.maskBorderColor ?? "rgba(0,0,0,0.12)");
   const maskBorderWidth = Number.isFinite(Number(cfg.maskBorderWidth))
@@ -6289,6 +6397,8 @@ export default function Widget(props: Props) {
         height: "100%",
         boxSizing: "border-box",
         padding: maskOuterOffset,
+        background: generalMaskBg,
+        borderRadius: generalMaskRadius,
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
@@ -6382,6 +6492,7 @@ export default function Widget(props: Props) {
           borderRadius: maskRadius,
           background: maskBg,
           padding: maskInnerPadding,
+          position: "relative",
           overflow: "hidden",
         }}
       >
@@ -6933,7 +7044,7 @@ export default function Widget(props: Props) {
                           : "—";
                       } else if (shouldUseInitialOggettoFallback(d)) {
                         // Nessun record LOG e pratica realmente iniziale proveniente da TR.
-                        causaleVal = "NUOVA RILEVAZIONE TRASMESSA";
+                        causaleVal = "RILEVAZIONE TRASMESSA";
                         const creator = String(
                           d.Creator ?? d.creator ?? d.CREATOR ?? "",
                         ).trim();
@@ -7155,6 +7266,7 @@ export default function Widget(props: Props) {
                                   event.currentTarget,
                                   causaleVal,
                                   rowOggettoColor,
+                                  { log: _logEntry, data: d },
                                 );
                               }}
                               onMouseLeave={hideOggettoLegend}
@@ -7163,6 +7275,7 @@ export default function Widget(props: Props) {
                                   event.currentTarget,
                                   causaleVal,
                                   rowOggettoColor,
+                                  { log: _logEntry, data: d },
                                 );
                               }}
                               onBlur={hideOggettoLegend}
@@ -7172,7 +7285,7 @@ export default function Widget(props: Props) {
                                   event.currentTarget,
                                   causaleVal,
                                   rowOggettoColor,
-                                  true,
+                                  { log: _logEntry, data: d, autoClose: true },
                                 );
                               }}
                               onMouseDown={(event) => {
@@ -7435,7 +7548,7 @@ export default function Widget(props: Props) {
       {oggettoLegendInfo &&
         (() => {
           const tooltipWidth = 360;
-          const tooltipHeight = 150;
+          const tooltipHeight = oggettoLegendInfo.detail ? 205 : 165;
           const viewportWidth =
             typeof window !== "undefined" ? window.innerWidth : 1280;
           const viewportHeight =
@@ -7503,7 +7616,7 @@ export default function Widget(props: Props) {
                       marginBottom: 2,
                     }}
                   >
-                    STATO DEL PROCEDIMENTO ISTRUTTORIO
+                    STATO PRATICA
                   </div>
                   <div
                     style={{
@@ -7517,6 +7630,21 @@ export default function Widget(props: Props) {
                   <div style={{ fontSize: 15, lineHeight: 1.45 }}>
                     {oggettoLegendInfo.description}
                   </div>
+                  {oggettoLegendInfo.detail && (
+                    <div
+                      style={{
+                        marginTop: 9,
+                        paddingTop: 8,
+                        borderTop: "1px solid rgba(17, 24, 39, 0.12)",
+                        fontSize: 14,
+                        lineHeight: 1.4,
+                        fontWeight: 600,
+                        color: "#374151",
+                      }}
+                    >
+                      {oggettoLegendInfo.detail}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

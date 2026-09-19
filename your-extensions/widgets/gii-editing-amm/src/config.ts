@@ -133,7 +133,7 @@ export interface Config {
   tabPaddingBottom: number
   tabPaddingLeft: number
 
-  // Barra Azioni della scheda Verifica istruttoria.
+  // Barra Azioni condivisa dalle sezioni amministrative che espongono azioni operative.
   actionBarBg: string
   actionBarBorderColor: string
   actionBarBorderWidth: number
@@ -143,6 +143,10 @@ export interface Config {
   actionBarTitleColor: string
   actionBarTitleFontSize: number
   actionBarButtonGap: number
+  actionBarTopGap: number
+  actionBarGapBg: string
+  integrationCycleHorizontalSeparatorColor: string
+  integrationCycleVerticalSeparatorColor: string
 
   primaryColor: string
   primaryTextColor: string
@@ -306,11 +310,15 @@ export const defaultConfig: Config = {
   actionBarBorderColor: '#e5e7eb',
   actionBarBorderWidth: 1,
   actionBarBorderRadius: 10,
-  actionBarPaddingX: 12,
-  actionBarPaddingY: 10,
+  actionBarPaddingX: 11,
+  actionBarPaddingY: 11,
   actionBarTitleColor: '#111827',
   actionBarTitleFontSize: 14,
   actionBarButtonGap: 10,
+  actionBarTopGap: 8,
+  actionBarGapBg: 'transparent',
+  integrationCycleHorizontalSeparatorColor: '#d8e6f7',
+  integrationCycleVerticalSeparatorColor: '#93c5fd',
 
   primaryColor: '#0d3b66',
   primaryTextColor: '#ffffff',

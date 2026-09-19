@@ -1834,6 +1834,7 @@ type RiaIntegrationDocumentInfo = {
 
 type RiaIntegrationCycleInfo = {
   requested: boolean
+  requestRole: string
   requestUsername: string
   requestOperatorName: string
   requestAt: any
@@ -1851,6 +1852,7 @@ type RiaIntegrationCycleInfo = {
 
 const EMPTY_RIA_INTEGRATION_CYCLE: RiaIntegrationCycleInfo = {
   requested: false,
+  requestRole: '',
   requestUsername: '',
   requestOperatorName: '',
   requestAt: null,
@@ -1869,14 +1871,36 @@ const EMPTY_RIA_INTEGRATION_CYCLE: RiaIntegrationCycleInfo = {
 function parseAdministrativeIntegrationRequestNote (raw: any): { targets: string[], motivation: string } {
   const note = String(raw || '').trim()
   if (!note) return { targets: [], motivation: '' }
-  const targetsMatch = note.match(/Oggetto\s+del\s+rimando\s*:\s*([^\r\n]+)/i)
-  const motivationMatch = note.match(/Motivazione\s+del\s+rimando\s*:\s*([\s\S]+)$/i)
-  const targets = String(targetsMatch?.[1] || '')
-    .split(',')
-    .map(value => value.trim())
-    .filter(Boolean)
-  const motivation = String(motivationMatch?.[1] || '').trim()
-  return { targets, motivation: motivation || (!targetsMatch ? note : '') }
+  const targets: string[] = []
+  const motivationParts: string[] = []
+  let recognizedStructuredNote = false
+  note.split(/\r?\n/g).map(value => value.trim()).filter(Boolean).forEach(line => {
+    const targetMatch = line.match(/^(?:Oggetto\s+del\s+rimando|Dati\s+da\s+integrare\s+o\s+rettificare)\s*:\s*(.*)$/i)
+    if (targetMatch) {
+      recognizedStructuredNote = true
+      String(targetMatch[1] || '').split(',').map(value => value.trim()).filter(Boolean).forEach(value => targets.push(value))
+      return
+    }
+    const motivationMatch = line.match(/^Motivazione\s+del\s+rimando\s*:\s*(.*)$/i)
+    if (motivationMatch) {
+      recognizedStructuredNote = true
+      const value = String(motivationMatch[1] || '').trim()
+      if (value) motivationParts.push(value)
+      return
+    }
+    const annotationMatch = line.match(/^(?:Altre\s+motivazioni\s+e\s+ulteriori\s+annotazioni|Ulteriori\s+annotazioni)\s*:\s*(.*)$/i)
+    if (annotationMatch) {
+      recognizedStructuredNote = true
+      const value = String(annotationMatch[1] || '').trim()
+      if (value) motivationParts.push(value)
+      return
+    }
+    motivationParts.push(line)
+  })
+  return {
+    targets: Array.from(new Set(targets)),
+    motivation: motivationParts.join('\n').trim() || (!recognizedStructuredNote ? note : '')
+  }
 }
 
 function parseIntegrationDocumentAudit (rawJson: any): RiaIntegrationDocumentInfo[] {
@@ -1913,7 +1937,7 @@ function isIntegrationWorkflowField (fieldNameRaw: any): boolean {
   return false
 }
 
-async function loadCurrentRiaIntegrationCycle (parentGlobalIdRaw: any): Promise<RiaIntegrationCycleInfo> {
+async function loadCurrentRiaIntegrationCycle (parentGlobalIdRaw: any, iaOutcomeAtRaw: any = null): Promise<RiaIntegrationCycleInfo> {
   const parentGlobalId = String(parentGlobalIdRaw ?? '').trim()
   if (!parentGlobalId) return { ...EMPTY_RIA_INTEGRATION_CYCLE }
   try {
@@ -1930,32 +1954,59 @@ async function loadCurrentRiaIntegrationCycle (parentGlobalIdRaw: any): Promise<
     q.orderByFields = ['dt_chiusura ASC', `${oidField} ASC`]
     const res = await fl.queryFeatures(q)
     const rows = (res?.features || []).map((feature: any) => feature?.attributes || {}).filter(Boolean)
-    let requestIndex = -1
+    const iaOutcomeAtMs = workflowTimestamp(iaOutcomeAtRaw)
+    // I log di un medesimo gesto possono differire di pochi millisecondi dal
+    // timestamp salvato sulla pratica. La tolleranza evita di perdere un rimando
+    // registrato contestualmente all'esito IA, senza riaprire cicli precedenti.
+    const cycleFloorMs = iaOutcomeAtMs > 0 ? iaOutcomeAtMs - 2000 : 0
+    const requestEvents = new Set([
+      'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE',
+      'ISTRUTTORIA_RIMANDATA_PER_INTEGRAZIONE',
+      'FASCICOLO_RIMANDATO_INTEGRAZIONE',
+      'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE'
+    ])
+    let responseIndex = -1
     for (let index = 0; index < rows.length; index++) {
       const attrs = rows[index]
       const event = String(attrs?.evento_chiusura || '').trim().toUpperCase()
       const role = String(attrs?.ruolo_competente || '').trim().toUpperCase()
       const destination = String(attrs?.ruolo_destinatario || '').trim().toUpperCase()
-      if (role === 'IA' && destination === 'RIA' && ['ISTRUTTORIA_RIMANDATA_INTEGRAZIONE', 'ISTRUTTORIA_RIMANDATA_PER_INTEGRAZIONE'].includes(event)) {
+      const rowAtMs = workflowTimestamp(attrs?.dt_chiusura)
+      if (
+        event === 'ESITO_INTEGRAZIONE_TRASMESSO' &&
+        role === 'RIA' &&
+        destination === 'IA' &&
+        (cycleFloorMs <= 0 || rowAtMs <= 0 || rowAtMs >= cycleFloorMs)
+      ) {
+        responseIndex = index
+      }
+    }
+
+    // Il ciclo visualizzato all'IA nasce dal primo rimando successivo al suo
+    // ultimo esito. In questo modo un precedente IA -> RIA (per esempio alle
+    // 12:29) non viene confuso con il rimando disposto dal RIA dopo il visto IA
+    // (per esempio alle 12:33). Eventuali successivi passaggi RIA -> RIT -> DT
+    // appartengono allo stesso ciclo e non ne sostituiscono l'origine.
+    let requestIndex = -1
+    const requestSearchEnd = responseIndex >= 0 ? responseIndex : rows.length
+    for (let index = 0; index < requestSearchEnd; index++) {
+      const attrs = rows[index]
+      const event = String(attrs?.evento_chiusura || '').trim().toUpperCase()
+      const rowAtMs = workflowTimestamp(attrs?.dt_chiusura)
+      if (
+        requestEvents.has(event) &&
+        (cycleFloorMs <= 0 || rowAtMs <= 0 || rowAtMs >= cycleFloorMs)
+      ) {
         requestIndex = index
+        break
       }
     }
     if (requestIndex < 0) return { ...EMPTY_RIA_INTEGRATION_CYCLE }
 
     const requestAttrs = rows[requestIndex]
     const requestAtMs = workflowTimestamp(requestAttrs?.dt_chiusura)
-    let responseAttrs: any = null
-    let responseIndex = -1
-    for (let index = requestIndex + 1; index < rows.length; index++) {
-      const attrs = rows[index]
-      const event = String(attrs?.evento_chiusura || '').trim().toUpperCase()
-      const role = String(attrs?.ruolo_competente || '').trim().toUpperCase()
-      const destination = String(attrs?.ruolo_destinatario || '').trim().toUpperCase()
-      if (event === 'ESITO_INTEGRAZIONE_TRASMESSO' && role === 'RIA' && destination === 'IA') {
-        responseAttrs = attrs
-        responseIndex = index
-      }
-    }
+    const responseAttrs: any = responseIndex > requestIndex ? rows[responseIndex] : null
+    if (!responseAttrs) responseIndex = -1
 
     const responseAtMs = workflowTimestamp(responseAttrs?.dt_chiusura)
     const endIndex = responseIndex >= 0 ? responseIndex : rows.length - 1
@@ -1977,15 +2028,17 @@ async function loadCurrentRiaIntegrationCycle (parentGlobalIdRaw: any): Promise<
 
     const requestNote = String(requestAttrs?.note_chiusura || '').trim()
     const parsedRequest = parseAdministrativeIntegrationRequestNote(requestNote)
+    const requestRole = String(requestAttrs?.ruolo_competente || '').trim().toUpperCase()
     const requestUsername = String(requestAttrs?.utente_operatore || '').trim()
     const responseUsername = String(responseAttrs?.utente_operatore || '').trim()
     const [requestOperatorName, responseOperatorName] = await Promise.all([
-      resolveHistoricalAmmOperatorName(requestUsername, 'IA'),
+      resolveHistoricalAmmOperatorName(requestUsername, requestRole),
       responseAttrs ? resolveHistoricalAmmOperatorName(responseUsername, 'RIA') : Promise.resolve('')
     ])
 
     return {
       requested: true,
+      requestRole,
       requestUsername,
       requestOperatorName,
       requestAt: requestAtMs || requestAttrs?.dt_chiusura || null,
@@ -2001,7 +2054,7 @@ async function loadCurrentRiaIntegrationCycle (parentGlobalIdRaw: any): Promise<
       documents: Array.from(documentsByKey.values())
     }
   } catch (e) {
-    console.warn('[GII_LOG_EVENTI_CICLI] Impossibile ricostruire il ciclo di integrazione IA -> RIA -> IA:', e)
+    console.warn('[GII_LOG_EVENTI_CICLI] Impossibile ricostruire il ciclo di integrazione corrente:', e)
     return { ...EMPTY_RIA_INTEGRATION_CYCLE }
   }
 }
@@ -3647,11 +3700,13 @@ const ADMIN_STYLE_DEFAULTS: Record<string, any> = {
   actionBarBorderColor: '#e5e7eb',
   actionBarBorderWidth: 1,
   actionBarBorderRadius: 10,
-  actionBarPaddingX: 12,
-  actionBarPaddingY: 10,
+  actionBarPaddingX: 11,
+  actionBarPaddingY: 11,
   actionBarTitleColor: '#111827',
   actionBarTitleFontSize: 14,
   actionBarButtonGap: 10,
+  actionBarTopGap: 8,
+  actionBarGapBg: 'transparent',
   amountFontSize: 16,
   titleFontSize: 18,
   subtitleFontSize: 13,
@@ -3688,7 +3743,7 @@ function Section (props: { title: string, children: React.ReactNode, right?: Rea
       border: `${Number(st.formCardBorderWidth ?? 1)}px solid ${st.formCardBorderColor || '#c6d7ea'}`,
       borderRadius: Number(st.formCardBorderRadius ?? 8),
       background: st.formCardBg || '#f8fbff',
-      boxShadow: st.formCardShadow || 'none',
+      boxShadow: String(st.formCardShadow ?? '').trim() || ADMIN_STYLE_DEFAULTS.formCardShadow,
       overflow: 'hidden',
       minWidth: 0,
       flex: '0 0 auto',
@@ -3823,6 +3878,26 @@ function bozzaIconButtonStyle (opts?: { danger?: boolean, disabled?: boolean }):
     border: `2px solid ${disabled ? '#e5e7eb' : (danger ? 'rgba(185,28,28,0.72)' : '#0d3b66')}`,
     background: disabled ? '#e5e7eb' : '#fff',
     color: disabled ? '#9ca3af' : (danger ? '#b91c1c' : '#0d3b66'),
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: '0 0 auto',
+    lineHeight: 1
+  }
+}
+
+function actionBarIconButtonStyle (opts?: { disabled?: boolean }): React.CSSProperties {
+  const disabled = !!opts?.disabled
+  return {
+    width: 44,
+    height: 44,
+    padding: 0,
+    boxSizing: 'border-box',
+    borderRadius: 8,
+    border: `2px solid ${disabled ? '#e5e7eb' : '#0d3b66'}`,
+    background: '#fff',
+    color: disabled ? '#9ca3af' : '#0d3b66',
     cursor: disabled ? 'not-allowed' : 'pointer',
     display: 'inline-flex',
     alignItems: 'center',
@@ -5836,7 +5911,7 @@ function StatusSummaryItem (props: { label: string, value: React.ReactNode, hint
     : tone === 'warn'
       ? (st.statusSummaryWarnBorderColor || '#fed7aa')
       : tone === 'ok'
-        ? '#bbf7d0'
+        ? '#9cf7bc'
         : tone === 'auto'
           ? (st.statusSummaryAutoBorderColor || '#bfdbfe')
           : (st.statusSummaryNormalBorderColor || '#c5d9f1')
@@ -5882,100 +5957,81 @@ function AdministrativeIntegrationCycleCards (props: { cycle: RiaIntegrationCycl
   const fieldLabels = cycle.modifiedFields
     .map(fieldName => integrationModifiedFieldLabel(fieldName, props.fields))
     .filter(Boolean)
-  const cardBase: React.CSSProperties = {
-    minWidth: 0,
-    overflow: 'hidden',
-    borderRadius: Number(st.formCardBorderRadius ?? 9),
-    background: '#fff',
-    boxShadow: '0 1px 2px rgba(15, 23, 42, 0.05)'
+  const detailTextStyle: React.CSSProperties = {
+    color: st.formWorkflowBadgeValueColor || '#111827',
+    fontSize: adminFieldFontSize(st),
+    lineHeight: 1.45,
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere'
   }
-  const metadataStyle: React.CSSProperties = {
-    display: 'grid',
-    gap: 4,
-    color: '#475569',
-    fontSize: adminLabelFontSize(st),
-    lineHeight: 1.4
-  }
-  const detailTitleStyle: React.CSSProperties = {
-    color: st.formWorkflowBadgeTitleColor || '#0d3b66',
-    fontWeight: 900,
-    fontSize: adminLabelFontSize(st),
-    textTransform: 'uppercase',
-    letterSpacing: 0.2
-  }
+  const hasResponseAnnotations = !!cycle.responseNote
+  const hasResponseData = fieldLabels.length > 0
+  const hasResponseDocuments = cycle.documents.length > 0
+  const responseContent = !cycle.received
+    ? 'In attesa del rientro'
+    : hasResponseData && hasResponseDocuments
+      ? 'Dati e documenti integrati'
+      : hasResponseData
+        ? 'Dati modificati'
+        : hasResponseDocuments
+          ? 'Documenti integrati'
+          : hasResponseAnnotations
+            ? 'Annotazioni'
+            : 'Nessuna integrazione registrata'
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 10, alignItems: 'stretch' }}>
-      <div style={{ ...cardBase, border: '1px solid #fed7aa' }}>
-        <div style={{ padding: '9px 11px', background: '#fff7ed', color: '#9a3412', borderBottom: '1px solid #fed7aa', fontWeight: 900, fontSize: adminFieldFontSize(st) }}>
-          Richiesta di integrazione
-        </div>
-        <div style={{ padding: 11, display: 'grid', gap: 10 }}>
-          {(requestOperator || requestAt) && (
-            <div style={metadataStyle}>
-              {requestOperator && <div><span style={{ fontWeight: 800 }}>Richiedente: </span>{requestOperator}</div>}
-              {requestAt && <div><span style={{ fontWeight: 800 }}>Data e ora richiesta: </span>{requestAt}</div>}
-            </div>
-          )}
-          {cycle.requestTargets.length > 0 && (
-            <div style={{ display: 'grid', gap: 6 }}>
-              <div style={detailTitleStyle}>Oggetto del rimando</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {cycle.requestTargets.map(target => (
-                  <span key={target} style={{ border: '1px solid #fdba74', background: '#fff7ed', color: '#9a3412', borderRadius: 999, padding: '3px 8px', fontSize: adminLabelFontSize(st), fontWeight: 800 }}>{target}</span>
-                ))}
-              </div>
-            </div>
-          )}
-          <div style={{ display: 'grid', gap: 5 }}>
-            <div style={detailTitleStyle}>Motivazione del rimando</div>
-            <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-              {cycle.requestMotivation || cycle.requestNote || '—'}
-            </div>
+    <div>
+      <div style={{ color: st.formInnerHeaderColor || '#0f4c81', fontWeight: 900, fontSize: adminInnerHeaderFontSize(st), textTransform: 'uppercase', letterSpacing: 0.25, marginBottom: 10 }}>
+        Ciclo di integrazione
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', alignItems: 'start' }}>
+        <div style={{ minWidth: 0, padding: '2px 14px 2px 0', display: 'grid', gap: 9 }}>
+          <div style={{ color: '#9a3412', fontSize: adminFieldFontSize(st), fontWeight: 900 }}>
+            Rimando
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 10 }}>
+            <StatusSummaryItem label='Richiedente' value={requestOperator || '—'} tone='auto' />
+            <StatusSummaryItem label='Data richiesta' value={requestAt || '—'} tone='auto' />
+            <StatusSummaryItem label='Motivazione' value={cycle.requestMotivation || cycle.requestNote || '—'} tone='warn' />
           </div>
         </div>
-      </div>
 
-      <div style={{ ...cardBase, border: `1px solid ${cycle.received ? '#bfdbfe' : '#dbe4ee'}` }}>
-        <div style={{ padding: '9px 11px', background: cycle.received ? '#eff6ff' : '#f8fafc', color: cycle.received ? '#1d4ed8' : '#64748b', borderBottom: `1px solid ${cycle.received ? '#bfdbfe' : '#dbe4ee'}`, fontWeight: 900, fontSize: adminFieldFontSize(st) }}>
-          {cycle.received ? 'Esito integrazione ricevuto' : 'Esito integrazione non ancora ricevuto'}
-        </div>
-        <div style={{ padding: 11, display: 'grid', gap: 10 }}>
+        <div style={{ minWidth: 0, padding: '2px 0 2px 14px', borderLeft: `1px solid ${st.integrationCycleVerticalSeparatorColor || '#93c5fd'}`, display: 'grid', gap: 9 }}>
+          <div style={{ color: cycle.received ? '#1d4ed8' : '#64748b', fontSize: adminFieldFontSize(st), fontWeight: 900 }}>
+            Rientro
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 10 }}>
+            <StatusSummaryItem label='Mittente' value={responseOperator || '—'} tone='auto' />
+            <StatusSummaryItem label='Data ricezione' value={responseAt || '—'} tone='auto' />
+            <StatusSummaryItem label='Contenuto' value={responseContent} tone={cycle.received ? 'auto' : 'normal'} />
+          </div>
           {!cycle.received ? (
             <div style={{ color: '#64748b', fontSize: adminFieldFontSize(st), lineHeight: 1.45 }}>
-              La richiesta è stata trasmessa. L’esito dell’integrazione non è ancora disponibile.
+              Il rimando è stato disposto. L’esito dell’integrazione non è ancora disponibile.
             </div>
           ) : (
             <>
-              {(responseOperator || responseAt) && (
-                <div style={metadataStyle}>
-                  {responseOperator && <div><span style={{ fontWeight: 800 }}>Trasmettitore: </span>{responseOperator}</div>}
-                  {responseAt && <div><span style={{ fontWeight: 800 }}>Data e ora trasmissione: </span>{responseAt}</div>}
+              {cycle.responseNote && (
+                <div style={detailTextStyle}>
+                  <span style={{ color: '#475569', fontWeight: 800 }}>Annotazioni: </span>
+                  {cycle.responseNote}
                 </div>
               )}
-              <div style={{ display: 'grid', gap: 5 }}>
-                <div style={detailTitleStyle}>Annotazioni</div>
-                <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                  {cycle.responseNote || 'Nessuna ulteriore annotazione.'}
-                </div>
-              </div>
-              <div style={{ display: 'grid', gap: 6 }}>
-                <div style={detailTitleStyle}>Modifiche registrate</div>
-                {fieldLabels.length > 0 ? (
+              {fieldLabels.length > 0 && (
+                <div style={{ display: 'grid', gap: 5 }}>
+                  <div style={{ color: '#475569', fontSize: adminLabelFontSize(st), fontWeight: 800 }}>Dati modificati:</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                     {fieldLabels.map(label => (
                       <span key={label} style={{ border: '1px solid #cbd5e1', background: '#f8fafc', color: '#334155', borderRadius: 999, padding: '3px 8px', fontSize: adminLabelFontSize(st), fontWeight: 800 }}>{label}</span>
                     ))}
                   </div>
-                ) : (
-                  <div style={{ color: '#64748b', fontSize: adminLabelFontSize(st) }}>Nessuna modifica ai dati registrata nel ciclo.</div>
-                )}
-              </div>
-              <div style={{ display: 'grid', gap: 6 }}>
-                <div style={detailTitleStyle}>Documenti integrati</div>
-                {cycle.documents.length > 0 ? (
+                </div>
+              )}
+              {cycle.documents.length > 0 && (
+                <div style={{ display: 'grid', gap: 5 }}>
+                  <div style={{ color: '#475569', fontSize: adminLabelFontSize(st), fontWeight: 800 }}>Documenti integrati:</div>
                   <div style={{ display: 'grid', gap: 5 }}>
                     {cycle.documents.map((document, index) => (
-                      <div key={`${document.attachmentId || index}-${document.name}`} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, border: '1px solid #e2e8f0', background: '#f8fafc', borderRadius: 7, padding: '7px 8px', minWidth: 0 }}>
+                      <div key={`${document.attachmentId || index}-${document.name}`} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, minWidth: 0 }}>
                         <span aria-hidden='true' style={{ color: '#0d3b66', fontWeight: 900, lineHeight: 1.3 }}>▣</span>
                         <div style={{ minWidth: 0, color: '#1f2937', fontSize: adminLabelFontSize(st), lineHeight: 1.4, overflowWrap: 'anywhere' }}>
                           <span style={{ fontWeight: 800 }}>{document.action === 'AGGIUNTO' ? 'Aggiunto: ' : 'Sostituito: '}</span>
@@ -5986,10 +6042,8 @@ function AdministrativeIntegrationCycleCards (props: { cycle: RiaIntegrationCycl
                       </div>
                     ))}
                   </div>
-                ) : (
-                  <div style={{ color: '#64748b', fontSize: adminLabelFontSize(st) }}>Nessun documento aggiunto o sostituito nel ciclo.</div>
-                )}
-              </div>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -6096,7 +6150,7 @@ function IaVerificationSummary (props: {
       return () => { cancelled = true }
     }
     const loadCycle = () => {
-      void loadCurrentRiaIntegrationCycle(workflowParentGlobalId).then(info => {
+      void loadCurrentRiaIntegrationCycle(workflowParentGlobalId, iaEsitoAt).then(info => {
         if (!cancelled) setRiaIntegrationCycle(info)
       })
     }
@@ -6108,11 +6162,18 @@ function IaVerificationSummary (props: {
     }
   }, [role, workflowParentGlobalId, iaPresaInCaricoAt, iaEsitoAt])
   const riaIntegrationRequestAt = workflowTimestamp(riaIntegrationCycle.requestAt)
-  // La richiesta resta corrente solo finché l'IA non esprime un esito successivo.
-  // Il timestamp della risposta RIA non deve riattivare un ciclo già superato da
-  // una nuova valutazione IA.
+  const riaIntegrationResponseAt = workflowTimestamp(riaIntegrationCycle.responseAt)
+  // Quando la risposta RIA e' disponibile, e' quella risposta ad aprire il nuovo
+  // ciclo di valutazione IA. Richiesta e risposta restano quindi visibili finche'
+  // l'IA non esprime un esito successivo alla risposta. Prima della risposta, una
+  // richiesta e' corrente finche' non risulta superata da un nuovo esito IA.
+  const integrationResponseOpensNewEvaluation = riaIntegrationCycle.received && (
+    iaEsitoAt <= 0 || riaIntegrationResponseAt <= 0 || riaIntegrationResponseAt > iaEsitoAt
+  )
   const integrationRequestStillCurrent = riaIntegrationCycle.requested && (
-    iaEsitoAt <= 0 || riaIntegrationRequestAt <= 0 || iaEsitoAt <= riaIntegrationRequestAt
+    riaIntegrationCycle.received
+      ? integrationResponseOpensNewEvaluation
+      : (iaEsitoAt <= 0 || riaIntegrationRequestAt <= 0 || iaEsitoAt <= riaIntegrationRequestAt)
   )
   // Il routing della feature madre viene aggiornato insieme al workflow, quindi è
   // disponibile prima della query asincrona al LOG. Nel rientro RIA -> IA successivo
@@ -6131,7 +6192,7 @@ function IaVerificationSummary (props: {
       !rimando &&
       (statoBozza === 'TRASMESSA_RIA' || statoBozza === 'BOZZA_TRASMESSA_RIA')
   })()
-  const hasLoggedRiaIntegrationResponse = role === 'IA' && riaIntegrationCycle.received && integrationRequestStillCurrent
+  const hasLoggedRiaIntegrationResponse = role === 'IA' && integrationResponseOpensNewEvaluation
   const hasCurrentRiaIntegrationResponse =
     (immediateRiaIntegrationReturn && (!riaIntegrationCycle.requested || integrationRequestStillCurrent)) ||
     hasLoggedRiaIntegrationResponse
@@ -6217,7 +6278,7 @@ function IaVerificationSummary (props: {
     : (esitoLabel || '—')
   const primaryOperatoreLabel = showRiaOutcomeAsPrimary
     ? 'Responsabile dell’istruttoria amministrativa'
-    : 'Istruttore amministrativo'
+    : 'Istruttore'
   const primaryOperatoreValue = showRiaOutcomeAsPrimary
     ? cleanAmmOperatorLabel(riaNome)
     : cleanAmmOperatorLabel(tecnico)
@@ -6269,9 +6330,9 @@ function IaVerificationSummary (props: {
               <div style={{ display: 'grid', gap: 8 }}>
                 <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: Number(st.formSectionTitleSize ?? 14), textTransform: 'uppercase', letterSpacing: 0.2 }}>{primarySummaryTitle}</div>
                 <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 10 }}>
-                  <StatusSummaryItem label='Esito' value={primaryEsitoLabel || '—'} tone={primaryTone as any} />
                   <StatusSummaryItem label={primaryOperatoreLabel} value={primaryOperatoreValue || '—'} tone='auto' />
                   <StatusSummaryItem label={primaryDateLabel} value={primaryDateValue || '—'} tone='auto' />
+                  <StatusSummaryItem label='Esito' value={primaryEsitoLabel || '—'} tone={primaryTone as any} />
                 </div>
                 {(showRiaOutcomeAsPrimary || esitoCode === 1) && <div style={{ border: `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}`, background: st.formWorkflowBadgeBg || '#ffffff', borderRadius: 9, padding: 10 }}>
                   {showRiaOutcomeAsPrimary ? (
@@ -6296,7 +6357,7 @@ function IaVerificationSummary (props: {
               </div>
             )}
             {hasActiveAdministrativeIntegrationCycle && (
-              <div style={{ borderTop: hasPrimaryVerification ? `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}` : 'none', paddingTop: hasPrimaryVerification ? 10 : 0 }}>
+              <div style={{ borderTop: hasPrimaryVerification ? `1px solid ${st.integrationCycleHorizontalSeparatorColor || '#d8e6f7'}` : 'none', paddingTop: hasPrimaryVerification ? 10 : 0 }}>
                 <AdministrativeIntegrationCycleCards cycle={riaIntegrationCycle} fields={props.fields} />
               </div>
             )}
@@ -7905,9 +7966,9 @@ function PostAttestazioneIaWorkSection (props: {
           <div style={{ display: 'grid', gap: 10 }}>
               {preApprovalGuideText && <InfoBox>{preApprovalGuideText}</InfoBox>}
               <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 10 }}>
-                {hasBozzaGenerated && <StatusSummaryItem label='Generata il' value={dataGenerazione || '—'} tone='auto' />}
-                {hasBozzaGenerated && <StatusSummaryItem label='Generata da' value={generataDa || '—'} tone='auto' />}
-                <StatusSummaryItem label='Stato documento' value={statoBozza} tone={hasBozzaGenerated ? 'auto' : 'warn'} />
+                {hasBozzaGenerated && <StatusSummaryItem label='Istruttore' value={generataDa || '—'} tone='auto' />}
+                {hasBozzaGenerated && <StatusSummaryItem label='Data e ora generazione' value={dataGenerazione || '—'} tone='auto' />}
+                <StatusSummaryItem label='Stato' value={statoBozza} tone={hasBozzaGenerated ? 'auto' : 'warn'} />
               </div>
               {attachmentsError && attachmentsErrorSection === 'bozza' && <InfoBox kind='warn'>{attachmentsError}</InfoBox>}
               {hasBozzaGenerated && hasBozzaPdfCaricata && (
@@ -8210,13 +8271,13 @@ function PostAttestazioneIaWorkSection (props: {
           background: String(st.actionBarBg || '#ffffff'),
           border: `${Number(st.actionBarBorderWidth ?? 1)}px solid ${String(st.actionBarBorderColor || '#e5e7eb')}`,
           borderRadius: Number(st.actionBarBorderRadius ?? 10),
-          padding: `${Number(st.actionBarPaddingY ?? 10)}px ${Number(st.actionBarPaddingX ?? 12)}px`
+          padding: `${Number(st.actionBarPaddingY ?? 11)}px ${Number(st.actionBarPaddingX ?? 11)}px`
         }}>
           <div style={{ fontSize: Number(st.actionBarTitleFontSize ?? 14), fontWeight: 700, color: String(st.actionBarTitleColor || '#111827') }}>Azioni</div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: Number(st.actionBarButtonGap ?? 10), flexWrap: 'wrap', alignItems: 'center' }}>
             {showDeterminationWorkflow && props.showIaInfo && (
               <span style={{ position: 'relative', display: 'inline-flex' }}>
-                {props.vistoActionPending && !props.saving && <NextActionPulse floating title='Azione successiva: esprimere l’esito dell’istruttoria' />}
+                {props.vistoActionPending && props.manageOutcomeEnabled && !props.saving && <NextActionPulse floating title='Azione successiva: esprimere l’esito dell’istruttoria' />}
                 <Button
                   type='primary'
                   title={props.manageOutcomeEnabled
@@ -8229,9 +8290,9 @@ function PostAttestazioneIaWorkSection (props: {
                   onClick={props.onManageOutcome}
                   style={{
                     borderRadius: 8,
-                    fontSize: 13,
+                    fontSize: 14,
                     fontWeight: 600,
-                    padding: '8px 16px',
+                    padding: '10px 14px',
                     backgroundColor: (!props.manageOutcomeEnabled || !!props.saving) ? '#e5e7eb' : '#1d4ed8',
                     borderColor: (!props.manageOutcomeEnabled || !!props.saving) ? '#e5e7eb' : '#1d4ed8',
                     color: (!props.manageOutcomeEnabled || !!props.saving) ? '#9ca3af' : '#ffffff',
@@ -8253,7 +8314,7 @@ function PostAttestazioneIaWorkSection (props: {
                 aria-label={generateActionTitle}
                 disabled={generateActionDisabled}
                 onClick={attoWorkflow ? props.onGenerateAttoContestazioneWord : props.onGenerateBozzaDeterminazioneWord}
-                style={bozzaIconButtonStyle({ disabled: generateActionDisabled })}
+                style={actionBarIconButtonStyle({ disabled: generateActionDisabled })}
               >
                 <BozzaActionIcon name='edit' size={24} />
               </button>
@@ -8269,7 +8330,7 @@ function PostAttestazioneIaWorkSection (props: {
                 title={uploadActionTitle}
                 aria-label={uploadActionTitle}
                 aria-disabled={uploadActionDisabled}
-                style={{ ...bozzaIconButtonStyle({ disabled: uploadActionDisabled }), margin: 0 }}
+                style={{ ...actionBarIconButtonStyle({ disabled: uploadActionDisabled }), margin: 0 }}
               >
                 <BozzaActionIcon name='upload' size={24} />
                 <input
@@ -8300,7 +8361,7 @@ function PostAttestazioneIaWorkSection (props: {
                 aria-label={transmitActionTitle}
                 disabled={transmitActionDisabled}
                 onClick={attoWorkflow ? props.onTransmitAttoContestazioneRia : props.onTransmitBozzaDeterminazioneRia}
-                style={bozzaIconButtonStyle({ disabled: transmitActionDisabled })}
+                style={actionBarIconButtonStyle({ disabled: transmitActionDisabled })}
               >
                 <BozzaActionIcon name='send' size={24} />
               </button>
@@ -8316,7 +8377,7 @@ function PostAttestazioneIaWorkSection (props: {
                 aria-label={contextualEmailTitle}
                 disabled={contextualEmailDisabled}
                 onClick={attoWorkflow ? (contextualEmailIsAttoProtocollo ? props.onPrepareEmailAttoProtocollo : props.onPrepareEmailAttoDirettore) : (contextualEmailIsProtocollo ? props.onPrepareEmailProtocollo : props.onPrepareEmailDirettore)}
-                style={bozzaIconButtonStyle({ disabled: contextualEmailDisabled })}
+                style={actionBarIconButtonStyle({ disabled: contextualEmailDisabled })}
               >
                 <BozzaActionIcon name='mail' size={24} />
               </button>
@@ -8597,8 +8658,6 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
       renderRow('dom-1', '4fr 1fr', [existingField(['dom_notifica_via'], 'Via/Piazza/Località'), existingField(['dom_notifica_civico'], 'N. civico')]),
       renderRow('dom-2', '2fr 0.8fr 1fr 1.4fr', [existingField(['dom_notifica_citta'], 'Città'), existingField(['dom_notifica_provincia'], 'Provincia'), existingField(['dom_notifica_cap'], 'CAP'), existingField(['dom_notifica_stato'], 'Stato')])
     )
-  } else {
-    domicilioRows.push(<InfoBox key='dom-info'>Il domicilio per le notifiche coincide con {mainAddressRef}.</InfoBox>)
   }
 
   const rlDomRaw = pickAttrCI(d, ['rl_dom_notifica'])
@@ -12966,15 +13025,20 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const configuredDs = configuredDsState?.ds || null
 
   // La pratica candidata arriva prima di tutto dall'intent impostato da gii-azioni.
-  // Per il IA i dati candidati servono soltanto a localizzare il record: nessun
-  // contenuto viene mostrato prima della verifica aggiornata sul servizio.
+  // Per IA e ADMIN i dati candidati servono soltanto a localizzare il record:
+  // il contenuto viene mostrato dopo la rilettura aggiornata dal servizio.
   const candidateSelection = (intentState?.oid != null || intentState?.data) ? intentState : (dsStatesWithSelection[0] || null)
   const candidateDs = candidateSelection?.ds || configuredDs
   const candidateData = candidateSelection?.data || null
   const candidateOid = candidateSelection?.oid ?? (candidateData ? pickOidFromData(candidateData, candidateSelection?.idFieldName || 'OBJECTID') : null)
   const candidateHasSelection = !!candidateData || (candidateOid != null && Number.isFinite(Number(candidateOid)))
   const currentRole = String(profile.role || '').toUpperCase()
+  const isWorkflowAdminAccount = currentUserIsWorkflowAdmin()
   const isIaProfile = currentRole === 'IA'
+  // Sia l'IA sia l'ADMIN devono rileggere il record completo dal layer. Per
+  // l'ADMIN, però, la rilettura non comporta il controllo di assegnazione
+  // personale previsto esclusivamente per l'Istruttore amministrativo.
+  const requiresVerifiedSelection = isIaProfile || isWorkflowAdminAccount
   const profileIdentity = userProfileIdentityKey(profile)
   const candidateLayerUrl = normalizeEditLayerUrl(candidateSelection?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
   const candidateVerificationDs = candidateLayerUrl ? null : candidateDs
@@ -12995,7 +13059,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   React.useEffect(() => {
     const seq = ++iaAccessSeqRef.current
-    if (!isIaProfile || !candidateHasSelection || candidateOid == null || !Number.isFinite(Number(candidateOid))) {
+    if (!requiresVerifiedSelection || !candidateHasSelection || candidateOid == null || !Number.isFinite(Number(candidateOid))) {
       setIaAccess(prev => prev.status === 'idle' && !prev.selectionKey
         ? prev
         : { status: 'idle', selectionKey: '', data: null, message: '', checkedAt: 0 })
@@ -13028,7 +13092,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           })
           return
         }
-        if (!isPracticeAssignedToCurrentIa(liveAttrs, profile)) {
+        if (isIaProfile && !isWorkflowAdminAccount && !isPracticeAssignedToCurrentIa(liveAttrs, profile)) {
           setIaAccess({
             status: 'denied',
             selectionKey: candidateSelectionKey,
@@ -13059,20 +13123,20 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     void verify()
     return () => { cancelled = true }
-  }, [candidateHasSelection, candidateLayerUrl, candidateOid, candidateSelection?.idFieldName, candidateSelectionKey, candidateVerificationDs, isIaProfile, practiceContextRevision, profileIdentity])
+  }, [candidateHasSelection, candidateLayerUrl, candidateOid, candidateSelection?.idFieldName, candidateSelectionKey, candidateVerificationDs, isIaProfile, isWorkflowAdminAccount, practiceContextRevision, profileIdentity, requiresVerifiedSelection])
 
-  const iaAccessRequired = isIaProfile && candidateHasSelection
+  const iaAccessRequired = requiresVerifiedSelection && candidateHasSelection
   const iaAccessAllowed = !iaAccessRequired || (
     iaAccess.status === 'allowed' &&
     iaAccess.selectionKey === candidateSelectionKey &&
     !!iaAccess.data
   )
-  const activeSelection = isIaProfile
+  const activeSelection = requiresVerifiedSelection
     ? (iaAccessAllowed && candidateSelection
         ? { ...candidateSelection, data: iaAccess.data, sig: `${candidateSelection.sig}|verified:${iaAccess.checkedAt}` }
         : null)
     : candidateSelection
-  const active = activeSelection ? { ...activeSelection, ds: activeSelection.ds || configuredDs } : (isIaProfile ? null : (configuredDsState || null))
+  const active = activeSelection ? { ...activeSelection, ds: activeSelection.ds || configuredDs } : (requiresVerifiedSelection ? null : (configuredDsState || null))
   const data = activeSelection?.data || null
   const oid = activeSelection?.oid ?? (data ? pickOidFromData(data, activeSelection?.idFieldName || 'OBJECTID') : null)
   const hasSelection = !!data || (oid != null && Number.isFinite(Number(oid)))
@@ -15754,6 +15818,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [cfg])
 
   const workflowHasSeparateActionPanel = hasSelection && (activeAmmSection === 'verifica_istruttoria' || activeAmmSection === 'notifica')
+  const actionBarTopGap = Math.max(0, Math.min(80, Number(adminStyle.actionBarTopGap ?? 8) || 0))
+  const actionBarGapBg = String(adminStyle.actionBarGapBg ?? 'transparent').trim() || 'transparent'
 
   const wrapperStyle: React.CSSProperties = {
     width: '100%',
@@ -16367,10 +16433,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           style={{
             flex: '0 0 auto',
             width: '100%',
-            boxSizing: 'border-box',
-            padding: '8px 0 0 0'
+            boxSizing: 'border-box'
           }}
         >
+          {actionBarTopGap > 0 && (
+            <div
+              aria-hidden='true'
+              style={{
+                height: actionBarTopGap,
+                background: actionBarGapBg,
+                pointerEvents: 'none'
+              }}
+            />
+          )}
           <div ref={setVerificationActionBarTarget} />
         </div>
       )}

@@ -135,7 +135,11 @@ export interface Config {
   panelBorderRadius: number
   panelPadding: number
 
-  // --- Maschera (come widget Elenco)
+  // --- Maschera generale del widget (contenitore esterno, titolo compreso)
+  generalMaskBg: string
+  generalMaskRadius: number
+
+  // --- Pannello dettaglio interno
   maskBg: string
   maskBorderColor: string
   maskBorderWidth: number
@@ -225,7 +229,11 @@ export const defaultConfig: Config = {
   panelBorderRadius: 10,
   panelPadding: 12,
 
-  // Maschera (come widget Elenco)
+  // Maschera generale del widget (contenitore esterno, titolo compreso)
+  generalMaskBg: '#ffffff',
+  generalMaskRadius: 20,
+
+  // Pannello dettaglio interno
   maskBg: '#ffffff',
   maskBorderColor: '#e5e7eb',
   maskBorderWidth: 1,

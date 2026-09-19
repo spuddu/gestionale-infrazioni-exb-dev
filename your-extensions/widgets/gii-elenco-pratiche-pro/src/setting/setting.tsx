@@ -73,9 +73,9 @@ const VIRTUAL_FIELDS: FieldOpt[] = [
   { name:'__stato_sint__', alias:'⚙ Stato pratica / Il mio stato (calcolato)', type:'virtual' },
   { name:'__fase_istruttoria__', alias:'⚙ Fase istruttoria (calcolato)', type:'virtual' },
   { name:'__ultimo_agg__', alias:'⚙ Ultimo aggiornamento sintetico (calcolato)', type:'virtual' },
-  { name:'__causale__',    alias:'⚙ Oggetto / Stato (da LOG)', type:'virtual' },
-  { name:'__mittente__',   alias:'⚙ Mittente (da LOG)', type:'virtual' },
-  { name:'__prossima__',   alias:'⚙ Destinatario (calcolato)', type:'virtual' },
+  { name:'__causale__',    alias:'⚙ Stato pratica (da LOG)', type:'virtual' },
+  { name:'__mittente__',   alias:'⚙ Eseguito da (da LOG)', type:'virtual' },
+  { name:'__prossima__',   alias:'⚙ Trasmesso a (da LOG)', type:'virtual' },
   { name:'__data_msg__',   alias:'⚙ Ultimo aggiornamento / Data messaggio (da LOG)', type:'virtual' },
 ]
 
@@ -179,6 +179,9 @@ const OGGETTO_BADGE_KEY_ALIASES: Record<string, string> = {
   ISTRUTTORIA_AMMINISTRATIVA_VALIDATA: 'ISTRUTTORIA_VALIDATA',
   ISTRUTTORIA_TECNICA_APPROVATA: 'ISTRUTTORIA_APPROVATA',
   ESITO_INTEGRAZIONE_TECNICA_TRASMESSO: 'ESITO_INTEGRAZIONE_TRASMESSO',
+  FASCICOLO_RIMANDATO_INTEGRAZIONE: 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE',
+  ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE: 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE',
+  RILEVAZIONE_RESPINTA: 'ISTRUTTORIA_RESPINTA',
   ISTRUTTORIA_TECNICA_RESPINTA: 'ISTRUTTORIA_RESPINTA'
 }
 
@@ -311,6 +314,10 @@ function normalizeColumnLabel (label: any, field?: any): string {
   const f = String(field || '').trim().toLowerCase()
   if (f === '__numero_rilevazione__') return 'N. rilevazione'
   if (f === '__numero_pratica__') return 'N. rapporto'
+  if (f === '__stato_sint__') return 'Il mio stato'
+  if (f === '__causale__') return 'Stato pratica'
+  if (f === '__mittente__') return 'Eseguito da'
+  if (f === '__prossima__') return 'Trasmesso a'
   if (f === '__tipo_pratica__') return 'N. rilevazione'
   if (/^tipo\s+pratica$/i.test(s)) return 'N. rilevazione'
   if (/^n\.?\s*(rapporto|pratica)$/i.test(s) || /^numero$/i.test(s)) return 'N. rapporto'
@@ -667,17 +674,29 @@ export default function Setting(props: Props) {
         <ColInp value={String(cfg.listTitleColor||'rgba(0,0,0,0.85)')} onChange={v=>update('listTitleColor',v)}/>
       </div>}
 
-      <Acc id='maschera' label='🖼 Maschera (bordo pannello)' open={isOpen('maschera')} onToggle={()=>toggle('maschera')}/>
-      {isOpen('maschera') && <div>
+      <Acc id='maschera-generale' label='🎨 Maschera generale' open={isOpen('maschera-generale')} onToggle={()=>toggle('maschera-generale')}/>
+      {isOpen('maschera-generale') && <div>
+        <div style={P.hint}>Aspetto del contenitore esterno dell’intero widget, titolo compreso. È indipendente dal raggio del pannello interno dell’elenco.</div>
         <div style={P.row2}>
-          <div><label style={P.lbl}>Outer offset</label><NumInp value={cfg.maskOuterOffset} onChange={n=>update('maskOuterOffset',n)} min={0} unit='px'/></div>
-          <div><label style={P.lbl}>Inner padding</label><NumInp value={cfg.maskInnerPadding} onChange={n=>update('maskInnerPadding',n)} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Arrotondamento</label><NumInp value={parseNum(cfg.generalMaskRadius, 20)} onChange={n=>update('generalMaskRadius',n)} min={0} max={40} unit='px'/></div>
+          <div><label style={P.lbl}>Padding interno</label><NumInp value={cfg.maskOuterOffset} onChange={n=>update('maskOuterOffset',n)} min={0} unit='px'/></div>
+        </div>
+        <label style={P.lbl}>Sfondo maschera</label>
+        <ColInp value={String(cfg.generalMaskBg||'#ffffff')} onChange={v=>update('generalMaskBg',v)}/>
+      </div>}
+
+      <Acc id='pannello-elenco' label='🖼 Pannello elenco' open={isOpen('pannello-elenco')} onToggle={()=>toggle('pannello-elenco')}/>
+      {isOpen('pannello-elenco') && <div>
+        <div style={P.hint}>Aspetto del pannello interno che contiene filtri, intestazioni e righe. Il suo raggio è distinto dall’arrotondamento della maschera generale.</div>
+        <div style={P.row2}>
+          <div><label style={P.lbl}>Padding interno pannello</label><NumInp value={cfg.maskInnerPadding} onChange={n=>update('maskInnerPadding',n)} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Raggio pannello / bordo</label><NumInp value={cfg.maskRadius} onChange={n=>update('maskRadius',n)} min={0} unit='px'/></div>
         </div>
         <div style={P.row2}>
-          <div><label style={P.lbl}>Border width</label><NumInp value={cfg.maskBorderWidth} onChange={n=>update('maskBorderWidth',n)} min={0} unit='px'/></div>
-          <div><label style={P.lbl}>Border radius</label><NumInp value={cfg.maskRadius} onChange={n=>update('maskRadius',n)} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Spessore bordo</label><NumInp value={cfg.maskBorderWidth} onChange={n=>update('maskBorderWidth',n)} min={0} unit='px'/></div>
+          <div />
         </div>
-        <label style={P.lbl}>Background</label>
+        <label style={P.lbl}>Sfondo pannello</label>
         <ColInp value={String(cfg.maskBg||'')} onChange={v=>update('maskBg',v)}/>
         <label style={P.lbl}>Colore bordo</label>
         <ColInp value={String(cfg.maskBorderColor||'')} onChange={v=>update('maskBorderColor',v)}/>

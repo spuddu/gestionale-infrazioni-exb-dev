@@ -187,6 +187,37 @@ export default function Setting (props: Props) {
         </SectionBox>
       </div>}
 
+      <Acc id='stile-barra-azioni' label='🎨 Barra Azioni' open={isOpen('stile-barra-azioni')} onToggle={() => toggle('stile-barra-azioni')} />
+      {isOpen('stile-barra-azioni') && <div>
+        <SectionBox title='Aspetto barra' hint='Stile condiviso dalla Barra Azioni nelle schede Iter approvativo e Notifica.'>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Colore di sfondo</label><ColInp value={cfgJs.actionBarBg || defaultConfig.actionBarBg} onChange={v => patch({ actionBarBg: v })} /></div>
+            <div><label style={P.lbl}>Colore bordo</label><ColInp value={cfgJs.actionBarBorderColor || defaultConfig.actionBarBorderColor} onChange={v => patch({ actionBarBorderColor: v })} /></div>
+          </div>
+          <div style={P.row3}>
+            <div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.actionBarBorderWidth, defaultConfig.actionBarBorderWidth)} onChange={n => patch({ actionBarBorderWidth: n })} min={0} max={8} unit='px' /></div>
+            <div><label style={P.lbl}>Arrotondamento</label><NumInp value={parseNum(cfgJs.actionBarBorderRadius, defaultConfig.actionBarBorderRadius)} onChange={n => patch({ actionBarBorderRadius: n })} min={0} max={40} unit='px' /></div>
+            <div><label style={P.lbl}>Spazio tra pulsanti</label><NumInp value={parseNum(cfgJs.actionBarButtonGap, defaultConfig.actionBarButtonGap)} onChange={n => patch({ actionBarButtonGap: n })} min={0} max={40} unit='px' /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Padding orizzontale</label><NumInp value={parseNum(cfgJs.actionBarPaddingX, defaultConfig.actionBarPaddingX)} onChange={n => patch({ actionBarPaddingX: n })} min={0} max={40} unit='px' /></div>
+            <div><label style={P.lbl}>Padding verticale</label><NumInp value={parseNum(cfgJs.actionBarPaddingY, defaultConfig.actionBarPaddingY)} onChange={n => patch({ actionBarPaddingY: n })} min={0} max={30} unit='px' /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Distanza dalla scheda superiore</label><NumInp value={parseNum(cfgJs.actionBarTopGap, defaultConfig.actionBarTopGap)} onChange={n => patch({ actionBarTopGap: n })} min={0} max={80} unit='px' /></div>
+            <div>
+              <label style={P.lbl}>Sfondo interspazio (CSS)</label>
+              <Inp value={cfgJs.actionBarGapBg || defaultConfig.actionBarGapBg} onChange={v => patch({ actionBarGapBg: v })} placeholder='transparent, #rrggbb o rgba(...)' />
+              <div style={P.hint}>Usa <b>transparent</b> per mostrare lo sfondo della pagina tra scheda e barra.</div>
+            </div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Colore titolo “Azioni”</label><ColInp value={cfgJs.actionBarTitleColor || defaultConfig.actionBarTitleColor} onChange={v => patch({ actionBarTitleColor: v })} /></div>
+            <div><label style={P.lbl}>Dimensione titolo</label><NumInp value={parseNum(cfgJs.actionBarTitleFontSize, defaultConfig.actionBarTitleFontSize)} onChange={n => patch({ actionBarTitleFontSize: n })} min={8} max={24} unit='px' /></div>
+          </div>
+        </SectionBox>
+      </div>}
+
       <Acc id='stile-campi' label='🎨 Campi input e testi' open={isOpen('stile-campi')} onToggle={() => toggle('stile-campi')} />
       {isOpen('stile-campi') && <div>
         <SectionBox title='Etichette dei campi' hint='Etichette sopra input, combo e textarea.'>
@@ -247,26 +278,13 @@ export default function Setting (props: Props) {
 
       <Acc id='stile-verifica-istruttoria' label='🎨 Iter approvativo' open={isOpen('stile-verifica-istruttoria')} onToggle={() => toggle('stile-verifica-istruttoria')} />
       {isOpen('stile-verifica-istruttoria') && <div>
-        <SectionBox title='Barra Azioni' hint='Aspetto della barra mostrata esclusivamente nella scheda Iter approvativo.'>
+        <SectionBox title='Riquadri di stato' hint='I riquadri Esito, Operatore, Date e Stato bozza usano lo stile condiviso configurabile nella sezione “Riquadri riepilogativi condivisi”.' />
+        <SectionBox title='Separatori del ciclo di integrazione' hint='Linee che separano Ultimo esito espresso dal Ciclo di integrazione e, al suo interno, Rimando da Esito integrazione.'>
           <div style={P.row2}>
-            <div><label style={P.lbl}>Colore di sfondo</label><ColInp value={cfgJs.actionBarBg || defaultConfig.actionBarBg} onChange={v => patch({ actionBarBg: v })} /></div>
-            <div><label style={P.lbl}>Colore bordo</label><ColInp value={cfgJs.actionBarBorderColor || defaultConfig.actionBarBorderColor} onChange={v => patch({ actionBarBorderColor: v })} /></div>
-          </div>
-          <div style={P.row3}>
-            <div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.actionBarBorderWidth, defaultConfig.actionBarBorderWidth)} onChange={n => patch({ actionBarBorderWidth: n })} min={0} max={8} unit='px' /></div>
-            <div><label style={P.lbl}>Arrotondamento</label><NumInp value={parseNum(cfgJs.actionBarBorderRadius, defaultConfig.actionBarBorderRadius)} onChange={n => patch({ actionBarBorderRadius: n })} min={0} max={40} unit='px' /></div>
-            <div><label style={P.lbl}>Spazio tra pulsanti</label><NumInp value={parseNum(cfgJs.actionBarButtonGap, defaultConfig.actionBarButtonGap)} onChange={n => patch({ actionBarButtonGap: n })} min={0} max={40} unit='px' /></div>
-          </div>
-          <div style={P.row2}>
-            <div><label style={P.lbl}>Padding orizzontale</label><NumInp value={parseNum(cfgJs.actionBarPaddingX, defaultConfig.actionBarPaddingX)} onChange={n => patch({ actionBarPaddingX: n })} min={0} max={40} unit='px' /></div>
-            <div><label style={P.lbl}>Padding verticale</label><NumInp value={parseNum(cfgJs.actionBarPaddingY, defaultConfig.actionBarPaddingY)} onChange={n => patch({ actionBarPaddingY: n })} min={0} max={30} unit='px' /></div>
-          </div>
-          <div style={P.row2}>
-            <div><label style={P.lbl}>Colore titolo “Azioni”</label><ColInp value={cfgJs.actionBarTitleColor || defaultConfig.actionBarTitleColor} onChange={v => patch({ actionBarTitleColor: v })} /></div>
-            <div><label style={P.lbl}>Dimensione titolo</label><NumInp value={parseNum(cfgJs.actionBarTitleFontSize, defaultConfig.actionBarTitleFontSize)} onChange={n => patch({ actionBarTitleFontSize: n })} min={8} max={24} unit='px' /></div>
+            <div><label style={P.lbl}>Separatore orizzontale</label><ColInp value={cfgJs.integrationCycleHorizontalSeparatorColor || defaultConfig.integrationCycleHorizontalSeparatorColor} onChange={v => patch({ integrationCycleHorizontalSeparatorColor: v })} /></div>
+            <div><label style={P.lbl}>Separatore verticale</label><ColInp value={cfgJs.integrationCycleVerticalSeparatorColor || defaultConfig.integrationCycleVerticalSeparatorColor} onChange={v => patch({ integrationCycleVerticalSeparatorColor: v })} /></div>
           </div>
         </SectionBox>
-        <SectionBox title='Riquadri di stato' hint='I riquadri Esito, Operatore, Date e Stato bozza usano lo stile condiviso configurabile nella sezione “Riquadri riepilogativi condivisi”.' />
       </div>}
 
       <Acc id='stile-riepiloghi' label='🎨 Riquadri riepilogativi condivisi' open={isOpen('stile-riepiloghi')} onToggle={() => toggle('stile-riepiloghi')} />

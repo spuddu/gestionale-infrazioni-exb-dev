@@ -24,21 +24,19 @@ export interface OggettoBadgeRule {
  */
 export const OGGETTO_STATUS_CATALOG: OggettoStatusDef[] = [
   { key: 'BOZZA', label: 'BOZZA' },
-  { key: 'NUOVA_RILEVAZIONE_TRASMESSA', label: 'NUOVA RILEVAZIONE TRASMESSA' },
-  { key: 'ISTRUTTORIA_ASSEGNATA', label: 'ISTRUTTORIA ASSEGNATA' },
-  { key: 'ISTRUTTORIA_TRASMESSA_VERIFICA', label: 'ISTRUTTORIA TRASMESSA PER VERIFICA' },
-  { key: 'ISTRUTTORIA_VERIFICATA', label: 'ISTRUTTORIA VERIFICATA' },
-  { key: 'ISTRUTTORIA_VALIDATA', label: 'ISTRUTTORIA VALIDATA' },
-  { key: 'ISTRUTTORIA_APPROVATA', label: 'ISTRUTTORIA APPROVATA' },
-  { key: 'FASCICOLO_TRASMESSO_VERIFICA', label: 'FASCICOLO TRASMESSO PER VERIFICA' },
-  { key: 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE', label: 'ISTRUTTORIA RIMANDATA PER INTEGRAZIONE' },
-  { key: 'FASCICOLO_RIMANDATO_INTEGRAZIONE', label: 'FASCICOLO RIMANDATO PER INTEGRAZIONE' },
+  { key: 'NUOVA_RILEVAZIONE_TRASMESSA', label: 'RILEVAZIONE TRASMESSA' },
+  { key: 'ISTRUTTORIA_ASSEGNATA', label: 'ASSEGNATA' },
+  { key: 'ISTRUTTORIA_TRASMESSA_VERIFICA', label: 'ISTRUITA' },
+  { key: 'ISTRUTTORIA_VERIFICATA', label: 'VERIFICATA' },
+  { key: 'ISTRUTTORIA_VALIDATA', label: 'VALIDATA' },
+  { key: 'ISTRUTTORIA_APPROVATA', label: 'APPROVATA' },
+  { key: 'FASCICOLO_TRASMESSO_VERIFICA', label: 'FASCICOLO TRASMESSO' },
+  { key: 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE', label: 'RIMANDATA' },
   { key: 'ESITO_INTEGRAZIONE_TRASMESSO', label: 'ESITO INTEGRAZIONE TRASMESSO' },
-  { key: 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA', label: 'ATTO DI ACCERTAMENTO TRASMESSO PER VERIFICA' },
-  { key: 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE', label: 'ATTO DI ACCERTAMENTO RIMANDATO PER INTEGRAZIONE' },
-  { key: 'ATTO_ACCERTAMENTO_APPROVATO', label: 'ATTO DI ACCERTAMENTO APPROVATO' },
-  { key: 'RILEVAZIONE_RESPINTA', label: 'RILEVAZIONE RESPINTA' },
-  { key: 'ISTRUTTORIA_RESPINTA', label: 'ISTRUTTORIA RESPINTA' },
+  { key: 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA', label: 'ATTO TRASMESSO' },
+  { key: 'ATTO_ACCERTAMENTO_APPROVATO', label: 'ATTO APPROVATO' },
+  { key: 'ISTRUTTORIA_RESPINTA', label: 'RESPINTA' },
+  { key: 'ARCHIVIAZIONE', label: 'ARCHIVIATA' },
   { key: 'SANZIONE_NOTIFICATA', label: 'SANZIONE NOTIFICATA' }
 ]
 
@@ -52,13 +50,11 @@ export const DEFAULT_OGGETTO_BADGE_RULES: OggettoBadgeRule[] = [
   { key: 'ISTRUTTORIA_APPROVATA', color: '#009246' },
   { key: 'FASCICOLO_TRASMESSO_VERIFICA', color: '#8b5cf6' },
   { key: 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE', color: '#ff6400' },
-  { key: 'FASCICOLO_RIMANDATO_INTEGRAZIONE', color: '#ff6400' },
   { key: 'ESITO_INTEGRAZIONE_TRASMESSO', color: '#8b5cf6' },
   { key: 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA', color: '#8b5cf6' },
-  { key: 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE', color: '#ff6400' },
   { key: 'ATTO_ACCERTAMENTO_APPROVATO', color: '#c316d0' },
-  { key: 'RILEVAZIONE_RESPINTA', color: '#dc2626' },
   { key: 'ISTRUTTORIA_RESPINTA', color: '#dc2626' },
+  { key: 'ARCHIVIAZIONE', color: '#6b7280' },
   { key: 'SANZIONE_NOTIFICATA', color: '#5f05e6' }
 ]
 
@@ -216,7 +212,11 @@ export interface Config {
   chipTextNeutro: string
   chipBorderNeutro: string
 
-  // Aspetto maschera (bordo pannello)
+  // Maschera generale del widget (contenitore esterno, titolo compreso)
+  generalMaskBg: string
+  generalMaskRadius: number
+
+  // Pannello interno elenco / bordo pannello
   maskOuterOffset: number
   maskInnerPadding: number
   maskBg: string
@@ -244,9 +244,9 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'col_ufficio',         label: 'Ufficio origine',  field: 'ufficio_zona',               width: 190 },
   { id: 'col_stato',           label: 'Il mio stato',     field: '__stato_sint__',             width: 170 },
   { id: 'col_fase',            label: 'Fase istruttoria', field: '__fase_istruttoria__',        width: 150 },
-  { id: 'col_causale',         label: 'Stato',            field: '__causale__',                width: 250 },
-  { id: 'col_mittente',        label: 'Mittente',         field: '__mittente__',               width: 210 },
-  { id: 'col_prossima',        label: 'Destinatario',     field: '__prossima__',               width: 210 },
+  { id: 'col_causale',         label: 'Stato pratica',    field: '__causale__',                width: 250 },
+  { id: 'col_mittente',        label: 'Eseguito da',       field: '__mittente__',               width: 210 },
+  { id: 'col_prossima',        label: 'Trasmesso a',       field: '__prossima__',               width: 210 },
   { id: 'col_data_msg',        label: 'Ultimo agg.',      field: '__data_msg__',               width: 150 }
 ]
 
@@ -380,7 +380,11 @@ export const defaultConfig: IMConfig = {
   chipTextNeutro: '#333333',
   chipBorderNeutro: '#d0d0d0',
 
-  // Aspetto maschera (bordo pannello)
+  // Maschera generale del widget (contenitore esterno, titolo compreso)
+  generalMaskBg: '#ffffff',
+  generalMaskRadius: 20,
+
+  // Pannello interno elenco / bordo pannello
   maskOuterOffset: 12,
   maskInnerPadding: 8,
   maskBg: '#ffffff',

@@ -767,18 +767,31 @@ export default function Setting(props: Props) {
         />
       </div>}
 
-      {/* ═══ MASCHERA ═══ */}
-      <Acc id='maschera' label='🖼 Maschera (bordo pannello)' open={isOpen('maschera')} onToggle={()=>toggle('maschera')}/>
-      {isOpen('maschera') && <div>
+      {/* ═══ MASCHERA GENERALE ═══ */}
+      <Acc id='maschera-generale' label='🎨 Maschera generale' open={isOpen('maschera-generale')} onToggle={()=>toggle('maschera-generale')}/>
+      {isOpen('maschera-generale') && <div>
+        <div style={P.hint}>Aspetto del contenitore esterno dell’intero widget, titolo compreso. È indipendente dal raggio del pannello interno del dettaglio.</div>
         <div style={P.row2}>
-          <div><label style={P.lbl}>Outer offset</label><NumInp value={parseNum(cfgJs.maskOuterOffset, 0)} onChange={n=>patch({maskOuterOffset:n})} min={0} unit='px'/></div>
-          <div><label style={P.lbl}>Inner padding</label><NumInp value={parseNum(cfgJs.maskInnerPadding ?? cfgJs.panelPadding, 12)} onChange={n=>patch({maskInnerPadding:n})} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Arrotondamento</label><NumInp value={parseNum(cfgJs.generalMaskRadius, 20)} onChange={n=>patch({generalMaskRadius:n})} min={0} max={40} unit='px'/></div>
+          <div><label style={P.lbl}>Padding interno</label><NumInp value={parseNum(cfgJs.maskOuterOffset, 0)} onChange={n=>patch({maskOuterOffset:n})} min={0} unit='px'/></div>
+        </div>
+        <label style={P.lbl}>Sfondo maschera</label>
+        <ColInp value={String(cfgJs.generalMaskBg ?? '#ffffff')} onChange={v=>patch({generalMaskBg:v})}/>
+      </div>}
+
+      {/* ═══ PANNELLO DETTAGLIO ═══ */}
+      <Acc id='pannello-dettaglio' label='🖼 Pannello dettaglio' open={isOpen('pannello-dettaglio')} onToggle={()=>toggle('pannello-dettaglio')}/>
+      {isOpen('pannello-dettaglio') && <div>
+        <div style={P.hint}>Aspetto del pannello interno che contiene titolo, schede e contenuti del dettaglio. Il suo raggio è distinto dall’arrotondamento della maschera generale.</div>
+        <div style={P.row2}>
+          <div><label style={P.lbl}>Padding interno pannello</label><NumInp value={parseNum(cfgJs.maskInnerPadding ?? cfgJs.panelPadding, 12)} onChange={n=>patch({maskInnerPadding:n})} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Raggio pannello / bordo</label><NumInp value={parseNum(cfgJs.maskBorderRadius ?? cfgJs.panelBorderRadius, 10)} onChange={n=>patch({maskBorderRadius:n})} min={0} unit='px'/></div>
         </div>
         <div style={P.row2}>
-          <div><label style={P.lbl}>Border width</label><NumInp value={parseNum(cfgJs.maskBorderWidth ?? cfgJs.panelBorderWidth, 1)} onChange={n=>patch({maskBorderWidth:n})} min={0} unit='px'/></div>
-          <div><label style={P.lbl}>Border radius</label><NumInp value={parseNum(cfgJs.maskBorderRadius ?? cfgJs.panelBorderRadius, 10)} onChange={n=>patch({maskBorderRadius:n})} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.maskBorderWidth ?? cfgJs.panelBorderWidth, 1)} onChange={n=>patch({maskBorderWidth:n})} min={0} unit='px'/></div>
+          <div />
         </div>
-        <label style={P.lbl}>Background</label>
+        <label style={P.lbl}>Sfondo pannello</label>
         <ColInp value={String(cfgJs.maskBg ?? cfgJs.panelBg ?? '#ffffff')} onChange={v=>patch({maskBg:v})}/>
         <label style={P.lbl}>Colore bordo</label>
         <ColInp value={String(cfgJs.maskBorderColor ?? cfgJs.panelBorderColor ?? '#e5e7eb')} onChange={v=>patch({maskBorderColor:v})}/>

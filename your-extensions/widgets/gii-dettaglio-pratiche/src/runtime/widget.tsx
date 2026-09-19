@@ -3263,10 +3263,20 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
             <div style={{ padding: '8px 12px' }}>
               {(operatoreLabel || qualificaLabel) && (
                 <div style={rowSt}>
-                  <span style={lblSt}>Operatore</span>
+                  <span style={lblSt}>Avviato da</span>
                   <span style={valSt}>
                     {operatoreLabel || qualificaLabel}
                     {operatoreLabel && qualificaLabel ? <span style={{ color: '#6b7280', fontWeight: 500 }}> ({qualificaLabel})</span> : null}
+                  </span>
+                </div>
+              )}
+
+              {(destinatarioNomeLabel || destinatarioQualificaLabel) && (
+                <div style={rowSt}>
+                  <span style={lblSt}>Trasmesso a</span>
+                  <span style={valSt}>
+                    {destinatarioNomeLabel || destinatarioQualificaLabel}
+                    {destinatarioNomeLabel && destinatarioQualificaLabel ? <span style={{ color: '#6b7280', fontWeight: 500 }}> ({destinatarioQualificaLabel})</span> : null}
                   </span>
                 </div>
               )}
@@ -3275,16 +3285,6 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
 
               {c.stato_record === 'CHIUSO' && (
                 <div style={rowSt}><span style={lblSt}>Chiusura</span><span style={valSt}>{formatDateSafe(c.dt_chiusura)}</span></div>
-              )}
-
-              {(destinatarioNomeLabel || destinatarioQualificaLabel) && (
-                <div style={rowSt}>
-                  <span style={lblSt}>Destinatario</span>
-                  <span style={valSt}>
-                    {destinatarioNomeLabel || destinatarioQualificaLabel}
-                    {destinatarioNomeLabel && destinatarioQualificaLabel ? <span style={{ color: '#6b7280', fontWeight: 500 }}> ({destinatarioQualificaLabel})</span> : null}
-                  </span>
-                </div>
               )}
 
               {noteChiusuraLabel && (
@@ -5644,6 +5644,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const cfg: any = { ...defaultConfig, ...cfgMutable }
 
 
+  const generalMaskBg = String((cfg as any).generalMaskBg ?? (defaultConfig as any).generalMaskBg ?? '#ffffff')
+  const generalMaskRadius = Number.isFinite(Number((cfg as any).generalMaskRadius))
+    ? Number((cfg as any).generalMaskRadius)
+    : Number((defaultConfig as any).generalMaskRadius ?? 20)
+
   const ui = {
     panelBg: String((cfg as any).maskBg ?? cfg.panelBg ?? (defaultConfig as any).maskBg ?? defaultConfig.panelBg),
     panelBorderColor: String((cfg as any).maskBorderColor ?? cfg.panelBorderColor ?? (defaultConfig as any).maskBorderColor ?? defaultConfig.panelBorderColor),
@@ -5965,7 +5970,17 @@ const queryFields = React.useMemo(() => {
 
 
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0 }}>
+    <div style={{
+      width: '100%',
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: 0,
+      boxSizing: 'border-box',
+      padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0,
+      background: generalMaskBg,
+      borderRadius: generalMaskRadius
+    }}>
       <>
 				<DetailTabsPanel
                   active={activeGate}
