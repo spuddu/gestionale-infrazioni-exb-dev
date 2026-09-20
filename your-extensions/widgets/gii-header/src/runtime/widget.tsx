@@ -1481,7 +1481,8 @@ function alertSenderRoleCode (alert: GiiAlertItem | null | undefined): string {
   const destRole = alertDestRoleCode(alert as any)
 
   if (alertIsNewRilevazione(alert)) return alertIsItOrigin(alert) ? 'IT' : 'TR'
-  if (event === 'FASCICOLO_TRASMESSO_VERIFICA' || event === 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA') return 'IA'
+  if (event === 'FASCICOLO_TRASMESSO_VERIFICA') return destRole === 'IA' ? 'RIA' : 'IA'
+  if (event === 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA') return 'IA'
   if (event === 'NUOVA_RILEVAZIONE_TRASMESSA' && destRole === 'CS') return alertIsItOrigin(alert) ? 'IT' : 'TR'
   if (event === 'ISTRUTTORIA_TRASMESSA_VERIFICA' && destRole === 'CS') return 'IT'
 

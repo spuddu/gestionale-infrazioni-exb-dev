@@ -150,6 +150,9 @@ export default function Setting (props: Props) {
             <div><label style={P.lbl}>Arrotondamento</label><NumInp value={parseNum(cfgJs.maskBorderRadius, defaultConfig.maskBorderRadius)} onChange={n => patch({ maskBorderRadius: n })} min={0} max={40} unit='px' /></div>
             <div><label style={P.lbl}>Padding interno</label><NumInp value={parseNum(cfgJs.maskInnerPadding, defaultConfig.maskInnerPadding)} onChange={n => patch({ maskInnerPadding: n })} min={0} max={40} unit='px' /></div>
           </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Arrotondamento messaggio informativo</label><NumInp value={parseNum(cfgJs.infoMessageBorderRadius, defaultConfig.infoMessageBorderRadius)} onChange={n => patch({ infoMessageBorderRadius: n })} min={0} max={40} unit='px' /></div>
+          </div>
         </SectionBox>
         <SectionBox title='Padding contenuto schede' hint='Regola il contenitore esterno di tutte le schede, comprese Allegati e Anteprima. Gli stessi valori sono usati dal gii-editing-tec.'>
           <div style={P.row2}>
@@ -184,6 +187,143 @@ export default function Setting (props: Props) {
             <div><label style={P.lbl}>Padding Y intestazione</label><NumInp value={parseNum(cfgJs.formCardHeaderPaddingY, defaultConfig.formCardHeaderPaddingY)} onChange={n => patch({ formCardHeaderPaddingY: n })} min={0} max={24} unit='px' /></div>
           </div>
           <div style={P.row2}><div><label style={P.lbl}>Padding corpo card</label><NumInp value={parseNum(cfgJs.formCardBodyPadding, defaultConfig.formCardBodyPadding)} onChange={n => patch({ formCardBodyPadding: n })} min={0} max={30} unit='px' /></div><div><label style={P.lbl}>Dimensione importi</label><NumInp value={parseNum(cfgJs.amountFontSize, defaultConfig.amountFontSize)} onChange={n => patch({ amountFontSize: n })} min={10} max={32} unit='px' /></div></div>
+        </SectionBox>
+      </div>}
+
+      <Acc id='stile-allegati' label='🎨 Allegati' open={isOpen('stile-allegati')} onToggle={() => toggle('stile-allegati')} />
+      {isOpen('stile-allegati') && <div>
+        <SectionBox title='Pannello Allegati' hint='Aspetto del contenitore esterno della scheda Allegati. Queste impostazioni sono indipendenti dalle due card interne.'>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Sfondo pannello</label><ColInp value={cfgJs.attachmentsPanelBg || defaultConfig.attachmentsPanelBg} onChange={v => patch({ attachmentsPanelBg: v })} /></div>
+            <div><label style={P.lbl}>Colore bordo</label><ColInp value={cfgJs.attachmentsPanelBorderColor || defaultConfig.attachmentsPanelBorderColor} onChange={v => patch({ attachmentsPanelBorderColor: v })} /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.attachmentsPanelBorderWidth, defaultConfig.attachmentsPanelBorderWidth)} onChange={n => patch({ attachmentsPanelBorderWidth: n })} min={0} max={8} unit='px' /></div>
+            <div><label style={P.lbl}>Arrotondamento</label><NumInp value={parseNum(cfgJs.attachmentsPanelBorderRadius, defaultConfig.attachmentsPanelBorderRadius)} onChange={n => patch({ attachmentsPanelBorderRadius: n })} min={0} max={40} unit='px' /></div>
+          </div>
+          <label style={P.lbl}>Padding interno pannello</label>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Superiore</label><NumInp value={parseNum(cfgJs.attachmentsPanelPaddingTop, defaultConfig.attachmentsPanelPaddingTop)} onChange={n => patch({ attachmentsPanelPaddingTop: n })} min={0} max={80} unit='px' /></div>
+            <div><label style={P.lbl}>Destro</label><NumInp value={parseNum(cfgJs.attachmentsPanelPaddingRight, defaultConfig.attachmentsPanelPaddingRight)} onChange={n => patch({ attachmentsPanelPaddingRight: n })} min={0} max={80} unit='px' /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Inferiore</label><NumInp value={parseNum(cfgJs.attachmentsPanelPaddingBottom, defaultConfig.attachmentsPanelPaddingBottom)} onChange={n => patch({ attachmentsPanelPaddingBottom: n })} min={0} max={80} unit='px' /></div>
+            <div><label style={P.lbl}>Sinistro</label><NumInp value={parseNum(cfgJs.attachmentsPanelPaddingLeft, defaultConfig.attachmentsPanelPaddingLeft)} onChange={n => patch({ attachmentsPanelPaddingLeft: n })} min={0} max={80} unit='px' /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Spazio elenco–anteprima</label><NumInp value={parseNum(cfgJs.attachmentsPreviewGap, defaultConfig.attachmentsPreviewGap)} onChange={n => patch({ attachmentsPreviewGap: n })} min={0} max={80} unit='px' /></div>
+          </div>
+          <label style={P.lbl}>Ombra pannello CSS</label>
+          <Inp value={cfgJs.attachmentsPanelShadow || defaultConfig.attachmentsPanelShadow} onChange={v => patch({ attachmentsPanelShadow: v })} placeholder='none oppure 0 8px 22px rgba(15, 23, 42, 0.08)' />
+        </SectionBox>
+        <SectionBox title='Pannello anteprima' hint='Bordo e raggio del riquadro di anteprima a destra. È indipendente dal contenitore principale, così puoi nascondere il bordo esterno e mantenere comunque un perimetro proprio per l’anteprima.'>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Colore bordo</label><ColInp value={cfgJs.attachmentsPreviewPanelBorderColor || defaultConfig.attachmentsPreviewPanelBorderColor} onChange={v => patch({ attachmentsPreviewPanelBorderColor: v })} /></div>
+            <div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.attachmentsPreviewPanelBorderWidth, defaultConfig.attachmentsPreviewPanelBorderWidth)} onChange={n => patch({ attachmentsPreviewPanelBorderWidth: n })} min={0} max={8} unit='px' /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Arrotondamento</label><NumInp value={parseNum(cfgJs.attachmentsPreviewPanelBorderRadius, defaultConfig.attachmentsPreviewPanelBorderRadius)} onChange={n => patch({ attachmentsPreviewPanelBorderRadius: n })} min={0} max={40} unit='px' /></div>
+          </div>
+          <label style={P.lbl}>Ombra pannello anteprima CSS</label>
+          <Inp value={cfgJs.attachmentsPreviewPanelShadow || defaultConfig.attachmentsPreviewPanelShadow} onChange={v => patch({ attachmentsPreviewPanelShadow: v })} placeholder='none oppure 0 8px 22px rgba(15, 23, 42, 0.08)' />
+        </SectionBox>
+        <SectionBox title='Allegati tecnici / Allegati amministrativi' hint='Aspetto delle due card interne alla scheda Allegati. I valori sono indipendenti dalle card principali delle altre schede.'>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Sfondo corpo card</label><ColInp value={cfgJs.attachmentsCardBg || defaultConfig.attachmentsCardBg} onChange={v => patch({ attachmentsCardBg: v })} /></div>
+            <div><label style={P.lbl}>Bordo card</label><ColInp value={cfgJs.attachmentsCardBorderColor || defaultConfig.attachmentsCardBorderColor} onChange={v => patch({ attachmentsCardBorderColor: v })} /></div>
+          </div>
+          <div style={P.row3}>
+            <div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.attachmentsCardBorderWidth, defaultConfig.attachmentsCardBorderWidth)} onChange={n => patch({ attachmentsCardBorderWidth: n })} min={0} max={8} unit='px' /></div>
+            <div><label style={P.lbl}>Arrotondamento</label><NumInp value={parseNum(cfgJs.attachmentsCardBorderRadius, defaultConfig.attachmentsCardBorderRadius)} onChange={n => patch({ attachmentsCardBorderRadius: n })} min={0} max={40} unit='px' /></div>
+            <div><label style={P.lbl}>Spazio tra card</label><NumInp value={parseNum(cfgJs.attachmentsGroupGap, defaultConfig.attachmentsGroupGap)} onChange={n => patch({ attachmentsGroupGap: n })} min={0} max={40} unit='px' /></div>
+          </div>
+          <label style={P.lbl}>Ombra card CSS</label>
+          <Inp value={cfgJs.attachmentsCardShadow || defaultConfig.attachmentsCardShadow} onChange={v => patch({ attachmentsCardShadow: v })} placeholder='0 8px 22px rgba(15, 23, 42, 0.08)' />
+          <div style={{ ...P.row2, marginTop: 10 }}>
+            <div><label style={P.lbl}>Colore hover record</label><ColInp value={cfgJs.attachmentsRecordHoverBg || defaultConfig.attachmentsRecordHoverBg} onChange={v => patch({ attachmentsRecordHoverBg: v })} /></div>
+            <div><label style={P.lbl}>Colore record selezionato</label><ColInp value={cfgJs.attachmentsRecordSelectedBg || defaultConfig.attachmentsRecordSelectedBg} onChange={v => patch({ attachmentsRecordSelectedBg: v })} /></div>
+          </div>
+        </SectionBox>
+        <SectionBox title='Intestazioni Allegati' hint='Barra del titolo delle card “Allegati tecnici” e “Allegati amministrativi”.'>
+          <label style={P.lbl}>Sfondo intestazione</label>
+          <Inp value={cfgJs.attachmentsHeaderBg || defaultConfig.attachmentsHeaderBg} onChange={v => patch({ attachmentsHeaderBg: v })} placeholder='linear-gradient(90deg, #0d3b66, #155e9d)' />
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Colore testo</label><ColInp value={cfgJs.attachmentsHeaderColor || defaultConfig.attachmentsHeaderColor} onChange={v => patch({ attachmentsHeaderColor: v })} /></div>
+            <div><label style={P.lbl}>Dimensione testo</label><NumInp value={parseNum(cfgJs.attachmentsHeaderFontSize, defaultConfig.attachmentsHeaderFontSize)} onChange={n => patch({ attachmentsHeaderFontSize: n })} min={10} max={24} unit='px' /></div>
+          </div>
+          <div style={P.row3}>
+            <div><label style={P.lbl}>Peso testo</label><NumInp value={parseNum(cfgJs.attachmentsHeaderFontWeight, defaultConfig.attachmentsHeaderFontWeight)} onChange={n => patch({ attachmentsHeaderFontWeight: n })} min={300} max={900} step={100} /></div>
+            <div><label style={P.lbl}>Padding X intestazione</label><NumInp value={parseNum(cfgJs.attachmentsHeaderPaddingX, defaultConfig.attachmentsHeaderPaddingX)} onChange={n => patch({ attachmentsHeaderPaddingX: n })} min={0} max={30} unit='px' /></div>
+            <div><label style={P.lbl}>Padding Y intestazione</label><NumInp value={parseNum(cfgJs.attachmentsHeaderPaddingY, defaultConfig.attachmentsHeaderPaddingY)} onChange={n => patch({ attachmentsHeaderPaddingY: n })} min={0} max={24} unit='px' /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Padding corpo card</label><NumInp value={parseNum(cfgJs.attachmentsCardBodyPadding, defaultConfig.attachmentsCardBodyPadding)} onChange={n => patch({ attachmentsCardBodyPadding: n })} min={0} max={30} unit='px' /></div>
+          </div>
+        </SectionBox>
+      </div>}
+
+      <Acc id='stile-fascicolo' label='🎨 Fascicolo' open={isOpen('stile-fascicolo')} onToggle={() => toggle('stile-fascicolo')} />
+      {isOpen('stile-fascicolo') && <div>
+        <SectionBox title='Contenitore generale Fascicolo' hint='Bordo esterno che racchiude insieme anteprima PDF e pannello documenti a destra. Può essere nascosto impostando lo spessore a 0.'>
+          <div style={P.row3}>
+            <div><label style={P.lbl}>Colore bordo generale</label><ColInp value={cfgJs.fascicoloPanelBorderColor || defaultConfig.fascicoloPanelBorderColor} onChange={v => patch({ fascicoloPanelBorderColor: v })} /></div>
+            <div><label style={P.lbl}>Spessore bordo generale</label><NumInp value={parseNum(cfgJs.fascicoloPanelBorderWidth, defaultConfig.fascicoloPanelBorderWidth)} onChange={n => patch({ fascicoloPanelBorderWidth: n })} min={0} max={8} unit='px' /></div>
+            <div><label style={P.lbl}>Arrotondamento generale</label><NumInp value={parseNum(cfgJs.fascicoloPanelBorderRadius, defaultConfig.fascicoloPanelBorderRadius)} onChange={n => patch({ fascicoloPanelBorderRadius: n })} min={0} max={40} unit='px' /></div>
+          </div>
+        </SectionBox>
+        <SectionBox title='Pannello destro' hint='Padding interno del pannello Documenti. I valori regolano la distanza delle schede dai bordi del pannello e mantengono allineato il pulsante fisso “Rigenera documento”.'>
+          <label style={P.lbl}>Padding interno pannello destro</label>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Superiore</label><NumInp value={parseNum(cfgJs.fascicoloSidebarPaddingTop, defaultConfig.fascicoloSidebarPaddingTop)} onChange={n => patch({ fascicoloSidebarPaddingTop: n })} min={0} max={80} unit='px' /></div>
+            <div><label style={P.lbl}>Destro</label><NumInp value={parseNum(cfgJs.fascicoloSidebarPaddingRight, defaultConfig.fascicoloSidebarPaddingRight)} onChange={n => patch({ fascicoloSidebarPaddingRight: n })} min={0} max={80} unit='px' /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Inferiore</label><NumInp value={parseNum(cfgJs.fascicoloSidebarPaddingBottom, defaultConfig.fascicoloSidebarPaddingBottom)} onChange={n => patch({ fascicoloSidebarPaddingBottom: n })} min={0} max={80} unit='px' /></div>
+            <div><label style={P.lbl}>Sinistro</label><NumInp value={parseNum(cfgJs.fascicoloSidebarPaddingLeft, defaultConfig.fascicoloSidebarPaddingLeft)} onChange={n => patch({ fascicoloSidebarPaddingLeft: n })} min={0} max={80} unit='px' /></div>
+          </div>
+        </SectionBox>
+        <SectionBox title='Pannello anteprima Fascicolo' hint='Aspetto del pannello di anteprima PDF di sinistra. Sfondo, bordo e raggio sono indipendenti dal contenitore generale.'>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Sfondo dietro anteprima</label><ColInp value={cfgJs.fascicoloPreviewBackgroundColor || defaultConfig.fascicoloPreviewBackgroundColor} onChange={v => patch({ fascicoloPreviewBackgroundColor: v })} /></div>
+            <div><label style={P.lbl}>Colore bordo anteprima</label><ColInp value={cfgJs.fascicoloPreviewBorderColor || defaultConfig.fascicoloPreviewBorderColor} onChange={v => patch({ fascicoloPreviewBorderColor: v })} /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Spessore bordo anteprima</label><NumInp value={parseNum(cfgJs.fascicoloPreviewBorderWidth, defaultConfig.fascicoloPreviewBorderWidth)} onChange={n => patch({ fascicoloPreviewBorderWidth: n })} min={0} max={8} unit='px' /></div>
+            <div><label style={P.lbl}>Arrotondamento anteprima</label><NumInp value={parseNum(cfgJs.fascicoloPreviewBorderRadius, defaultConfig.fascicoloPreviewBorderRadius)} onChange={n => patch({ fascicoloPreviewBorderRadius: n })} min={0} max={40} unit='px' /></div>
+          </div>
+        </SectionBox>
+        <SectionBox title='Schede Documenti' hint='Aspetto delle card “Documenti tecnici” e “Documenti amministrativi” nel pannello destro del Fascicolo.'>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Sfondo corpo card</label><ColInp value={cfgJs.fascicoloDocsCardBg || defaultConfig.fascicoloDocsCardBg} onChange={v => patch({ fascicoloDocsCardBg: v })} /></div>
+            <div><label style={P.lbl}>Colore bordo card</label><ColInp value={cfgJs.fascicoloDocsCardBorderColor || defaultConfig.fascicoloDocsCardBorderColor} onChange={v => patch({ fascicoloDocsCardBorderColor: v })} /></div>
+          </div>
+          <div style={P.row3}>
+            <div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.fascicoloDocsCardBorderWidth, defaultConfig.fascicoloDocsCardBorderWidth)} onChange={n => patch({ fascicoloDocsCardBorderWidth: n })} min={0} max={8} unit='px' /></div>
+            <div><label style={P.lbl}>Arrotondamento</label><NumInp value={parseNum(cfgJs.fascicoloDocsCardBorderRadius, defaultConfig.fascicoloDocsCardBorderRadius)} onChange={n => patch({ fascicoloDocsCardBorderRadius: n })} min={0} max={40} unit='px' /></div>
+            <div><label style={P.lbl}>Spazio tra schede</label><NumInp value={parseNum(cfgJs.fascicoloDocsGroupGap, defaultConfig.fascicoloDocsGroupGap)} onChange={n => patch({ fascicoloDocsGroupGap: n })} min={0} max={40} unit='px' /></div>
+          </div>
+          <label style={P.lbl}>Ombra card CSS</label>
+          <Inp value={cfgJs.fascicoloDocsCardShadow || defaultConfig.fascicoloDocsCardShadow} onChange={v => patch({ fascicoloDocsCardShadow: v })} placeholder='none oppure 0 8px 22px rgba(15, 23, 42, 0.08)' />
+          <div style={{ ...P.row2, marginTop: 10 }}>
+            <div><label style={P.lbl}>Colore testo record</label><ColInp value={cfgJs.fascicoloDocsTextColor || defaultConfig.fascicoloDocsTextColor} onChange={v => patch({ fascicoloDocsTextColor: v })} /></div>
+            <div><label style={P.lbl}>Colore testo disabilitato</label><ColInp value={cfgJs.fascicoloDocsDisabledTextColor || defaultConfig.fascicoloDocsDisabledTextColor} onChange={v => patch({ fascicoloDocsDisabledTextColor: v })} /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Padding corpo card</label><NumInp value={parseNum(cfgJs.fascicoloDocsBodyPadding, defaultConfig.fascicoloDocsBodyPadding)} onChange={n => patch({ fascicoloDocsBodyPadding: n })} min={0} max={30} unit='px' /></div>
+          </div>
+        </SectionBox>
+        <SectionBox title='Intestazioni schede Documenti' hint='Barre dei titoli “Documenti tecnici” e “Documenti amministrativi”.'>
+          <label style={P.lbl}>Sfondo intestazione</label>
+          <Inp value={cfgJs.fascicoloDocsHeaderBg || defaultConfig.fascicoloDocsHeaderBg} onChange={v => patch({ fascicoloDocsHeaderBg: v })} placeholder='linear-gradient(90deg, #0d3b66, #155e9d)' />
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Colore testo</label><ColInp value={cfgJs.fascicoloDocsHeaderColor || defaultConfig.fascicoloDocsHeaderColor} onChange={v => patch({ fascicoloDocsHeaderColor: v })} /></div>
+            <div><label style={P.lbl}>Dimensione testo</label><NumInp value={parseNum(cfgJs.fascicoloDocsHeaderFontSize, defaultConfig.fascicoloDocsHeaderFontSize)} onChange={n => patch({ fascicoloDocsHeaderFontSize: n })} min={9} max={24} unit='px' /></div>
+          </div>
+          <div style={P.row3}>
+            <div><label style={P.lbl}>Peso testo</label><NumInp value={parseNum(cfgJs.fascicoloDocsHeaderFontWeight, defaultConfig.fascicoloDocsHeaderFontWeight)} onChange={n => patch({ fascicoloDocsHeaderFontWeight: n })} min={300} max={900} step={100} /></div>
+            <div><label style={P.lbl}>Padding X intestazione</label><NumInp value={parseNum(cfgJs.fascicoloDocsHeaderPaddingX, defaultConfig.fascicoloDocsHeaderPaddingX)} onChange={n => patch({ fascicoloDocsHeaderPaddingX: n })} min={0} max={30} unit='px' /></div>
+            <div><label style={P.lbl}>Padding Y intestazione</label><NumInp value={parseNum(cfgJs.fascicoloDocsHeaderPaddingY, defaultConfig.fascicoloDocsHeaderPaddingY)} onChange={n => patch({ fascicoloDocsHeaderPaddingY: n })} min={0} max={24} unit='px' /></div>
+          </div>
         </SectionBox>
       </div>}
 

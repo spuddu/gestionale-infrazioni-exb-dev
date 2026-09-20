@@ -3348,6 +3348,65 @@ export default function Widget(props: Props) {
     }
   };
 
+  const getWorkflowRoleRequester = (role: any): string => {
+    switch (normalizeWorkflowRole(role)) {
+      case "TR": return "dal Tecnico rilevatore";
+      case "IT": return "dall’Istruttore tecnico";
+      case "CS": return "dal Capo Settore";
+      case "RIT": return "dal Responsabile dell’istruttoria tecnica";
+      case "DT": return "dal Direttore d’Area";
+      case "IA": return "dall’Istruttore amministrativo";
+      case "RIA": return "dal Responsabile dell’istruttoria amministrativa";
+      case "DA": return "dal Direttore Area AA. GG. e P.F.";
+      default: return "";
+    }
+  };
+
+  const getOpenIntegrationRequester = (log: LogEntry | null): string => {
+    if (!log) return "";
+
+    const requestEvents = new Set([
+      "ISTRUTTORIA_RIMANDATA_INTEGRAZIONE",
+      "ISTRUTTORIA_RIMANDATA_PER_INTEGRAZIONE",
+      "FASCICOLO_RIMANDATO_INTEGRAZIONE",
+      "ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE",
+    ]);
+    const returnEvents = new Set([
+      "ESITO_INTEGRAZIONE_TRASMESSO",
+      "ESITO_INTEGRAZIONE_TECNICA_TRASMESSO",
+      "INTEGRAZIONE_TRASMESSA_VERIFICA",
+      "INTEGRAZIONE_TECNICA_TRASMESSA_VERIFICA",
+    ]);
+
+    // history e' ordinato dal piu' recente al piu' vecchio e non contiene
+    // l'evento corrente. Ricostruiamo quindi i cicli in ordine cronologico.
+    // Le richieste intermedie possono annidarsi: quando un esito raggiunge il
+    // ruolo che aveva aperto una richiesta, chiudiamo quella richiesta e tutte
+    // le eventuali richieste piu' interne. Il primo elemento ancora aperto resta
+    // il richiedente originario del ciclo complessivo.
+    const chronological = [...(log.history || [])].reverse();
+    const openRequesters: string[] = [];
+
+    for (const item of chronological) {
+      const event = String(item?.evento || "").trim().toUpperCase();
+      const sender = normalizeWorkflowRole(item?.ruolo);
+      const receiver = normalizeWorkflowRole(item?.ruoloDest);
+
+      if (requestEvents.has(event)) {
+        if (sender && receiver) openRequesters.push(sender);
+        continue;
+      }
+
+      if (!returnEvents.has(event) || !receiver || !openRequesters.length)
+        continue;
+
+      const closeIndex = openRequesters.lastIndexOf(receiver);
+      if (closeIndex >= 0) openRequesters.splice(closeIndex);
+    }
+
+    return openRequesters[0] || "";
+  };
+
   const getOggettoLegendDescription = (
     oggetto: string,
     log: LogEntry | null,
@@ -3391,8 +3450,13 @@ export default function Widget(props: Props) {
     if (o === "APPROVATA")
       return `${subject} ha approvato l’istruttoria tecnica e l’ha trasmessa ${recipient} per l’avvio della fase amministrativa.`;
 
-    if (o === "FASCICOLO TRASMESSO")
+    if (o === "FASCICOLO TRASMESSO") {
+      const senderRole = normalizeWorkflowRole(log?.ruolo);
+      const recipientRole = normalizeWorkflowRole(log?.ruoloDest);
+      if (evento === "FASCICOLO_TRASMESSO_VERIFICA" && senderRole === "RIA" && recipientRole === "IA")
+        return `${subject} ha trasmesso ${recipient} il fascicolo aggiornato per una nuova valutazione.`;
       return `${subject} ha trasmesso l’intero fascicolo ${recipient} per la verifica.`;
+    }
 
     if (o === "RIMANDATA") {
       if (evento === "FASCICOLO_RIMANDATO_INTEGRAZIONE")
@@ -3402,8 +3466,16 @@ export default function Widget(props: Props) {
       return `${subject} ha rimandato l’istruttoria ${recipient} per integrazioni o chiarimenti.`;
     }
 
-    if (o === "ESITO INTEGRAZIONE TRASMESSO")
-      return `${subject} ha trasmesso ${recipient} l’esito dell’integrazione richiesta.`;
+    if (o === "ESITO INTEGRAZIONE TRASMESSO") {
+      const requesterRole = normalizeWorkflowRole(getOpenIntegrationRequester(log));
+      const recipientRole = normalizeWorkflowRole(log?.ruoloDest);
+      if (requesterRole === recipientRole)
+        return `${subject} ha trasmesso ${recipient} l’esito dell’integrazione da lui richiesta.`;
+      const requester = getWorkflowRoleRequester(requesterRole);
+      return requester
+        ? `${subject} ha trasmesso ${recipient} l’esito dell’integrazione richiesta ${requester}.`
+        : `${subject} ha trasmesso ${recipient} l’esito dell’integrazione richiesta.`;
+    }
 
     if (o === "ATTO TRASMESSO")
       return `${subject} ha trasmesso l’Atto di accertamento ${recipient} per la verifica.`;

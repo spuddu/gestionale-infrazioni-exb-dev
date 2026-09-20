@@ -226,6 +226,8 @@ export type GiiAttachmentViewerProps<T extends GiiAttachmentViewerItem = GiiAtta
   editDisabled?: boolean
   uploadLabel?: string
   uploadInputKey?: number
+  uploadInputRef?: React.RefObject<HTMLInputElement>
+  showUploadControls?: boolean
   emptyMessage?: string
   noOidMessage?: string
   oidAvailable?: boolean
@@ -255,6 +257,42 @@ export type GiiAttachmentViewerProps<T extends GiiAttachmentViewerItem = GiiAtta
   headerBorderColor?: string
   borderRadius?: number
   innerHeaderColor?: string
+  panelBackground?: string
+  panelBorderColor?: string
+  panelBorderWidth?: number
+  panelBorderRadius?: number
+  panelPaddingTop?: number
+  panelPaddingTopAffectsPreview?: boolean
+  panelPaddingRight?: number
+  panelPaddingBottom?: number
+  panelPaddingLeft?: number
+  panelShadow?: string
+  panelContentInset?: number
+  listPaddingRight?: number
+  previewColumnGap?: number
+  previewColumnWidth?: string | number
+  previewPanelBorderColor?: string
+  previewPanelBorderWidth?: number
+  previewPanelBorderRadius?: number
+  previewPanelShadow?: string
+  groupHeaderBg?: string
+  groupHeaderColor?: string
+  groupHeaderPaddingX?: number
+  groupHeaderPaddingY?: number
+  groupHeaderFontSize?: number
+  groupHeaderFontWeight?: number
+  groupSectionStyle?: boolean
+  groupSectionGap?: number
+  groupCardBg?: string
+  groupCardBorderColor?: string
+  groupCardBorderWidth?: number
+  groupCardBorderRadius?: number
+  groupCardBodyPadding?: number
+  groupCardShadow?: string
+  recordHoverBackground?: string
+  recordSelectedBackground?: string
+  disabledActionBackground?: string
+  disabledActionOpacity?: number
 }
 
 function defaultFormatBytes (value?: number): string {
@@ -292,7 +330,7 @@ function isRotatableImageAttachment (item: GiiAttachmentViewerItem): boolean {
   return ct.includes('jpeg') || ct.includes('jpg') || ct.includes('png') || /\.(jpe?g|png)$/i.test(name)
 }
 
-const ALLOWED_ATTACHMENT_UPLOAD_HINT = 'Formati ammessi: PDF, JPG, PNG, GIF, WEBP, BMP, TIFF.'
+export const GII_ALLOWED_ATTACHMENT_UPLOAD_HINT = 'Formati ammessi: PDF, JPG, PNG, GIF, WEBP, BMP, TIFF.'
 const ALLOWED_ATTACHMENT_UPLOAD_ACCEPT = 'application/pdf,image/*'
 
 function isAllowedAttachmentUpload (file: File): boolean {
@@ -540,9 +578,11 @@ function AttachmentActionIcon (props: { name: AttachmentActionIconName, size?: n
   )
 }
 
-function buttonStyle (opts?: { danger?: boolean, disabled?: boolean }): React.CSSProperties {
+function buttonStyle (opts?: { danger?: boolean, disabled?: boolean, disabledBackground?: string, disabledOpacity?: number }): React.CSSProperties {
   const disabled = !!opts?.disabled
   const danger = !!opts?.danger
+  const disabledBackground = String(opts?.disabledBackground || '#e5e7eb')
+  const disabledOpacity = Number.isFinite(Number(opts?.disabledOpacity)) ? Math.max(0, Math.min(1, Number(opts?.disabledOpacity))) : 0.6
   return {
     width: 38,
     height: 36,
@@ -550,11 +590,11 @@ function buttonStyle (opts?: { danger?: boolean, disabled?: boolean }): React.CS
     boxSizing: 'border-box',
     color: disabled ? '#9ca3af' : (danger ? '#b91c1c' : '#0d3b66'),
     whiteSpace: 'nowrap',
-    background: disabled ? '#e5e7eb' : '#ffffff',
+    background: disabled ? disabledBackground : '#ffffff',
     border: disabled ? '2px solid #e5e7eb' : (danger ? '2px solid rgba(185,28,28,0.72)' : '2px solid #0d3b66'),
     borderRadius: 8,
     cursor: disabled ? 'not-allowed' : 'pointer',
-    opacity: disabled ? 0.6 : 1,
+    opacity: disabled ? disabledOpacity : 1,
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -572,7 +612,10 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
   const formatBytes = props.formatBytes || defaultFormatBytes
   const labelFontSize = Number(props.labelFontSize ?? 12)
   const borderRadius = Number(props.borderRadius ?? 10)
+  const disabledActionBackground = String(props.disabledActionBackground || '#e5e7eb')
+  const disabledActionOpacity = Number.isFinite(Number(props.disabledActionOpacity)) ? Math.max(0, Math.min(1, Number(props.disabledActionOpacity))) : 0.6
   const [internalSelectedId, setInternalSelectedId] = React.useState<number | string | null>(props.selectedItemId ?? null)
+  const [hoveredItemId, setHoveredItemId] = React.useState<number | string | null>(null)
   const selectedId = props.selectedItemId !== undefined ? props.selectedItemId : internalSelectedId
   const selected = React.useMemo(() => {
     if (selectedId == null) return null
@@ -676,10 +719,23 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
   const canConfirmInternalRotation = !props.onConfirmRotation && !!props.onReplace && canEdit && !itemEditDisabled(selected) && normalizedRotationDeg !== 0
   const confirmRotationDisabled = effectiveRotationBusy || normalizedRotationDeg === 0 || !(canConfirmExternalRotation || canConfirmInternalRotation)
   const uploadTitle = String(props.uploadLabel || 'Carica allegato')
+  const showUploadControls = props.showUploadControls !== false
+  const handleUploadInputChange = React.useCallback((e: any) => {
+    const files = Array.from(e.currentTarget.files || []) as File[]
+    if (!files.length) return
+    const rejected = files.filter(f => !isAllowedAttachmentUpload(f))
+    if (rejected.length) {
+      setUploadFormatError(`Formato non ammesso per: ${rejected.map(f => f.name).join(', ')}. ${GII_ALLOWED_ATTACHMENT_UPLOAD_HINT}`)
+      return
+    }
+    setUploadFormatError(null)
+    void props.onUpload?.(files)
+  }, [props.onUpload])
   const showPreviewCaption = props.showPreviewCaption === true
   const rotationControlsPosition = props.rotationControlsPosition === 'bottom' ? 'bottom' : 'top'
   const showConfirmRotation = props.showConfirmRotation !== false
   const bodyPadding = props.bodyPadding == null ? null : Math.max(0, Number(props.bodyPadding) || 0)
+  const panelContentInset = Math.max(0, Number(props.panelContentInset ?? 12) || 0)
   const selectedIndex = selected ? items.findIndex((it: any) => String(it?.id) === String(selected.id)) : -1
   const previewCaption = selected
     ? `${selectedIndex >= 0 ? `Allegato ${selectedIndex + 1} • ` : ''}${selected.name || `Allegato ${selectedIndex + 1}`}`
@@ -728,68 +784,75 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
   ) : null
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', height: '100%', border: `1px solid ${props.headerBorderColor || '#c5d9f1'}`, borderRadius, background: '#fff', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', height: '100%', border: `${Number(props.panelBorderWidth ?? 1)}px solid ${props.panelBorderColor || props.headerBorderColor || '#c5d9f1'}`, borderRadius: Number(props.panelBorderRadius ?? borderRadius), background: props.panelBackground || '#fff', boxShadow: String(props.panelShadow || '').trim() || 'none', overflow: 'hidden' }}>
       {!oidAvailable ? (
-        <div style={{ flex: '1 1 auto', minHeight: 0, padding: 12, color: '#6b7280', fontSize: labelFontSize }}>
+        <div style={{ flex: '1 1 auto', minHeight: 0, padding: `${Number(props.panelPaddingTop ?? 0) + panelContentInset}px ${Number(props.panelPaddingRight ?? 0) + panelContentInset}px ${Number(props.panelPaddingBottom ?? 0) + panelContentInset}px ${Number(props.panelPaddingLeft ?? 0) + panelContentInset}px`, color: '#6b7280', fontSize: labelFontSize }}>
           {props.noOidMessage || 'Selezionare una pratica prima di consultare o caricare gli allegati.'}
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, flex: '1 1 auto', minHeight: 0, height: '100%', overflow: 'hidden', padding: bodyPadding == null ? undefined : bodyPadding, boxSizing: 'border-box' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'hidden', padding: bodyPadding == null ? 12 : 0, boxSizing: 'border-box' }}>
-            <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-              <div style={{ fontWeight: 800, fontSize: Math.max(13, labelFontSize), color: props.innerHeaderColor || '#0f4c81' }}>Elenco allegati</div>
-              {props.onUpload && (
-                <label title={uploadTitle} aria-label={uploadTitle} style={{ width: 38, height: 36, minHeight: 36, boxSizing: 'border-box', padding: 0, borderRadius: 8, border: disabledEdit ? '2px solid #e5e7eb' : '2px solid #0d3b66', background: disabledEdit ? '#e5e7eb' : '#ffffff', color: disabledEdit ? '#9ca3af' : '#0d3b66', fontSize: labelFontSize, fontWeight: 600, cursor: disabledEdit ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap', flex: '0 0 auto', opacity: disabledEdit ? 0.6 : 1 }}>
-                  <AttachmentActionIcon name='upload' />
-                  <input
-                    key={props.uploadInputKey}
-                    type='file'
-                    multiple
-                    accept={ALLOWED_ATTACHMENT_UPLOAD_ACCEPT}
-                    disabled={disabledEdit}
-                    style={{ display: 'none' }}
-                    onChange={(e: any) => {
-                      const files = Array.from(e.currentTarget.files || []) as File[]
-                      if (!files.length) return
-                      const rejected = files.filter(f => !isAllowedAttachmentUpload(f))
-                      if (rejected.length) {
-                        setUploadFormatError(`Formato non ammesso per: ${rejected.map(f => f.name).join(', ')}. ${ALLOWED_ATTACHMENT_UPLOAD_HINT}`)
-                        return
-                      }
-                      setUploadFormatError(null)
-                      void props.onUpload?.(files)
-                    }}
-                  />
-                </label>
-              )}
-              {props.onReplace && (
-                <input
-                  key={replaceInputKey}
-                  ref={replaceInputRef}
-                  type='file'
-                  accept={ALLOWED_ATTACHMENT_UPLOAD_ACCEPT}
-                  disabled={disabledEdit}
-                  style={{ display: 'none' }}
-                  onChange={(e: any) => {
-                    const file = Array.from(e.currentTarget.files || [])[0] as File | undefined
-                    const target = replaceTargetRef.current
-                    setReplaceInputKey(k => k + 1)
-                    replaceTargetRef.current = null
-                    if (!file || !target) return
-                    if (!isAllowedAttachmentUpload(file)) {
-                      setUploadFormatError(`Formato non ammesso: ${file.name}. ${ALLOWED_ATTACHMENT_UPLOAD_HINT}`)
-                      return
-                    }
-                    setUploadFormatError(null)
-                    void props.onReplace?.(target, file)
-                  }}
-                />
-              )}
-            </div>
+        <div style={{ display: 'grid', gridTemplateColumns: props.previewColumnWidth != null ? `minmax(0, 1fr) ${typeof props.previewColumnWidth === 'number' ? `${Math.max(0, props.previewColumnWidth)}px` : props.previewColumnWidth}` : 'minmax(0, 1fr) minmax(0, 1fr)', columnGap: Math.max(0, Number(props.previewColumnGap ?? 12) || 0), flex: '1 1 auto', minHeight: 0, height: '100%', overflow: 'hidden', padding: bodyPadding == null ? `${props.panelPaddingTopAffectsPreview === false ? 0 : Number(props.panelPaddingTop ?? 0)}px ${Number(props.panelPaddingRight ?? 0)}px ${Number(props.panelPaddingBottom ?? 0)}px ${Number(props.panelPaddingLeft ?? 0)}px` : bodyPadding, boxSizing: 'border-box' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'hidden', padding: bodyPadding == null ? panelContentInset : 0, paddingTop: bodyPadding == null ? panelContentInset + (props.panelPaddingTopAffectsPreview === false ? Math.max(0, Number(props.panelPaddingTop ?? 0) || 0) : 0) : 0, boxSizing: 'border-box' }}>
+            {showUploadControls && (
+              <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ fontWeight: 800, fontSize: Math.max(13, labelFontSize), color: props.innerHeaderColor || '#0f4c81' }}>Elenco allegati</div>
+                {props.onUpload && (
+                  <label title={uploadTitle} aria-label={uploadTitle} style={{ width: 38, height: 36, minHeight: 36, boxSizing: 'border-box', padding: 0, borderRadius: 8, border: disabledEdit ? '2px solid #e5e7eb' : '2px solid #0d3b66', background: disabledEdit ? disabledActionBackground : '#ffffff', color: disabledEdit ? '#9ca3af' : '#0d3b66', fontSize: labelFontSize, fontWeight: 600, cursor: disabledEdit ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap', flex: '0 0 auto', opacity: disabledEdit ? disabledActionOpacity : 1 }}>
+                    <AttachmentActionIcon name='upload' />
+                    <input
+                      key={props.uploadInputKey}
+                      ref={props.uploadInputRef}
+                      type='file'
+                      multiple
+                      accept={ALLOWED_ATTACHMENT_UPLOAD_ACCEPT}
+                      disabled={disabledEdit}
+                      style={{ display: 'none' }}
+                      onChange={handleUploadInputChange}
+                    />
+                  </label>
+                )}
+              </div>
+            )}
 
-            {props.onUpload && (
+            {props.onReplace && (
+              <input
+                key={replaceInputKey}
+                ref={replaceInputRef}
+                type='file'
+                accept={ALLOWED_ATTACHMENT_UPLOAD_ACCEPT}
+                disabled={disabledEdit}
+                style={{ display: 'none' }}
+                onChange={(e: any) => {
+                  const file = Array.from(e.currentTarget.files || [])[0] as File | undefined
+                  const target = replaceTargetRef.current
+                  setReplaceInputKey(k => k + 1)
+                  replaceTargetRef.current = null
+                  if (!file || !target) return
+                  if (!isAllowedAttachmentUpload(file)) {
+                    setUploadFormatError(`Formato non ammesso: ${file.name}. ${GII_ALLOWED_ATTACHMENT_UPLOAD_HINT}`)
+                    return
+                  }
+                  setUploadFormatError(null)
+                  void props.onReplace?.(target, file)
+                }}
+              />
+            )}
+
+            {!showUploadControls && props.onUpload && (
+              <input
+                key={props.uploadInputKey}
+                ref={props.uploadInputRef}
+                type='file'
+                multiple
+                accept={ALLOWED_ATTACHMENT_UPLOAD_ACCEPT}
+                disabled={disabledEdit}
+                style={{ display: 'none' }}
+                onChange={handleUploadInputChange}
+              />
+            )}
+
+            {showUploadControls && props.onUpload && (
               <div style={{ flex: '0 0 auto', fontSize: Math.max(10, labelFontSize - 2), color: '#6b7280', fontWeight: 600 }}>
-                {ALLOWED_ATTACHMENT_UPLOAD_HINT}
+                {GII_ALLOWED_ATTACHMENT_UPLOAD_HINT}
               </div>
             )}
 
@@ -798,94 +861,160 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
             {props.loading ? (
               <div style={{ flex: '0 0 auto', color: '#6b7280', fontSize: labelFontSize }}>Caricamento allegati…</div>
             ) : items.length > 0 ? (
-              <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', display: 'grid', alignContent: 'start', gap: 8, paddingRight: 2, gridAutoRows: 'max-content' }}>
-                {items.map((att, idx) => {
-                  const active = selected?.id != null && String(selected.id) === String(att.id)
-                  const itemDisabled = itemEditDisabled(att)
-                  const groupTitle = String((att as any)?.groupTitle || '').trim()
-                  const previousGroupTitle = idx > 0 ? String((items[idx - 1] as any)?.groupTitle || '').trim() : ''
-                  const showGroupTitle = !!groupTitle && groupTitle !== previousGroupTitle
-                  const row = (
-                    <div key={String(att.id)} onClick={() => setSelected(att)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'start', columnGap: 10, border: `1px solid ${active ? '#2563eb' : 'rgba(0,0,0,0.08)'}`, background: active ? '#eff6ff' : '#fff', borderRadius: 10, padding: '8px 10px', cursor: 'pointer', transition: 'all 0.15s' }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: labelFontSize, color: '#111827', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{att.name || `Allegato ${idx + 1}`}</div>
-                        {formatBytes(att.size) && <div style={{ fontSize: Math.max(11, labelFontSize - 1), color: '#64748b' }}>{formatBytes(att.size)}</div>}
-                        {(att as any)?.readOnly && itemReadOnlyReason(att) && <div style={{ marginTop: 3, fontSize: Math.max(10, labelFontSize - 2), color: '#64748b', fontWeight: 600 }}>{itemReadOnlyReason(att)}</div>}
+              <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', display: 'grid', alignContent: 'start', gap: props.groupSectionStyle ? Math.max(0, Number(props.groupSectionGap ?? 10) || 0) : 8, paddingRight: Math.max(0, Number(props.listPaddingRight ?? 2) || 0), gridAutoRows: 'max-content' }}>
+                {(() => {
+                  const renderRow = (att: T, idx: number) => {
+                    const active = selected?.id != null && String(selected.id) === String(att.id)
+                    const hovered = hoveredItemId != null && String(hoveredItemId) === String(att.id)
+                    const itemDisabled = itemEditDisabled(att)
+                    const rowBackground = active
+                      ? (props.recordSelectedBackground || '#eff6ff')
+                      : (hovered ? (props.recordHoverBackground || '#fff') : '#fff')
+                    return (
+                      <div
+                        key={String(att.id)}
+                        onClick={() => setSelected(att)}
+                        onMouseEnter={() => setHoveredItemId(att.id)}
+                        onMouseLeave={() => setHoveredItemId(current => (current != null && String(current) === String(att.id)) ? null : current)}
+                        style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'start', columnGap: 10, border: `1px solid ${active ? '#2563eb' : 'rgba(0,0,0,0.08)'}`, background: rowBackground, borderRadius: 10, padding: '8px 10px', cursor: 'pointer', transition: 'all 0.15s' }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: labelFontSize, color: '#111827', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{att.name || `Allegato ${idx + 1}`}</div>
+                          {formatBytes(att.size) && <div style={{ fontSize: Math.max(11, labelFontSize - 1), color: '#64748b' }}>{formatBytes(att.size)}</div>}
+                          {(att as any)?.readOnly && itemReadOnlyReason(att) && <div style={{ marginTop: 3, fontSize: Math.max(10, labelFontSize - 2), color: '#64748b', fontWeight: 600 }}>{itemReadOnlyReason(att)}</div>}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', justifyContent: 'flex-end', alignSelf: 'start', whiteSpace: 'nowrap' }}>
+                          {props.onOpen && (
+                            <button type='button' title='Apri o scarica allegato' aria-label='Apri o scarica allegato' onClick={e => { e.preventDefault(); e.stopPropagation(); void props.onOpen?.(att) }} style={buttonStyle()}>
+                              <AttachmentActionIcon name='open' />
+                            </button>
+                          )}
+                          {props.onReplace && (
+                            <button type='button' title='Sostituisci allegato' aria-label='Sostituisci allegato' disabled={itemDisabled} onClick={e => { e.preventDefault(); e.stopPropagation(); if (itemDisabled) return; replaceTargetRef.current = att; window.setTimeout(() => { try { replaceInputRef.current?.click() } catch {} }, 0) }} style={buttonStyle({ disabled: itemDisabled, disabledBackground: disabledActionBackground, disabledOpacity: disabledActionOpacity })}>
+                              <AttachmentActionIcon name='replace' />
+                            </button>
+                          )}
+                          {props.onDelete && (
+                            <button type='button' title='Elimina allegato' aria-label='Elimina allegato' disabled={itemDisabled} onClick={e => { e.preventDefault(); e.stopPropagation(); if (itemDisabled) return; void props.onDelete?.(att) }} style={buttonStyle({ danger: true, disabled: itemDisabled, disabledBackground: disabledActionBackground, disabledOpacity: disabledActionOpacity })}>
+                              <AttachmentActionIcon name='delete' />
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', justifyContent: 'flex-end', alignSelf: 'start', whiteSpace: 'nowrap' }}>
-                        {props.onOpen && (
-                          <button type='button' title='Apri o scarica allegato' aria-label='Apri o scarica allegato' onClick={e => { e.preventDefault(); e.stopPropagation(); void props.onOpen?.(att) }} style={buttonStyle()}>
-                            <AttachmentActionIcon name='open' />
-                          </button>
-                        )}
-                        {props.onReplace && (
-                          <button type='button' title='Sostituisci allegato' aria-label='Sostituisci allegato' disabled={itemDisabled} onClick={e => { e.preventDefault(); e.stopPropagation(); if (itemDisabled) return; replaceTargetRef.current = att; window.setTimeout(() => { try { replaceInputRef.current?.click() } catch {} }, 0) }} style={buttonStyle({ disabled: itemDisabled })}>
-                            <AttachmentActionIcon name='replace' />
-                          </button>
-                        )}
-                        {props.onDelete && (
-                          <button type='button' title='Elimina allegato' aria-label='Elimina allegato' disabled={itemDisabled} onClick={e => { e.preventDefault(); e.stopPropagation(); if (itemDisabled) return; void props.onDelete?.(att) }} style={buttonStyle({ danger: true, disabled: itemDisabled })}>
-                            <AttachmentActionIcon name='delete' />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )
-                  if (!showGroupTitle) return row
-                  return (
-                    <React.Fragment key={`grp-${groupTitle}-${String(att.id)}`}>
-                      <div style={{ marginTop: idx === 0 ? 0 : 6, padding: '5px 8px', borderRadius: 8, background: '#eef4fb', color: props.innerHeaderColor || '#0f4c81', fontSize: Math.max(11, labelFontSize - 1), fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.25 }}>
-                        {groupTitle}
-                      </div>
-                      {row}
-                    </React.Fragment>
-                  )
-                })}
+                    )
+                  }
+
+                  if (props.groupSectionStyle) {
+                    const groups: Array<{ title: string; entries: Array<{ att: T; idx: number }> }> = []
+                    items.forEach((att, idx) => {
+                      const title = String((att as any)?.groupTitle || '').trim()
+                      const last = groups[groups.length - 1]
+                      if (!last || last.title !== title) groups.push({ title, entries: [{ att, idx }] })
+                      else last.entries.push({ att, idx })
+                    })
+                    return groups.map((group, groupIdx) => {
+                      if (!group.title) return <React.Fragment key={`grp-empty-${groupIdx}`}>{group.entries.map(({ att, idx }) => renderRow(att, idx))}</React.Fragment>
+                      return (
+                        <section key={`grp-section-${group.title}-${groupIdx}`} style={{
+                          border: `${Number(props.groupCardBorderWidth ?? 1)}px solid ${props.groupCardBorderColor || props.headerBorderColor || '#c6d7ea'}`,
+                          borderRadius: Number(props.groupCardBorderRadius ?? borderRadius),
+                          background: props.groupCardBg || '#f8fbff',
+                          boxShadow: String(props.groupCardShadow || '').trim() || 'none',
+                          overflow: 'hidden',
+                          minWidth: 0
+                        }}>
+                          <div style={{
+                            padding: `${Number(props.groupHeaderPaddingY ?? 7)}px ${Number(props.groupHeaderPaddingX ?? 10)}px`,
+                            background: props.groupHeaderBg || '#eef4fb',
+                            color: props.groupHeaderColor || props.innerHeaderColor || '#0f4c81',
+                            fontSize: Number(props.groupHeaderFontSize ?? Math.max(11, labelFontSize - 1)),
+                            fontWeight: Number(props.groupHeaderFontWeight ?? 900) as any,
+                            textTransform: 'uppercase',
+                            letterSpacing: 0.25
+                          }}>
+                            {group.title}
+                          </div>
+                          <div style={{ padding: Number(props.groupCardBodyPadding ?? 10), display: 'grid', gap: 8 }}>
+                            {group.entries.map(({ att, idx }) => renderRow(att, idx))}
+                          </div>
+                        </section>
+                      )
+                    })
+                  }
+
+                  return items.map((att, idx) => {
+                    const groupTitle = String((att as any)?.groupTitle || '').trim()
+                    const previousGroupTitle = idx > 0 ? String((items[idx - 1] as any)?.groupTitle || '').trim() : ''
+                    const showGroupTitle = !!groupTitle && groupTitle !== previousGroupTitle
+                    const row = renderRow(att, idx)
+                    if (!showGroupTitle) return row
+                    return (
+                      <React.Fragment key={`grp-${groupTitle}-${String(att.id)}`}>
+                        <div style={{
+                          marginTop: idx === 0 ? 0 : 6,
+                          padding: `${Number(props.groupHeaderPaddingY ?? 5)}px ${Number(props.groupHeaderPaddingX ?? 8)}px`,
+                          borderRadius: 8,
+                          background: props.groupHeaderBg || '#eef4fb',
+                          color: props.groupHeaderColor || props.innerHeaderColor || '#0f4c81',
+                          fontSize: Number(props.groupHeaderFontSize ?? Math.max(11, labelFontSize - 1)),
+                          fontWeight: Number(props.groupHeaderFontWeight ?? 900) as any,
+                          textTransform: 'uppercase',
+                          letterSpacing: 0.25
+                        }}>
+                          {groupTitle}
+                        </div>
+                        {row}
+                      </React.Fragment>
+                    )
+                  })
+                })()}
               </div>
             ) : (
               <div style={{ flex: '0 0 auto', color: '#6b7280', fontSize: labelFontSize }}>{props.emptyMessage || 'Nessun allegato.'}</div>
             )}
           </div>
 
-          <div style={{ background: '#282828', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0, height: '100%' }}>
-            {showPreviewCaption && (
-              <div style={{ flex: '0 0 auto', width: '100%', boxSizing: 'border-box', padding: '7px 14px', background: '#282828', borderBottom: '1px solid rgba(255,255,255,0.12)', color: '#fff', textAlign: 'center', lineHeight: 1.2 }}>
-                <div style={{ fontSize: 12, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{previewCaption}</div>
-              </div>
-            )}
-            {rotationControlsPosition === 'top' && rotationControls}
-            <div style={{ flex: '1 1 0', minHeight: 0, width: '100%', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {!selected ? (
-                <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
-              ) : previewLoading ? (
-                <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.55)' }}>Caricamento anteprima…</div>
-              ) : previewError ? (
-                <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>{previewError}</div>
-              ) : previewUrl ? (() => {
-                if (isImageAttachment(selected)) return <img src={previewUrl} alt={selected.name || ''} style={{ display: 'block', maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', borderRadius: 6, objectFit: 'contain', transform: `rotate(${Number(effectiveRotationDeg || 0)}deg)`, transformOrigin: 'center center', transition: 'transform 0.16s ease' }}/>
-                const pdfPreview = isPdfAttachment(selected) || !!selected.previewUrl || String(previewUrl || '').toLowerCase().includes('.pdf') || /^blob:/i.test(previewUrl)
-                if (pdfPreview) {
-                  return (
-                    <div style={{ width: '100%', height: '100%', minHeight: 0, overflow: 'hidden' }}>
-                      <AnteprimaPdfViewer
-                        url={previewUrl}
-                        fileName={selected.name || 'allegato.pdf'}
-                        title={showPreviewCaption ? undefined : (selected.name || 'allegato.pdf')}
-                        subtitle={undefined}
-                        loading={false}
-                        error={null}
-                        emptyText='Anteprima PDF non disponibile.'
-                        style={{ width: '100%', height: '100%', minHeight: 0 }}
-                      />
-                    </div>
-                  )
-                }
-                return <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima non disponibile per questo tipo di file.</div>
-              })() : (
-                <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima PDF non disponibile per questo allegato. Se il file originale non è PDF o immagine, deve essere presente un PDF di anteprima associato.</div>
+          <div style={{ minHeight: 0, height: '100%', border: `${Number(props.previewPanelBorderWidth ?? 0)}px solid ${props.previewPanelBorderColor || props.headerBorderColor || '#c6d7ea'}`, borderRadius: Number(props.previewPanelBorderRadius ?? props.panelBorderRadius ?? borderRadius), boxShadow: String(props.previewPanelShadow || '').trim() || 'none', overflow: 'hidden', boxSizing: 'border-box', background: '#282828' }}>
+            <div style={{ background: '#282828', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0, height: '100%' }}>
+              {showPreviewCaption && (
+                <div style={{ flex: '0 0 auto', width: '100%', boxSizing: 'border-box', padding: '7px 14px', background: '#282828', borderBottom: '1px solid rgba(255,255,255,0.12)', color: '#fff', textAlign: 'center', lineHeight: 1.2 }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{previewCaption}</div>
+                </div>
               )}
+              {rotationControlsPosition === 'top' && rotationControls}
+              <div style={{ flex: '1 1 0', minHeight: 0, width: '100%', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {!selected ? (
+                  <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
+                ) : previewLoading ? (
+                  <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.55)' }}>Caricamento anteprima…</div>
+                ) : previewError ? (
+                  <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>{previewError}</div>
+                ) : previewUrl ? (() => {
+                  if (isImageAttachment(selected)) return <img src={previewUrl} alt={selected.name || ''} style={{ display: 'block', maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', borderRadius: 6, objectFit: 'contain', transform: `rotate(${Number(effectiveRotationDeg || 0)}deg)`, transformOrigin: 'center center', transition: 'transform 0.16s ease' }}/>
+                  const pdfPreview = isPdfAttachment(selected) || !!selected.previewUrl || String(previewUrl || '').toLowerCase().includes('.pdf') || /^blob:/i.test(previewUrl)
+                  if (pdfPreview) {
+                    return (
+                      <div style={{ width: '100%', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+                        <AnteprimaPdfViewer
+                          url={previewUrl}
+                          fileName={selected.name || 'allegato.pdf'}
+                          title={showPreviewCaption ? undefined : (selected.name || 'allegato.pdf')}
+                          subtitle={undefined}
+                          loading={false}
+                          error={null}
+                          emptyText='Anteprima PDF non disponibile.'
+                          style={{ width: '100%', height: '100%', minHeight: 0 }}
+                        />
+                      </div>
+                    )
+                  }
+                  return <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima non disponibile per questo tipo di file.</div>
+                })() : (
+                  <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima PDF non disponibile per questo allegato. Se il file originale non è PDF o immagine, deve essere presente un PDF di anteprima associato.</div>
+                )}
+              </div>
+              {rotationControlsPosition === 'bottom' && rotationControls}
             </div>
-            {rotationControlsPosition === 'bottom' && rotationControls}
           </div>
         </div>
       )}

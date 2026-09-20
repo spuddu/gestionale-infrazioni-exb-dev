@@ -34,6 +34,7 @@ export interface Config {
   maskBorderColor: string
   maskBorderWidth: number
   maskBorderRadius: number
+  infoMessageBorderRadius: number
   maskInnerPadding: number
   maskOuterOffset: number
   formLabelColor: string
@@ -127,6 +128,65 @@ export interface Config {
   formCardHeaderPaddingY: number
   formCardBodyPadding: number
 
+  // Pannello e card dei gruppi Allegati tecnici / Allegati amministrativi.
+  attachmentsPanelBg: string
+  attachmentsPanelBorderColor: string
+  attachmentsPanelBorderWidth: number
+  attachmentsPanelBorderRadius: number
+  attachmentsPanelPaddingTop: number
+  attachmentsPanelPaddingRight: number
+  attachmentsPanelPaddingBottom: number
+  attachmentsPanelPaddingLeft: number
+  attachmentsPanelShadow: string
+  attachmentsPreviewGap: number
+  attachmentsPreviewPanelBorderColor: string
+  attachmentsPreviewPanelBorderWidth: number
+  attachmentsPreviewPanelBorderRadius: number
+  attachmentsPreviewPanelShadow: string
+  attachmentsGroupGap: number
+  attachmentsCardBg: string
+  attachmentsCardBorderColor: string
+  attachmentsCardBorderWidth: number
+  attachmentsCardBorderRadius: number
+  attachmentsCardShadow: string
+  attachmentsHeaderBg: string
+  attachmentsHeaderColor: string
+  attachmentsHeaderFontSize: number
+  attachmentsHeaderFontWeight: number
+  attachmentsHeaderPaddingX: number
+  attachmentsHeaderPaddingY: number
+  attachmentsCardBodyPadding: number
+  attachmentsRecordHoverBg: string
+  attachmentsRecordSelectedBg: string
+
+  // Pannello Fascicolo / Anteprima fascicolo.
+  fascicoloPanelBorderColor: string
+  fascicoloPanelBorderWidth: number
+  fascicoloPanelBorderRadius: number
+  fascicoloSidebarPaddingTop: number
+  fascicoloSidebarPaddingRight: number
+  fascicoloSidebarPaddingBottom: number
+  fascicoloSidebarPaddingLeft: number
+  fascicoloPreviewBackgroundColor: string
+  fascicoloPreviewBorderColor: string
+  fascicoloPreviewBorderWidth: number
+  fascicoloPreviewBorderRadius: number
+  fascicoloDocsCardBg: string
+  fascicoloDocsCardBorderColor: string
+  fascicoloDocsCardBorderWidth: number
+  fascicoloDocsCardBorderRadius: number
+  fascicoloDocsCardShadow: string
+  fascicoloDocsGroupGap: number
+  fascicoloDocsHeaderBg: string
+  fascicoloDocsHeaderColor: string
+  fascicoloDocsHeaderFontSize: number
+  fascicoloDocsHeaderFontWeight: number
+  fascicoloDocsHeaderPaddingX: number
+  fascicoloDocsHeaderPaddingY: number
+  fascicoloDocsBodyPadding: number
+  fascicoloDocsTextColor: string
+  fascicoloDocsDisabledTextColor: string
+
   // Padding contenuto schede (contenitore esterno di tutte le tab).
   tabPaddingTop: number
   tabPaddingRight: number
@@ -207,6 +267,7 @@ export const defaultConfig: Config = {
   maskBorderColor: '#cbd8e6',
   maskBorderWidth: 1,
   maskBorderRadius: 10,
+  infoMessageBorderRadius: 8,
   maskInnerPadding: 12,
   maskOuterOffset: 12,
   formLabelColor: '#334155',
@@ -299,6 +360,63 @@ export const defaultConfig: Config = {
   formCardHeaderPaddingX: 10,
   formCardHeaderPaddingY: 7,
   formCardBodyPadding: 10,
+
+  attachmentsPanelBg: '#ffffff',
+  attachmentsPanelBorderColor: '#c6d7ea',
+  attachmentsPanelBorderWidth: 1,
+  attachmentsPanelBorderRadius: 8,
+  attachmentsPanelPaddingTop: 0,
+  attachmentsPanelPaddingRight: 0,
+  attachmentsPanelPaddingBottom: 0,
+  attachmentsPanelPaddingLeft: 0,
+  attachmentsPanelShadow: 'none',
+  attachmentsPreviewGap: 0,
+  attachmentsPreviewPanelBorderColor: '#c6d7ea',
+  attachmentsPreviewPanelBorderWidth: 1,
+  attachmentsPreviewPanelBorderRadius: 8,
+  attachmentsPreviewPanelShadow: 'none',
+  attachmentsGroupGap: 10,
+  attachmentsCardBg: '#f8fbff',
+  attachmentsCardBorderColor: '#c6d7ea',
+  attachmentsCardBorderWidth: 1,
+  attachmentsCardBorderRadius: 8,
+  attachmentsCardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
+  attachmentsHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
+  attachmentsHeaderColor: '#ffffff',
+  attachmentsHeaderFontSize: 14,
+  attachmentsHeaderFontWeight: 800,
+  attachmentsHeaderPaddingX: 10,
+  attachmentsHeaderPaddingY: 7,
+  attachmentsCardBodyPadding: 10,
+  attachmentsRecordHoverBg: '#f8fbff',
+  attachmentsRecordSelectedBg: '#eff6ff',
+
+  fascicoloPanelBorderColor: '#c6d7ea',
+  fascicoloPanelBorderWidth: 1,
+  fascicoloPanelBorderRadius: 8,
+  fascicoloSidebarPaddingTop: 10,
+  fascicoloSidebarPaddingRight: 10,
+  fascicoloSidebarPaddingBottom: 10,
+  fascicoloSidebarPaddingLeft: 10,
+  fascicoloPreviewBackgroundColor: '#282828',
+  fascicoloPreviewBorderColor: '#c6d7ea',
+  fascicoloPreviewBorderWidth: 1,
+  fascicoloPreviewBorderRadius: 8,
+  fascicoloDocsCardBg: '#f8fbff',
+  fascicoloDocsCardBorderColor: '#c6d7ea',
+  fascicoloDocsCardBorderWidth: 1,
+  fascicoloDocsCardBorderRadius: 8,
+  fascicoloDocsCardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
+  fascicoloDocsGroupGap: 10,
+  fascicoloDocsHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
+  fascicoloDocsHeaderColor: '#ffffff',
+  fascicoloDocsHeaderFontSize: 12,
+  fascicoloDocsHeaderFontWeight: 900,
+  fascicoloDocsHeaderPaddingX: 10,
+  fascicoloDocsHeaderPaddingY: 7,
+  fascicoloDocsBodyPadding: 10,
+  fascicoloDocsTextColor: '#334155',
+  fascicoloDocsDisabledTextColor: '#94a3b8',
 
   // Stessi valori predefiniti del gii-editing-tec.
   tabPaddingTop: 12,

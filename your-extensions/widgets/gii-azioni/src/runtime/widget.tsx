@@ -3051,6 +3051,7 @@ function ActionsPanel (props: {
 
     // Passaggi documentali amministrativi non riconducibili a una nuova istruttoria.
     if (ev === 'FASCICOLO_TRASMESSO_VERIFICA' && dest === 'RIA') return 'Nuovo fascicolo ricevuto'
+    if (ev === 'FASCICOLO_TRASMESSO_VERIFICA' && dest === 'IA') return 'Fascicolo ricevuto'
     if (ev === 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA' && dest === 'IA') return 'Fascicolo ricevuto'
     if (ev === 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA' && dest === 'RIA') return 'Atto di accertamento ricevuto'
     if (ev === 'ATTO_ACCERTAMENTO_APPROVATO' && dest === 'IA') return 'Atto di accertamento ricevuto'
@@ -3068,7 +3069,7 @@ function ActionsPanel (props: {
     if (isExplicitIntegrationReturnEvent(ev)) return `Esito dell’integrazione della pratica n. ${n} ricevuto.`
     if (isOrdinaryInstructionEvent(ev)) return `Istruttoria della pratica n. ${n} ricevuta.`
 
-    if (ev === 'FASCICOLO_TRASMESSO_VERIFICA' && dest === 'RIA') return `Fascicolo della pratica n. ${n} ricevuto.`
+    if (ev === 'FASCICOLO_TRASMESSO_VERIFICA' && (dest === 'RIA' || dest === 'IA')) return `Fascicolo della pratica n. ${n} ricevuto.`
     if (ev === 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA' && dest === 'IA') return `Fascicolo della pratica n. ${n} ricevuto.`
     if (ev === 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA' && dest === 'RIA') return `Atto di accertamento della pratica n. ${n} ricevuto.`
     if (ev === 'ATTO_ACCERTAMENTO_APPROVATO' && dest === 'IA') return `Atto di accertamento della pratica n. ${n} ricevuto.`
@@ -4655,8 +4656,10 @@ function ActionsPanel (props: {
         },
         {
           key: 'INVIA_IA',
-          label: 'Trasmetti esito integrazione',
-          desc: 'Trasmette all’Istruttore amministrativo l’esito dell’integrazione.',
+          label: isRiaTechnicalIntegrationReturnForUi ? 'Trasmetti fascicolo' : 'Trasmetti esito integrazione',
+          desc: isRiaTechnicalIntegrationReturnForUi
+            ? 'Trasmette all’Istruttore amministrativo il fascicolo aggiornato dopo l’integrazione tecnica.'
+            : 'Trasmette all’Istruttore amministrativo l’esito dell’integrazione.',
           enabled: canStartInviaIa,
           visible: role === 'RIA' && (isRientroTecnicoDaDt || riaIncomingIaIntegrationRequest),
           color: buttonColors.approva,
@@ -5549,7 +5552,13 @@ function ActionsPanel (props: {
 
       addGiiRoutingFields(upd, 'IA', 'TRASMISSIONE', { destUsername: String(iaUserRaw || '') })
 
-      await saveWithWorkflowLog(upd, 'Pratica inviata all’Istruttore amministrativo.', { eventoChiusura: 'ESITO_INTEGRAZIONE_TRASMESSO', ruoloDestinatario: 'IA', utenteDestinatario: String(iaUserRaw || resolveDestUser('IA')), noteChiusura: noteTrim, fase: role })
+      const restituzioneEvento = isRientroTecnicoDaDt
+        ? 'FASCICOLO_TRASMESSO_VERIFICA'
+        : 'ESITO_INTEGRAZIONE_TRASMESSO'
+      const restituzioneMessaggio = isRientroTecnicoDaDt
+        ? 'Fascicolo trasmesso all’Istruttore amministrativo.'
+        : 'Esito integrazione trasmesso all’Istruttore amministrativo.'
+      await saveWithWorkflowLog(upd, restituzioneMessaggio, { eventoChiusura: restituzioneEvento, ruoloDestinatario: 'IA', utenteDestinatario: String(iaUserRaw || resolveDestUser('IA')), noteChiusura: noteTrim, fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -6172,8 +6181,10 @@ function ActionsPanel (props: {
       ? `Assegnazione ${getRoleRecipientPhrase('IT')}`
       : pending === 'ASSEGNA_IA'
         ? `Assegnazione ${getRoleRecipientPhrase('IA')}`
-        : pending === 'INVIA_IA' && (isRiaTechnicalIntegrationReturnForUi || isRiaIaIntegrationResponseForUi)
-          ? 'Trasmissione esito integrazione'
+        : pending === 'INVIA_IA' && isRiaTechnicalIntegrationReturnForUi
+          ? 'Trasmissione fascicolo'
+          : pending === 'INVIA_IA' && isRiaIaIntegrationResponseForUi
+            ? 'Trasmissione esito integrazione'
           : pending === 'RESTITUISCI_IA'
             ? `Restituzione ${getRoleRecipientPhrase('IA')}`
             : (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA')
@@ -6233,7 +6244,9 @@ function ActionsPanel (props: {
     ASSEGNA_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaperturaWorkflowDaAvviare
       ? `Verrà aperto il nuovo ciclo di riapertura n. ${riaperturaAmmNumero} e l’istruttoria sarà assegnata ${getRoleRecipientPhrase('IA')} selezionato.`
       : `L’istruttoria verrà assegnata ${getRoleRecipientPhrase('IA')} selezionato.` },
-    INVIA_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'L’esito dell’integrazione verrà trasmesso all’Istruttore amministrativo assegnato.' },
+    INVIA_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: isRiaTechnicalIntegrationReturnForUi
+      ? 'Il fascicolo aggiornato verrà trasmesso all’Istruttore amministrativo assegnato.'
+      : 'L’esito dell’integrazione verrà trasmesso all’Istruttore amministrativo assegnato.' },
     RESTITUISCI_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `L’istruttoria verrà restituita ${getRoleRecipientPhrase('IA')} già assegnato.` },
     APPROVA:        { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: approvaActionDesc },
     INTEGRAZIONE:   { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: integrazioneActionDesc },
@@ -6333,11 +6346,14 @@ function ActionsPanel (props: {
   const workflowOperationalDesc = hideWorkflowOperationalDesc ? '' : actionMenuTheme.desc
   const selectedWorkflowMenuKey = selectedWorkflowMenuItem?.key || ''
   const isWorkflowRimandoPending = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA'
-  const isIntegrationOutcomeTransmissionPending = isIntegrationResponseForUi && (pending === 'APPROVA' || pending === 'INVIA_IA')
+  const isRiaTechnicalFascicoloTransmissionPending = pending === 'INVIA_IA' && isRiaTechnicalIntegrationReturnForUi
+  const isIntegrationOutcomeTransmissionPending = !isRiaTechnicalFascicoloTransmissionPending && isIntegrationResponseForUi && (pending === 'APPROVA' || pending === 'INVIA_IA')
   const isOrdinaryItTransmissionPending = role === 'IT' && pending === 'APPROVA' && !isIntegrationOutcomeTransmissionPending
-  const isAttestazioneConformitaPending = (pending === 'APPROVA' || pending === 'INVIA_IA') && !isIntegrationOutcomeTransmissionPending && !isOrdinaryItTransmissionPending
+  const isAttestazioneConformitaPending = (pending === 'APPROVA' || pending === 'INVIA_IA') && !isRiaTechnicalFascicoloTransmissionPending && !isIntegrationOutcomeTransmissionPending && !isOrdinaryItTransmissionPending
   const workflowNoteLabel = isAdministrativeRiaReturn
     ? 'Esito della verifica'
+    : isRiaTechnicalFascicoloTransmissionPending
+      ? 'Note'
     : (isIntegrationOutcomeTransmissionPending
         ? 'Esito integrazione'
         : isOrdinaryItTransmissionPending
@@ -6349,6 +6365,8 @@ function ActionsPanel (props: {
   const workflowNoteTextAreaRequired = noteIsRequired
   const workflowNotePlaceholder = isAdministrativeRiaReturn
     ? 'Indicare le modifiche, integrazioni o rettifiche richieste…'
+    : isRiaTechnicalFascicoloTransmissionPending
+      ? 'Inserire eventuali annotazioni sulla trasmissione del fascicolo…'
     : isIntegrationOutcomeTransmissionPending
       ? 'Inserire eventuali annotazioni sull’esito dell’integrazione…'
       : isOrdinaryItTransmissionPending

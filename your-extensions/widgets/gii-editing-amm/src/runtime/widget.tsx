@@ -11,7 +11,7 @@ import GiiAnteprimaPanel from '../../../_shared/gii-anteprime/anteprima-panel'
 import { buildFascicoloItems, type FascicoloPdfItem } from '../../../_shared/gii-anteprime/fascicolo-builder'
 import { FASCICOLO_MAP_DEFAULTS, DEFAULT_PRINT_SERVICE_URL } from '../../../_shared/gii-anteprime/fascicolo-map-defaults'
 import { computeReqPoint } from '../../../_shared/gii-anteprime/req-point'
-import GiiAttachmentViewer, { GII_ATTACHMENT_KEYWORDS, getGiiAttachmentKind, filterGiiAttachmentsForAdministrativeFascicolo, isGiiApprovedBozzaReferenceAttachment, isGiiBozzaDeterminazionePdfAttachment, isGiiLegacyBozzaDeterminazioneWordAttachment, isGiiPropostaContestazionePdfAttachment, isGiiAttoContestazionePdfAttachment, isGiiProtocolloFascicoloManifestAttachment, isGiiProtocolloAttoManifestAttachment, isGiiProtocolloFascicoloPdfAttachment, giiAttachmentKeywordValue, pickLatestGiiAttachment } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
+import GiiAttachmentViewer, { GII_ALLOWED_ATTACHMENT_UPLOAD_HINT, GII_ATTACHMENT_KEYWORDS, getGiiAttachmentKind, filterGiiAttachmentsForAdministrativeFascicolo, isGiiApprovedBozzaReferenceAttachment, isGiiBozzaDeterminazionePdfAttachment, isGiiLegacyBozzaDeterminazioneWordAttachment, isGiiPropostaContestazionePdfAttachment, isGiiAttoContestazionePdfAttachment, isGiiProtocolloFascicoloManifestAttachment, isGiiProtocolloAttoManifestAttachment, isGiiProtocolloFascicoloPdfAttachment, giiAttachmentKeywordValue, pickLatestGiiAttachment } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 import type { IMConfig, SummaryFieldConfig } from '../config'
 import { defaultConfig } from '../config'
 import { createPortal } from 'react-dom'
@@ -1947,7 +1947,7 @@ async function loadCurrentRiaIntegrationCycle (parentGlobalIdRaw: any, iaOutcome
     if (!fl?.queryFeatures) return { ...EMPTY_RIA_INTEGRATION_CYCLE }
     const q = fl.createQuery ? fl.createQuery() : {}
     q.where = `(${parentGlobalIdWhereForLog(parentGlobalId)}) AND stato_record = 'CHIUSO'`
-    q.outFields = ['evento_chiusura', 'ruolo_competente', 'ruolo_destinatario', 'utente_operatore', 'dt_chiusura', 'note_chiusura', 'campi_modificati', 'valori_dopo_json']
+    q.outFields = ['evento_chiusura', 'ruolo_competente', 'ruolo_destinatario', 'utente_operatore', 'dt_apertura', 'dt_chiusura', 'note_chiusura', 'campi_modificati', 'valori_dopo_json']
     q.returnGeometry = false
     q.num = 2000
     const oidField = String(fl.objectIdField || 'OBJECTID')
@@ -1955,9 +1955,11 @@ async function loadCurrentRiaIntegrationCycle (parentGlobalIdRaw: any, iaOutcome
     const res = await fl.queryFeatures(q)
     const rows = (res?.features || []).map((feature: any) => feature?.attributes || {}).filter(Boolean)
     const iaOutcomeAtMs = workflowTimestamp(iaOutcomeAtRaw)
-    // I log di un medesimo gesto possono differire di pochi millisecondi dal
-    // timestamp salvato sulla pratica. La tolleranza evita di perdere un rimando
-    // registrato contestualmente all'esito IA, senza riaprire cicli precedenti.
+    // Finché l'esito IA è ancora valorizzato lo usiamo solo come limite per
+    // individuare una richiesta ancora in attesa. Dopo il rientro tecnico RIA -> IA
+    // quei campi vengono azzerati per aprire il nuovo lavoro dell'IA: il ciclo
+    // concluso va quindi ricostruito dalla coppia richiesta/ritorno presente nel LOG,
+    // senza ripescare rimandi più vecchi della stessa pratica.
     const cycleFloorMs = iaOutcomeAtMs > 0 ? iaOutcomeAtMs - 2000 : 0
     const requestEvents = new Set([
       'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE',
@@ -1965,38 +1967,56 @@ async function loadCurrentRiaIntegrationCycle (parentGlobalIdRaw: any, iaOutcome
       'FASCICOLO_RIMANDATO_INTEGRAZIONE',
       'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE'
     ])
+    const responseEvents = new Set([
+      'ESITO_INTEGRAZIONE_TRASMESSO',
+      'FASCICOLO_TRASMESSO_VERIFICA'
+    ])
+
+    // Il rientro mostrato all'IA è sempre l'ultimo RIA -> IA pertinente. Il ritorno
+    // di un'integrazione tecnica richiesta dal RIA è FASCICOLO_TRASMESSO_VERIFICA;
+    // ESITO_INTEGRAZIONE_TRASMESSO resta invece il ritorno a seguito di una richiesta
+    // effettivamente partita dall'IA.
     let responseIndex = -1
-    for (let index = 0; index < rows.length; index++) {
+    for (let index = rows.length - 1; index >= 0; index--) {
       const attrs = rows[index]
       const event = String(attrs?.evento_chiusura || '').trim().toUpperCase()
       const role = String(attrs?.ruolo_competente || '').trim().toUpperCase()
       const destination = String(attrs?.ruolo_destinatario || '').trim().toUpperCase()
-      const rowAtMs = workflowTimestamp(attrs?.dt_chiusura)
-      if (
-        event === 'ESITO_INTEGRAZIONE_TRASMESSO' &&
-        role === 'RIA' &&
-        destination === 'IA' &&
-        (cycleFloorMs <= 0 || rowAtMs <= 0 || rowAtMs >= cycleFloorMs)
-      ) {
+      if (responseEvents.has(event) && role === 'RIA' && destination === 'IA') {
         responseIndex = index
+        break
       }
     }
 
-    // Il ciclo visualizzato all'IA nasce dal primo rimando successivo al suo
-    // ultimo esito. In questo modo un precedente IA -> RIA (per esempio alle
-    // 12:29) non viene confuso con il rimando disposto dal RIA dopo il visto IA
-    // (per esempio alle 12:33). Eventuali successivi passaggi RIA -> RIT -> DT
-    // appartengono allo stesso ciclo e non ne sostituiscono l'origine.
     let requestIndex = -1
-    const requestSearchEnd = responseIndex >= 0 ? responseIndex : rows.length
-    for (let index = 0; index < requestSearchEnd; index++) {
-      const attrs = rows[index]
-      const event = String(attrs?.evento_chiusura || '').trim().toUpperCase()
-      const rowAtMs = workflowTimestamp(attrs?.dt_chiusura)
-      if (
-        requestEvents.has(event) &&
-        (cycleFloorMs <= 0 || rowAtMs <= 0 || rowAtMs >= cycleFloorMs)
-      ) {
+    if (responseIndex >= 0) {
+      const responseEvent = String(rows[responseIndex]?.evento_chiusura || '').trim().toUpperCase()
+      // Si risale dal rientro alla richiesta che lo ha realmente generato:
+      // - FASCICOLO_TRASMESSO_VERIFICA => richiesta tecnica RIA -> RIT;
+      // - ESITO_INTEGRAZIONE_TRASMESSO => richiesta IA -> RIA.
+      // Cercare all'indietro evita di associare il rientro a un vecchio rimando CS/RIT.
+      for (let index = responseIndex - 1; index >= 0; index--) {
+        const attrs = rows[index]
+        const event = String(attrs?.evento_chiusura || '').trim().toUpperCase()
+        if (!requestEvents.has(event)) continue
+        const role = String(attrs?.ruolo_competente || '').trim().toUpperCase()
+        const destination = String(attrs?.ruolo_destinatario || '').trim().toUpperCase()
+        const matchesResponse = responseEvent === 'FASCICOLO_TRASMESSO_VERIFICA'
+          ? role === 'RIA' && destination === 'RIT'
+          : role === 'IA' && destination === 'RIA'
+        if (!matchesResponse) continue
+        requestIndex = index
+        break
+      }
+    } else {
+      // Nessun rientro ancora disponibile: manteniamo il comportamento della
+      // richiesta corrente, limitandolo all'ultimo esito IA quando presente.
+      for (let index = rows.length - 1; index >= 0; index--) {
+        const attrs = rows[index]
+        const event = String(attrs?.evento_chiusura || '').trim().toUpperCase()
+        const rowAtMs = workflowTimestamp(attrs?.dt_chiusura)
+        if (!requestEvents.has(event)) continue
+        if (cycleFloorMs > 0 && rowAtMs > 0 && rowAtMs < cycleFloorMs) break
         requestIndex = index
         break
       }
@@ -2012,7 +2032,14 @@ async function loadCurrentRiaIntegrationCycle (parentGlobalIdRaw: any, iaOutcome
     const endIndex = responseIndex >= 0 ? responseIndex : rows.length - 1
     const modifiedFields = new Set<string>()
     const documentsByKey = new Map<string, RiaIntegrationDocumentInfo>()
+    const auditFloorMs = requestAtMs > 0 ? requestAtMs - 2000 : 0
     rows.slice(requestIndex + 1, endIndex + 1).forEach((attrs: any) => {
+      // campi_modificati riepiloga l'intero ciclo del singolo ruolo. Un ciclo
+      // aperto prima della richiesta può quindi contenere variazioni vecchie pur
+      // chiudendosi dopo. Per questo rientro consideriamo solo cicli realmente
+      // aperti dopo l'avvio della specifica integrazione.
+      const openedAtMs = workflowTimestamp(attrs?.dt_apertura)
+      if (auditFloorMs > 0 && (openedAtMs <= 0 || openedAtMs < auditFloorMs)) return
       String(attrs?.campi_modificati || '')
         .split(/[;,|\n]+/g)
         .map(value => value.trim())
@@ -3603,6 +3630,7 @@ const ADMIN_STYLE_DEFAULTS: Record<string, any> = {
   maskBorderColor: '#cbd8e6',
   maskBorderWidth: 1,
   maskBorderRadius: 10,
+  infoMessageBorderRadius: 8,
   maskInnerPadding: 12,
   formLabelColor: '#334155',
   formLabelFontSize: 15,
@@ -3696,6 +3724,47 @@ const ADMIN_STYLE_DEFAULTS: Record<string, any> = {
   formCardHeaderPaddingX: 10,
   formCardHeaderPaddingY: 7,
   formCardBodyPadding: 10,
+  attachmentsPanelBg: '#ffffff',
+  attachmentsPanelBorderColor: '#c6d7ea',
+  attachmentsPanelBorderWidth: 1,
+  attachmentsPanelBorderRadius: 8,
+  attachmentsPanelPaddingTop: 0,
+  attachmentsPanelPaddingRight: 0,
+  attachmentsPanelPaddingBottom: 0,
+  attachmentsPanelPaddingLeft: 0,
+  attachmentsPanelShadow: 'none',
+  attachmentsPreviewPanelBorderColor: '#c6d7ea',
+  attachmentsPreviewPanelBorderWidth: 1,
+  attachmentsPreviewPanelBorderRadius: 8,
+  attachmentsPreviewPanelShadow: 'none',
+  attachmentsGroupGap: 10,
+  attachmentsCardBg: '#f8fbff',
+  attachmentsCardBorderColor: '#c6d7ea',
+  attachmentsCardBorderWidth: 1,
+  attachmentsCardBorderRadius: 8,
+  attachmentsCardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
+  attachmentsHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
+  attachmentsHeaderColor: '#ffffff',
+  attachmentsHeaderFontSize: 14,
+  attachmentsHeaderFontWeight: 800,
+  attachmentsHeaderPaddingX: 10,
+  attachmentsHeaderPaddingY: 7,
+  attachmentsCardBodyPadding: 10,
+  fascicoloDocsCardBg: '#f8fbff',
+  fascicoloDocsCardBorderColor: '#c6d7ea',
+  fascicoloDocsCardBorderWidth: 1,
+  fascicoloDocsCardBorderRadius: 8,
+  fascicoloDocsCardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
+  fascicoloDocsGroupGap: 10,
+  fascicoloDocsHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
+  fascicoloDocsHeaderColor: '#ffffff',
+  fascicoloDocsHeaderFontSize: 12,
+  fascicoloDocsHeaderFontWeight: 900,
+  fascicoloDocsHeaderPaddingX: 10,
+  fascicoloDocsHeaderPaddingY: 7,
+  fascicoloDocsBodyPadding: 10,
+  fascicoloDocsTextColor: '#334155',
+  fascicoloDocsDisabledTextColor: '#94a3b8',
   actionBarBg: '#ffffff',
   actionBarBorderColor: '#e5e7eb',
   actionBarBorderWidth: 1,
@@ -3876,7 +3945,7 @@ function bozzaIconButtonStyle (opts?: { danger?: boolean, disabled?: boolean }):
     boxSizing: 'border-box',
     borderRadius: 8,
     border: `2px solid ${disabled ? '#e5e7eb' : (danger ? 'rgba(185,28,28,0.72)' : '#0d3b66')}`,
-    background: disabled ? '#e5e7eb' : '#fff',
+    background: '#fff',
     color: disabled ? '#9ca3af' : (danger ? '#b91c1c' : '#0d3b66'),
     cursor: disabled ? 'not-allowed' : 'pointer',
     display: 'inline-flex',
@@ -3915,7 +3984,7 @@ function bozzaActionButtonStyle (opts?: { disabled?: boolean }): React.CSSProper
     boxSizing: 'border-box',
     borderRadius: 8,
     border: `2px solid ${disabled ? '#e5e7eb' : '#0d3b66'}`,
-    background: disabled ? '#e5e7eb' : '#fff',
+    background: '#fff',
     color: disabled ? '#9ca3af' : '#0d3b66',
     cursor: disabled ? 'not-allowed' : 'pointer',
     display: 'inline-flex',
@@ -5977,7 +6046,7 @@ function AdministrativeIntegrationCycleCards (props: { cycle: RiaIntegrationCycl
           ? 'Documenti integrati'
           : hasResponseAnnotations
             ? 'Annotazioni'
-            : 'Nessuna integrazione registrata'
+            : 'Nessuna modifica registrata'
   return (
     <div>
       <div style={{ color: st.formInnerHeaderColor || '#0f4c81', fontWeight: 900, fontSize: adminInnerHeaderFontSize(st), textTransform: 'uppercase', letterSpacing: 0.25, marginBottom: 10 }}>
@@ -12066,7 +12135,32 @@ function FascicoloAmmPreviewSection (props: {
   sidebarBackgroundColor?: string
   sidebarBorderColor?: string
   sidebarBorderWidth?: number
+  sidebarPaddingTop?: number
+  sidebarPaddingRight?: number
+  sidebarPaddingBottom?: number
+  sidebarPaddingLeft?: number
   borderRadius?: number
+  panelBorderColor?: string
+  panelBorderWidth?: number
+  panelBorderRadius?: number
+  previewBorderColor?: string
+  previewBorderWidth?: number
+  previewBorderRadius?: number
+  docsCardBg?: string
+  docsCardBorderColor?: string
+  docsCardBorderWidth?: number
+  docsCardBorderRadius?: number
+  docsCardShadow?: string
+  docsGroupGap?: number
+  docsHeaderBg?: string
+  docsHeaderColor?: string
+  docsHeaderFontSize?: number
+  docsHeaderFontWeight?: number
+  docsHeaderPaddingX?: number
+  docsHeaderPaddingY?: number
+  docsBodyPadding?: number
+  docsTextColor?: string
+  docsDisabledTextColor?: string
 }) {
   const oid = props.oid != null && Number.isFinite(Number(props.oid)) ? Number(props.oid) : null
   const layerUrl = normalizeEditLayerUrl(props.layerUrl || getDataSourceUrl(props.ds))
@@ -12091,8 +12185,12 @@ function FascicoloAmmPreviewSection (props: {
     return () => { cancelled = true }
   }, [props.hasSelection, oid, props.ds, props.idFieldName, layerUrl, props.data])
 
+  const panelBorderWidth = Math.max(0, Number(props.panelBorderWidth ?? 1) || 0)
+  const panelBorderRadius = Math.max(0, Number(props.panelBorderRadius ?? props.borderRadius ?? 8) || 0)
+  const effectivePanelBorderRadius = panelBorderWidth > 0 ? panelBorderRadius : 0
+
   return (
-    <div style={{ width: '100%', height: '100%', minHeight: 0, borderRadius: Number(props.borderRadius ?? 8), overflow: 'hidden', display: 'flex', flexDirection: 'column', background: props.viewerBackgroundColor || '#282828' }}>
+    <div style={{ width: '100%', height: '100%', minHeight: 0, boxSizing: 'border-box', border: panelBorderWidth > 0 ? `${panelBorderWidth}px solid ${props.panelBorderColor || '#c6d7ea'}` : 'none', borderRadius: effectivePanelBorderRadius, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: panelBorderWidth > 0 ? (props.viewerBackgroundColor || '#282828') : 'transparent' }}>
       <GiiAnteprimaPanel
         data={props.hasSelection ? (props.data || {}) : {}}
         mode='edit'
@@ -12112,7 +12210,30 @@ function FascicoloAmmPreviewSection (props: {
         pdfToolbarBackgroundColor={props.pdfToolbarBackgroundColor}
         sidebarBackgroundColor={props.sidebarBackgroundColor}
         sidebarBorderColor={props.sidebarBorderColor}
-        sidebarBorderWidth={props.sidebarBorderWidth}
+        sidebarBorderWidth={0}
+        sidebarBorderMode='left'
+        sidebarPaddingTop={props.sidebarPaddingTop}
+        sidebarPaddingRight={props.sidebarPaddingRight}
+        sidebarPaddingBottom={props.sidebarPaddingBottom}
+        sidebarPaddingLeft={props.sidebarPaddingLeft}
+        previewBorderColor={props.previewBorderColor}
+        previewBorderWidth={props.previewBorderWidth}
+        previewBorderRadius={props.previewBorderRadius}
+        docsCardBg={props.docsCardBg}
+        docsCardBorderColor={props.docsCardBorderColor}
+        docsCardBorderWidth={props.docsCardBorderWidth}
+        docsCardBorderRadius={props.docsCardBorderRadius}
+        docsCardShadow={props.docsCardShadow}
+        docsGroupGap={props.docsGroupGap}
+        docsHeaderBg={props.docsHeaderBg}
+        docsHeaderColor={props.docsHeaderColor}
+        docsHeaderFontSize={props.docsHeaderFontSize}
+        docsHeaderFontWeight={props.docsHeaderFontWeight}
+        docsHeaderPaddingX={props.docsHeaderPaddingX}
+        docsHeaderPaddingY={props.docsHeaderPaddingY}
+        docsBodyPadding={props.docsBodyPadding}
+        docsTextColor={props.docsTextColor}
+        docsDisabledTextColor={props.docsDisabledTextColor}
       />
 
     </div>
@@ -12157,7 +12278,9 @@ function AllegaiaSection (props: {
   onRotateRight: () => void,
   onRotationConfirmed: () => void,
   practiceContextRevision: number,
-  refreshKey?: number
+  refreshKey?: number,
+  uploadInputRef?: React.RefObject<HTMLInputElement>,
+  onBusyChange?: (busy: boolean) => void
 }) {
   const st = useAdminStyle()
   const oid = props.oid != null && Number.isFinite(Number(props.oid)) ? Number(props.oid) : null
@@ -12169,6 +12292,12 @@ function AllegaiaSection (props: {
   const [inputKey, setInputKey] = React.useState(0)
   const [deleteTarget, setDeleteTarget] = React.useState<AmmAttachmentInfo | null>(null)
   const loadSeqRef = React.useRef(0)
+
+  React.useEffect(() => {
+    props.onBusyChange?.(busy)
+  }, [busy, props.onBusyChange])
+
+  React.useEffect(() => () => { props.onBusyChange?.(false) }, [props.onBusyChange])
 
   React.useEffect(() => {
     loadSeqRef.current += 1
@@ -12390,8 +12519,10 @@ function AllegaiaSection (props: {
       busy={busy}
       error={error}
       canEdit={props.canEdit}
-      uploadLabel='Carica allegato'
+      uploadLabel='Aggiungi allegato'
       uploadInputKey={inputKey}
+      uploadInputRef={props.uploadInputRef}
+      showUploadControls={false}
       onUpload={upload}
       selectedItemId={props.selectedAttachmentId}
       onSelectedItemChange={props.onSelectedAttachmentChange as any}
@@ -12416,6 +12547,42 @@ function AllegaiaSection (props: {
       headerBorderColor={st.formCardBorderColor || '#c5d9f1'}
       borderRadius={Number(st.formCardBorderRadius ?? 10)}
       innerHeaderColor={st.formInnerHeaderColor || '#0f4c81'}
+      groupHeaderBg={st.attachmentsHeaderBg || 'linear-gradient(90deg, #0d3b66, #155e9d)'}
+      groupHeaderColor={st.attachmentsHeaderColor || '#fff'}
+      groupHeaderPaddingX={Number(st.attachmentsHeaderPaddingX ?? 10)}
+      groupHeaderPaddingY={Number(st.attachmentsHeaderPaddingY ?? 7)}
+      groupHeaderFontSize={Number(st.attachmentsHeaderFontSize ?? 14)}
+      groupHeaderFontWeight={Number(st.attachmentsHeaderFontWeight ?? 800)}
+      panelBackground={st.attachmentsPanelBg || '#ffffff'}
+      panelBorderColor={st.attachmentsPanelBorderColor || '#c6d7ea'}
+      panelBorderWidth={Number(st.attachmentsPanelBorderWidth ?? 1)}
+      panelBorderRadius={Number(st.attachmentsPanelBorderRadius ?? 8)}
+      panelPaddingTop={Number(st.attachmentsPanelPaddingTop ?? 0)}
+      panelPaddingTopAffectsPreview={false}
+      panelPaddingRight={Number(st.attachmentsPanelPaddingRight ?? 0)}
+      panelPaddingBottom={Number(st.attachmentsPanelPaddingBottom ?? 0)}
+      panelPaddingLeft={Number(st.attachmentsPanelPaddingLeft ?? 0)}
+      panelShadow={String(st.attachmentsPanelShadow ?? '').trim() || 'none'}
+      panelContentInset={0}
+      listPaddingRight={0}
+      previewColumnGap={Number(st.attachmentsPreviewGap ?? 0)}
+      previewColumnWidth='50%'
+      previewPanelBorderColor={st.attachmentsPreviewPanelBorderColor || '#c6d7ea'}
+      previewPanelBorderWidth={Number(st.attachmentsPreviewPanelBorderWidth ?? 1)}
+      previewPanelBorderRadius={Number(st.attachmentsPreviewPanelBorderRadius ?? 8)}
+      previewPanelShadow={String(st.attachmentsPreviewPanelShadow ?? '').trim() || 'none'}
+      groupSectionStyle
+      groupSectionGap={Number(st.attachmentsGroupGap ?? 10)}
+      groupCardBg={st.attachmentsCardBg || '#f8fbff'}
+      groupCardBorderColor={st.attachmentsCardBorderColor || '#c6d7ea'}
+      groupCardBorderWidth={Number(st.attachmentsCardBorderWidth ?? 1)}
+      groupCardBorderRadius={Number(st.attachmentsCardBorderRadius ?? 8)}
+      groupCardBodyPadding={Number(st.attachmentsCardBodyPadding ?? 10)}
+      groupCardShadow={String(st.attachmentsCardShadow ?? '').trim() || ADMIN_STYLE_DEFAULTS.attachmentsCardShadow}
+      recordHoverBackground={st.attachmentsRecordHoverBg || '#f8fbff'}
+      recordSelectedBackground={st.attachmentsRecordSelectedBg || '#eff6ff'}
+      disabledActionBackground='#fff'
+      disabledActionOpacity={1}
     />
     </>
   )}
@@ -12909,6 +13076,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [confirmTransmitReopensCycle, setConfirmTransmitReopensCycle] = React.useState(false)
   const [ammPreviewAttachment, setAmmPreviewAttachment] = React.useState<{ id: number; name?: string; contentType?: string; readOnly?: boolean } | null>(null)
   const [ammPreviewRotationDeg, setAmmPreviewRotationDeg] = React.useState(0)
+  const ammAttachmentToolbarUploadInputRef = React.useRef<HTMLInputElement>(null)
+  const [ammAttachmentToolbarBusy, setAmmAttachmentToolbarBusy] = React.useState(false)
   const [pendingAmmAttachmentRotations, setPendingAmmAttachmentRotations] = React.useState<Record<number, number>>({})
   const [activeAmmSection, setActiveAmmSection] = React.useState<AmmSectionKey>(() => getRequestedAmmSection() || AMM_DEFAULT_SECTION)
   const [persistentAnteprimaOid, setPersistentAnteprimaOid] = React.useState<number | null>(null)
@@ -15912,6 +16081,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     MozAppearance: 'none',
     cursor: saving ? 'not-allowed' : 'pointer'
   }
+  // I pulsanti grafici della toolbar usano come lato l'altezza reale del pulsante Salva.
+  const ammToolbarIconBtnBase: React.CSSProperties = {
+    ...editBtnBase,
+    width: 'var(--gii-amm-toolbar-square-button-size)',
+    height: 'var(--gii-amm-toolbar-square-button-size)',
+    padding: 0,
+    position: 'relative',
+    flex: '0 0 var(--gii-amm-toolbar-square-button-size)'
+  }
   const saveDisabled = saving || !isDirty || !canEdit
   const cancelDisabled = saving || !isDirty
   const closeDisabled = saving || isDirty
@@ -15929,6 +16107,39 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const pulseSaveDetermination = iterToolbarGuideActive && currentRole === 'IA' && !iaVistoGuidePending && !saveDisabled && determinationIsDirty && determinationToolbarComplete && (toolbarDeterminationState === TRASMESSA_FIRMA_DA_STATE || toolbarDeterminationState === 'ADOTTATA')
   const pulseSave = pulseSaveDetermination || pulseSaveProtocol
   const pulseSaveTitle = pulseSaveDetermination ? 'Azione successiva: salva numero e data della determina' : 'Azione successiva: salva numero e data di protocollo'
+
+  const ammToolbarRowRef = React.useRef<HTMLDivElement | null>(null)
+  const ammToolbarSaveButtonRef = React.useRef<HTMLButtonElement | null>(null)
+
+  React.useLayoutEffect((): (() => void) | void => {
+    const rowEl = ammToolbarRowRef.current
+    const saveEl = ammToolbarSaveButtonRef.current
+    if (!rowEl || !saveEl) return
+
+    const syncSquareButtonSize = (): void => {
+      try {
+        const h = saveEl.getBoundingClientRect().height
+        if (Number.isFinite(h) && h > 0) {
+          rowEl.style.setProperty('--gii-amm-toolbar-square-button-size', `${h}px`)
+          rowEl.parentElement?.style.setProperty('--gii-amm-toolbar-reference-button-size', `${h}px`)
+        }
+      } catch {}
+    }
+
+    syncSquareButtonSize()
+    let ro: ResizeObserver | null = null
+    try {
+      if (typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(syncSquareButtonSize)
+        ro.observe(saveEl)
+      }
+    } catch { ro = null }
+    window.addEventListener('resize', syncSquareButtonSize, true)
+    return (): void => {
+      try { ro?.disconnect() } catch {}
+      window.removeEventListener('resize', syncSquareButtonSize, true)
+    }
+  }, [])
 
   const readOnlyInfoButton = readOnlyBannerMessage ? (
     <button
@@ -16088,7 +16299,48 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           borderBottom: `1px solid ${cfg.dividerColor || '#cbd8e6'}`,
           transition: 'padding 280ms ease'
         }}>
-          <div style={{
+          {hasSelection && readOnlyBannerMessage && readOnlyBannerMounted && (
+            <div style={{
+              position: 'absolute',
+              // Il banner resta fermo verticalmente: l'apertura crea spazio spostando solo la riga toolbar.
+              // In questo modo il bordo superiore/radius non viene mai trascinato fuori dalla maschera.
+              top: 'calc((var(--gii-amm-toolbar-reference-button-size, 36px) - 36px) / 2)',
+              transform: 'none',
+              left: 0,
+              right: readOnlyBannerOpen ? 0 : 'auto',
+              width: readOnlyBannerOpen ? 'auto' : 36,
+              height: 36,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: readOnlyBannerOpen ? '6px 10px 6px 6px' : '6px',
+              border: '1px solid #fb923c',
+              borderRadius: Number(adminStyle.infoMessageBorderRadius ?? 8),
+              background: '#fff7ed',
+              color: '#b42318',
+              boxSizing: 'border-box',
+              overflow: 'hidden',
+              zIndex: 2,
+              transition: 'width 280ms ease, background-color 220ms ease, border-color 220ms ease'
+            }}>
+              {readOnlyInfoButton}
+              <span style={{
+                fontSize: Math.max(12, adminLabelFontSize(adminStyle)),
+                fontWeight: 700,
+                lineHeight: 1.35,
+                whiteSpace: 'nowrap',
+                opacity: readOnlyBannerOpen ? 1 : 0,
+                transform: readOnlyBannerOpen ? 'translateX(0)' : 'translateX(-8px)',
+                maxWidth: readOnlyBannerOpen ? 'calc(100% - 40px)' : 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                transition: 'opacity 220ms ease, transform 220ms ease'
+              }}>
+                {readOnlyBannerMessage}
+              </span>
+            </div>
+          )}
+          <div ref={ammToolbarRowRef} style={{
             position: 'relative',
             display: 'flex',
             alignItems: 'center',
@@ -16097,71 +16349,63 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             gap: 8,
             minHeight: hasSelection && readOnlyBannerMessage && readOnlyBannerMounted ? 36 : undefined
           }}>
-            {hasSelection && readOnlyBannerMessage && readOnlyBannerMounted && (
-              <div style={{
-                position: 'absolute',
-                // Da chiuso: quadrato 36x36 centrato sulla riga reale (qualunque sia la sua altezza).
-                // Da aperto: stessa posizione di prima (zona padding-top:48 sopra la riga), spostandolo
-                // sopra il bordo superiore della riga della stessa misura del padding-top aggiunto al toolbar.
-                top: readOnlyBannerOpen ? -48 : '50%',
-                transform: readOnlyBannerOpen ? 'none' : 'translateY(-50%)',
-                left: 0,
-                right: readOnlyBannerOpen ? 0 : 'auto',
-                width: readOnlyBannerOpen ? 'auto' : 36,
-                height: 36,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: readOnlyBannerOpen ? '6px 10px 6px 6px' : '6px',
-                border: '1px solid #fb923c',
-                borderRadius: readOnlyBannerOpen ? adminStyle.maskBorderRadius : 8,
-                background: '#fff7ed',
-                color: '#b42318',
-                boxSizing: 'border-box',
-                overflow: 'hidden',
-                zIndex: 2,
-                transition: 'top 280ms ease, transform 280ms ease, width 280ms ease, background-color 220ms ease, border-color 220ms ease'
-              }}>
-                {readOnlyInfoButton}
-                <span style={{
-                  fontSize: Math.max(12, adminLabelFontSize(adminStyle)),
-                  fontWeight: 700,
-                  lineHeight: 1.35,
-                  whiteSpace: 'nowrap',
-                  opacity: readOnlyBannerOpen ? 1 : 0,
-                  transform: readOnlyBannerOpen ? 'translateX(0)' : 'translateX(-8px)',
-                  maxWidth: readOnlyBannerOpen ? 'calc(100% - 40px)' : 0,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  transition: 'opacity 220ms ease, transform 220ms ease'
-                }}>
-                  {readOnlyBannerMessage}
-                </span>
-              </div>
-            )}
             <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, paddingLeft: hasSelection && readOnlyBannerMessage && readOnlyBannerMounted ? 44 : 0, transition: 'padding-left 220ms ease' }}>
               <div style={{ fontSize: Number(adminStyle.titleFontSize || 18), fontWeight: Number(cfg.titleFontWeight || 700) as any, color: '#111827', lineHeight: 1.25 }}>
                 {hasSelection ? (<>{headerTitleParts.prefix}{headerTitleParts.reportCode ? <span style={{ color: '#2563eb', fontWeight: Number(cfg.titleFontWeight || 700) as any }}>{headerTitleParts.reportCode}</span> : null}</>) : 'Istruttoria amministrativa'}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              {activeAmmSection === 'allegati' && hasSelection && oid != null && Number.isFinite(Number(oid)) && (
+                <>
+                  <span style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    {GII_ALLOWED_ATTACHMENT_UPLOAD_HINT}
+                  </span>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      if (!canEdit || saving || ammAttachmentToolbarBusy) return
+                      ammAttachmentToolbarUploadInputRef.current?.click()
+                    }}
+                    disabled={!canEdit || saving || ammAttachmentToolbarBusy}
+                    title='Aggiungi allegato'
+                    aria-label='Aggiungi allegato'
+                    style={{
+                      ...ammToolbarIconBtnBase,
+                      marginRight: 12,
+                      border: (!canEdit || saving || ammAttachmentToolbarBusy) ? '1px solid #e5e7eb' : '1px solid #0d3b66',
+                      boxShadow: `inset 0 0 0 1px ${(!canEdit || saving || ammAttachmentToolbarBusy) ? '#e5e7eb' : '#0d3b66'}`,
+                      background: '#fff',
+                      color: (!canEdit || saving || ammAttachmentToolbarBusy) ? '#9ca3af' : '#0d3b66',
+                      cursor: (!canEdit || saving || ammAttachmentToolbarBusy) ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    <span aria-hidden='true' style={{ visibility: 'hidden', lineHeight: 'normal' }}>M</span>
+                    <svg width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false' style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}>
+                      <path d='M21 13.1v5.9c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2v-4'/>
+                      <path d='M3 15V5c0-1.1.9-2 2-2h5.9'/>
+                      <path d='M16.5 3v9'/>
+                      <path d='M12 7.5h9'/>
+                    </svg>
+                  </button>
+                </>
+              )}
               <span style={{ position: 'relative', display: 'inline-flex' }}>
                 {pulseSave && <NextActionPulse floating title={pulseSaveTitle} />}
-                <button type='button' disabled={saveDisabled} onClick={handleSave}
+                <button ref={ammToolbarSaveButtonRef} type='button' disabled={saveDisabled} onClick={handleSave}
                   style={{
                     ...editBtnBase,
-                    border: '1px solid rgba(0,0,0,0.18)',
+                    border: saveDisabled ? 'none' : '1px solid rgba(0,0,0,0.18)',
                     background: saveDisabled ? '#e5e7eb' : '#1a7f37',
                     color: saveDisabled ? '#9ca3af' : '#fff',
                     cursor: saveDisabled ? 'not-allowed' : 'pointer'
                   }}>
-                  {saving ? 'Salvataggio bozza…' : 'Salva bozza'}
+                  {saving ? 'Salvataggio…' : 'Salva'}
                 </button>
               </span>
               <button type='button' disabled={cancelDisabled} onClick={handleReset}
                 style={{
                   ...editBtnBase,
-                  border: '1px solid rgba(0,0,0,0.24)',
+                  border: cancelDisabled ? 'none' : '1px solid rgba(0,0,0,0.24)',
                   background: cancelDisabled ? '#e5e7eb' : '#d92d20',
                   color: cancelDisabled ? '#9ca3af' : '#fff',
                   cursor: cancelDisabled ? 'not-allowed' : 'pointer'
@@ -16172,7 +16416,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 title={isDirty ? 'Salvare o annullare le modifiche prima di chiudere.' : undefined}
                 style={{
                   ...editBtnBase,
-                  border: '1px solid rgba(0,0,0,0.24)',
+                  border: closeDisabled ? 'none' : '1px solid rgba(0,0,0,0.24)',
                   background: closeDisabled ? '#e5e7eb' : '#1d4ed8',
                   color: closeDisabled ? '#9ca3af' : '#fff',
                   cursor: closeDisabled ? 'not-allowed' : 'pointer'
@@ -16388,6 +16632,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     onRotationConfirmed={() => setAmmPreviewRotationDeg(0)}
                     practiceContextRevision={practiceContextRevision}
                     refreshKey={liveRefreshVersion}
+                    uploadInputRef={ammAttachmentToolbarUploadInputRef}
+                    onBusyChange={setAmmAttachmentToolbarBusy}
                   />
                 </div>
               )}
@@ -16408,7 +16654,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     ds={(active as any)?.ds}
                     idFieldName={String((active as any)?.idFieldName || 'OBJECTID')}
                     layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}
-                    viewerBackgroundColor={String((cfg as any).anteprimaViewerBg || '#282828')}
+                    viewerBackgroundColor={String((adminStyle as any).fascicoloPreviewBackgroundColor || '#282828')}
                     pdfHeaderBackgroundColor={String((cfg as any).anteprimaPdfHeaderBg || '#282828')}
                     pdfPageAreaBackgroundColor={String((cfg as any).anteprimaPdfAreaBg || '#282828')}
                     pdfThumbnailsBackgroundColor={String((cfg as any).anteprimaPdfThumbnailsBg || '#1f1f1f')}
@@ -16416,7 +16662,32 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     sidebarBackgroundColor={String((cfg as any).anteprimaSidebarBg || '#eef4fb')}
                     sidebarBorderColor={String((cfg as any).anteprimaSidebarBorderColor || '#b8c7d9')}
                     sidebarBorderWidth={Number((cfg as any).anteprimaSidebarBorderWidth ?? 1)}
+                    sidebarPaddingTop={Number((adminStyle as any).fascicoloSidebarPaddingTop ?? 10)}
+                    sidebarPaddingRight={Number((adminStyle as any).fascicoloSidebarPaddingRight ?? 10)}
+                    sidebarPaddingBottom={Number((adminStyle as any).fascicoloSidebarPaddingBottom ?? 10)}
+                    sidebarPaddingLeft={Number((adminStyle as any).fascicoloSidebarPaddingLeft ?? 10)}
                     borderRadius={Number(adminStyle.formCardBorderRadius ?? 8)}
+                    panelBorderColor={String((adminStyle as any).fascicoloPanelBorderColor || '#c6d7ea')}
+                    panelBorderWidth={Number((adminStyle as any).fascicoloPanelBorderWidth ?? 1)}
+                    panelBorderRadius={Number((adminStyle as any).fascicoloPanelBorderRadius ?? 8)}
+                    previewBorderColor={String((adminStyle as any).fascicoloPreviewBorderColor || '#c6d7ea')}
+                    previewBorderWidth={Number((adminStyle as any).fascicoloPreviewBorderWidth ?? 1)}
+                    previewBorderRadius={Number((adminStyle as any).fascicoloPreviewBorderRadius ?? 8)}
+                    docsCardBg={String((adminStyle as any).fascicoloDocsCardBg || '#f8fbff')}
+                    docsCardBorderColor={String((adminStyle as any).fascicoloDocsCardBorderColor || '#c6d7ea')}
+                    docsCardBorderWidth={Number((adminStyle as any).fascicoloDocsCardBorderWidth ?? 1)}
+                    docsCardBorderRadius={Number((adminStyle as any).fascicoloDocsCardBorderRadius ?? 8)}
+                    docsCardShadow={String((adminStyle as any).fascicoloDocsCardShadow || 'none')}
+                    docsGroupGap={Number((adminStyle as any).fascicoloDocsGroupGap ?? 10)}
+                    docsHeaderBg={String((adminStyle as any).fascicoloDocsHeaderBg || 'linear-gradient(90deg, #0d3b66, #155e9d)')}
+                    docsHeaderColor={String((adminStyle as any).fascicoloDocsHeaderColor || '#ffffff')}
+                    docsHeaderFontSize={Number((adminStyle as any).fascicoloDocsHeaderFontSize ?? 12)}
+                    docsHeaderFontWeight={Number((adminStyle as any).fascicoloDocsHeaderFontWeight ?? 900)}
+                    docsHeaderPaddingX={Number((adminStyle as any).fascicoloDocsHeaderPaddingX ?? 10)}
+                    docsHeaderPaddingY={Number((adminStyle as any).fascicoloDocsHeaderPaddingY ?? 7)}
+                    docsBodyPadding={Number((adminStyle as any).fascicoloDocsBodyPadding ?? 10)}
+                    docsTextColor={String((adminStyle as any).fascicoloDocsTextColor || '#334155')}
+                    docsDisabledTextColor={String((adminStyle as any).fascicoloDocsDisabledTextColor || '#94a3b8')}
                   />
                 </div>
               )}

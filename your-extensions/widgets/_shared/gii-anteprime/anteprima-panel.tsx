@@ -774,7 +774,30 @@ export default function GiiAnteprimaPanel (p: {
   sidebarBackgroundColor?: string
   sidebarBorderColor?: string
   sidebarBorderWidth?: number
+  sidebarBorderMode?: 'inset' | 'left'
+  sidebarPaddingTop?: number
+  sidebarPaddingRight?: number
+  sidebarPaddingBottom?: number
+  sidebarPaddingLeft?: number
   sidebarWidth?: number
+  previewBorderColor?: string
+  previewBorderWidth?: number
+  previewBorderRadius?: number
+  docsCardBg?: string
+  docsCardBorderColor?: string
+  docsCardBorderWidth?: number
+  docsCardBorderRadius?: number
+  docsCardShadow?: string
+  docsGroupGap?: number
+  docsHeaderBg?: string
+  docsHeaderColor?: string
+  docsHeaderFontSize?: number
+  docsHeaderFontWeight?: number
+  docsHeaderPaddingX?: number
+  docsHeaderPaddingY?: number
+  docsBodyPadding?: number
+  docsTextColor?: string
+  docsDisabledTextColor?: string
   notaSpeseConfig?: NotaSpeseConfig
   // Unica vera differenza funzionale tra ruoli tecnici e amministrativi: questi ultimi
   // vedono anche le opzioni/documenti amministrativi (proposta di contestazione +
@@ -1357,6 +1380,29 @@ export default function GiiAnteprimaPanel (p: {
         backgroundColor={p.sidebarBackgroundColor}
         borderColor={p.sidebarBorderColor}
         borderWidth={p.sidebarBorderWidth}
+        borderMode={p.sidebarBorderMode}
+        paddingTop={p.sidebarPaddingTop}
+        paddingRight={p.sidebarPaddingRight}
+        paddingBottom={p.sidebarPaddingBottom}
+        paddingLeft={p.sidebarPaddingLeft}
+        previewBorderColor={p.previewBorderColor}
+        previewBorderWidth={p.previewBorderWidth}
+        previewBorderRadius={p.previewBorderRadius}
+        docsCardBg={p.docsCardBg}
+        docsCardBorderColor={p.docsCardBorderColor}
+        docsCardBorderWidth={p.docsCardBorderWidth}
+        docsCardBorderRadius={p.docsCardBorderRadius}
+        docsCardShadow={p.docsCardShadow}
+        docsGroupGap={p.docsGroupGap}
+        docsHeaderBg={p.docsHeaderBg}
+        docsHeaderColor={p.docsHeaderColor}
+        docsHeaderFontSize={p.docsHeaderFontSize}
+        docsHeaderFontWeight={p.docsHeaderFontWeight}
+        docsHeaderPaddingX={p.docsHeaderPaddingX}
+        docsHeaderPaddingY={p.docsHeaderPaddingY}
+        docsBodyPadding={p.docsBodyPadding}
+        docsTextColor={p.docsTextColor}
+        docsDisabledTextColor={p.docsDisabledTextColor}
         docOptions={docOptions}
         availability={{ ...availability, propostaContestazione: !!p.canSeeAmministrativi && propostaContestazioneAvailableComputed, determinazione: !!p.canSeeAmministrativi && determinazioneAvailableComputed, attoContestazione: !!p.canSeeAmministrativi && attoContestazioneAvailableComputed }}
         busy={loading}

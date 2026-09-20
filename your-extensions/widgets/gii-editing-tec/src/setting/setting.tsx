@@ -391,6 +391,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       <SectionBox title='Maschera / contenitore'>
         <div style={P.grid2}><Color k='maskBg' label='Sfondo maschera' fallback='#eef4fb'/><Color k='maskBorderColor' label='Colore bordo' fallback='#cbd8e6'/></div>
         <div style={P.grid2}><Num k='maskBorderWidth' label='Spessore bordo' min={0} max={8}/><Num k='maskBorderRadius' label='Arrotondamento' min={0} max={40}/></div>
+        <div style={P.grid2}><Num k='infoMessageBorderRadius' label='Arrotondamento messaggio informativo' min={0} max={40}/></div>
         <div style={{...P.hint, marginTop: 8, marginBottom: 6}}>Padding interno maschera</div>
         <div style={P.grid2}>
           <Num k='maskInnerPaddingTop' label='Superiore' min={0} max={80}/>
@@ -416,7 +417,10 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
           <Num k='titleFontSize' label='Dimensione titolo barra' min={9} max={28}/>
           <Num k='msgFontSize' label='Dimensione messaggi' min={9} max={24}/>
         </div>
-        <div style={P.hint}>Queste impostazioni regolano il titolo della maschera e i messaggi accanto ai pulsanti Salva/Annulla.</div>
+        <div style={P.grid2}>
+          <Num k='toolbarBottomGap' label='Spazio sotto pulsanti' min={0} max={80}/>
+        </div>
+        <div style={P.hint}>“Spazio sotto pulsanti” regola solo la distanza tra Salva/Annulla/Chiudi e il separatore inferiore, senza modificare il padding superiore della maschera.</div>
       </SectionBox>
     </>}
 
@@ -479,7 +483,64 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       </>}
     </div>}
 
-    <Acc id='anteprima' label='6. Anteprima PDF e titolo pratica' open={isOpen('anteprima')} onToggle={()=>toggle('anteprima')}/>
+    <Acc id='stile-allegati' label='6. Stile Allegati' open={isOpen('stile-allegati')} onToggle={()=>toggle('stile-allegati')}/>
+    {isOpen('stile-allegati') && <>
+      <SectionBox title='Pannello Allegati' hint='Aspetto del contenitore esterno della scheda Allegati.'>
+        <div style={P.grid2}><Color k='attachmentsPanelBg' label='Sfondo pannello' fallback='#ffffff'/><Color k='attachmentsPanelBorderColor' label='Colore bordo' fallback='#c6d7ea'/></div>
+        <div style={P.grid2}><Num k='attachmentsPanelBorderWidth' label='Spessore bordo' min={0} max={8}/><Num k='attachmentsPanelBorderRadius' label='Arrotondamento' min={0} max={40}/></div>
+        <div style={P.hint}>Padding interno pannello</div>
+        <div style={P.grid2}><Num k='attachmentsPanelPaddingTop' label='Superiore' min={0} max={80}/><Num k='attachmentsPanelPaddingRight' label='Destro' min={0} max={80}/></div>
+        <div style={P.grid2}><Num k='attachmentsPanelPaddingBottom' label='Inferiore' min={0} max={80}/><Num k='attachmentsPanelPaddingLeft' label='Sinistro' min={0} max={80}/></div>
+        <div style={P.grid2}><Num k='attachmentsPreviewGap' label='Spazio elenco–anteprima' min={0} max={80}/><div /></div>
+        <Text k='attachmentsPanelShadow' label='Ombra pannello CSS' placeholder='none oppure 0 8px 22px rgba(15, 23, 42, 0.08)'/>
+      </SectionBox>
+      <SectionBox title='Pannello anteprima' hint='Bordo e raggio del riquadro di anteprima a destra, indipendenti dal contenitore principale.'>
+        <div style={P.grid2}><Color k='attachmentsPreviewPanelBorderColor' label='Colore bordo' fallback='#c6d7ea'/><Num k='attachmentsPreviewPanelBorderWidth' label='Spessore bordo' min={0} max={8}/></div>
+        <div style={P.grid2}><Num k='attachmentsPreviewPanelBorderRadius' label='Arrotondamento' min={0} max={40}/><div /></div>
+        <Text k='attachmentsPreviewPanelShadow' label='Ombra pannello anteprima CSS' placeholder='none oppure 0 8px 22px rgba(15, 23, 42, 0.08)'/>
+      </SectionBox>
+      <SectionBox title='Allegati tecnici' hint='Aspetto della card che contiene gli allegati tecnici.'>
+        <div style={P.grid2}><Color k='attachmentsCardBg' label='Sfondo corpo card' fallback='#f8fbff'/><Color k='attachmentsCardBorderColor' label='Bordo card' fallback='#c6d7ea'/></div>
+        <div style={P.grid3}><Num k='attachmentsCardBorderWidth' label='Spessore bordo' min={0} max={8}/><Num k='attachmentsCardBorderRadius' label='Arrotondamento' min={0} max={40}/><Num k='attachmentsGroupGap' label='Spazio tra card' min={0} max={40}/></div>
+        <Text k='attachmentsCardShadow' label='Ombra card CSS' placeholder='0 8px 22px rgba(15, 23, 42, 0.08)'/>
+        <div style={P.grid2}><Color k='attachmentsRecordHoverBg' label='Colore hover record' fallback='#f8fbff'/><Color k='attachmentsRecordSelectedBg' label='Colore record selezionato' fallback='#eff6ff'/></div>
+        <Num k='attachmentsCardBodyPadding' label='Padding corpo card' min={0} max={30}/>
+      </SectionBox>
+      <SectionBox title='Intestazione Allegati tecnici'>
+        <Text k='attachmentsHeaderBg' label='Sfondo intestazione' placeholder='linear-gradient(90deg, #0d3b66, #155e9d)'/>
+        <div style={P.grid2}><Color k='attachmentsHeaderColor' label='Colore testo' fallback='#ffffff'/><Num k='attachmentsHeaderFontSize' label='Dimensione testo' min={10} max={24}/></div>
+        <div style={P.grid3}><Num k='attachmentsHeaderFontWeight' label='Peso testo' min={300} max={900} step={100}/><Num k='attachmentsHeaderPaddingX' label='Padding X intestazione' min={0} max={30}/><Num k='attachmentsHeaderPaddingY' label='Padding Y intestazione' min={0} max={24}/></div>
+      </SectionBox>
+    </>}
+
+    <Acc id='stile-fascicolo' label='7. Stile Fascicolo' open={isOpen('stile-fascicolo')} onToggle={()=>toggle('stile-fascicolo')}/>
+    {isOpen('stile-fascicolo') && <>
+      <SectionBox title='Contenitore generale Fascicolo' hint='Bordo esterno che racchiude anteprima PDF e pannello documenti. Può essere nascosto impostando lo spessore a 0.'>
+        <div style={P.grid3}><Color k='fascicoloPanelBorderColor' label='Colore bordo generale' fallback='#c6d7ea'/><Num k='fascicoloPanelBorderWidth' label='Spessore bordo generale' min={0} max={8}/><Num k='fascicoloPanelBorderRadius' label='Arrotondamento generale' min={0} max={40}/></div>
+      </SectionBox>
+      <SectionBox title='Pannello destro' hint='Padding interno del pannello Documenti. Il pulsante Rigenera documento resta fisso in fondo.'>
+        <div style={P.grid2}><Num k='fascicoloSidebarPaddingTop' label='Superiore' min={0} max={80}/><Num k='fascicoloSidebarPaddingRight' label='Destro' min={0} max={80}/></div>
+        <div style={P.grid2}><Num k='fascicoloSidebarPaddingBottom' label='Inferiore' min={0} max={80}/><Num k='fascicoloSidebarPaddingLeft' label='Sinistro' min={0} max={80}/></div>
+      </SectionBox>
+      <SectionBox title='Pannello anteprima Fascicolo' hint='Sfondo, bordo e raggio del pannello di anteprima PDF sono indipendenti dal contenitore generale.'>
+        <div style={P.grid2}><Color k='fascicoloPreviewBackgroundColor' label='Sfondo dietro anteprima' fallback='#282828'/><Color k='fascicoloPreviewBorderColor' label='Colore bordo anteprima' fallback='#c6d7ea'/></div>
+        <div style={P.grid2}><Num k='fascicoloPreviewBorderWidth' label='Spessore bordo anteprima' min={0} max={8}/><Num k='fascicoloPreviewBorderRadius' label='Arrotondamento anteprima' min={0} max={40}/></div>
+      </SectionBox>
+      <SectionBox title='Scheda Documenti tecnici' hint='Aspetto della card Documenti tecnici nel pannello destro del Fascicolo.'>
+        <div style={P.grid2}><Color k='fascicoloDocsCardBg' label='Sfondo corpo card' fallback='#f8fbff'/><Color k='fascicoloDocsCardBorderColor' label='Colore bordo card' fallback='#c6d7ea'/></div>
+        <div style={P.grid3}><Num k='fascicoloDocsCardBorderWidth' label='Spessore bordo' min={0} max={8}/><Num k='fascicoloDocsCardBorderRadius' label='Arrotondamento' min={0} max={40}/><Num k='fascicoloDocsGroupGap' label='Spazio tra schede' min={0} max={40}/></div>
+        <Text k='fascicoloDocsCardShadow' label='Ombra card CSS' placeholder='none oppure 0 8px 22px rgba(15, 23, 42, 0.08)'/>
+        <div style={P.grid2}><Color k='fascicoloDocsTextColor' label='Colore testo record' fallback='#334155'/><Color k='fascicoloDocsDisabledTextColor' label='Colore testo disabilitato' fallback='#94a3b8'/></div>
+        <Num k='fascicoloDocsBodyPadding' label='Padding corpo card' min={0} max={30}/>
+      </SectionBox>
+      <SectionBox title='Intestazione Documenti tecnici'>
+        <Text k='fascicoloDocsHeaderBg' label='Sfondo intestazione' placeholder='linear-gradient(90deg, #0d3b66, #155e9d)'/>
+        <div style={P.grid2}><Color k='fascicoloDocsHeaderColor' label='Colore testo' fallback='#ffffff'/><Num k='fascicoloDocsHeaderFontSize' label='Dimensione testo' min={9} max={24}/></div>
+        <div style={P.grid3}><Num k='fascicoloDocsHeaderFontWeight' label='Peso testo' min={300} max={900} step={100}/><Num k='fascicoloDocsHeaderPaddingX' label='Padding X intestazione' min={0} max={30}/><Num k='fascicoloDocsHeaderPaddingY' label='Padding Y intestazione' min={0} max={24}/></div>
+      </SectionBox>
+    </>}
+
+    <Acc id='anteprima' label='8. Anteprima PDF e titolo pratica' open={isOpen('anteprima')} onToggle={()=>toggle('anteprima')}/>
     {isOpen('anteprima') && <>
       <SectionBox title='Viewer PDF'>
         <div style={{...P.hint, marginTop: 10}}>Colori sfondo viewer</div>

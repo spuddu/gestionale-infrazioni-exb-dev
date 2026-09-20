@@ -19,6 +19,9 @@ type Props = GiiDocumentSidebarProps & {
   pdfPageAreaBackgroundColor?: string
   pdfThumbnailsBackgroundColor?: string
   pdfToolbarBackgroundColor?: string
+  previewBorderColor?: string
+  previewBorderWidth?: number
+  previewBorderRadius?: number
 }
 
 export default function GiiDocumentViewer (props: Props) {
@@ -36,13 +39,18 @@ export default function GiiDocumentViewer (props: Props) {
     pdfPageAreaBackgroundColor,
     pdfThumbnailsBackgroundColor,
     pdfToolbarBackgroundColor,
+    previewBorderColor,
+    previewBorderWidth,
+    previewBorderRadius,
     ...sidebarProps
   } = props
   const safeViewerBackgroundColor = String(viewerBackgroundColor || '#282828').trim() || '#282828'
+  const safePreviewBorderWidth = Math.max(0, Number(previewBorderWidth ?? 0) || 0)
+  const safePreviewBorderRadius = Math.max(0, Number(previewBorderRadius ?? 0) || 0)
 
   return (
     <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'stretch', overflow: 'hidden', background: safeViewerBackgroundColor }}>
-      <div style={{ flex: '1 1 auto', minWidth: 0, minHeight: 0 }}>
+      <div style={{ flex: '1 1 auto', minWidth: 0, minHeight: 0, boxSizing: 'border-box', border: safePreviewBorderWidth > 0 ? `${safePreviewBorderWidth}px solid ${previewBorderColor || '#c6d7ea'}` : 'none', borderRadius: safePreviewBorderRadius, overflow: 'hidden' }}>
         <AnteprimaPdfViewer
           url={url}
           fileName={fileName}

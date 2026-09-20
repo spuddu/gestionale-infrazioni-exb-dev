@@ -100,6 +100,8 @@ export interface Config {
   maskBorderColor: string
   maskBorderWidth: number
   maskBorderRadius: number
+  // Arrotondamento del messaggio informativo, indipendente dalla maschera.
+  infoMessageBorderRadius: number
   maskInnerPadding: number
   // Padding interno maschera per-lato. Se assente, eredita maskInnerPadding per compatibilità.
   maskInnerPaddingTop?: number
@@ -113,6 +115,8 @@ export interface Config {
   widgetPaddingBottom?: number
   widgetPaddingLeft?: number
   dividerColor: string
+  // Spazio verticale tra la riga titolo/pulsanti e il separatore inferiore della toolbar.
+  toolbarBottomGap: number
 
   // --- Tipografia
   titleFontSize: number
@@ -147,6 +151,65 @@ export interface Config {
   formCardHeaderPaddingX: number
   formCardHeaderPaddingY: number
   formCardBodyPadding: number
+
+  // --- Viewer Allegati: pannello, anteprima e card Allegati tecnici
+  attachmentsPanelBg: string
+  attachmentsPanelBorderColor: string
+  attachmentsPanelBorderWidth: number
+  attachmentsPanelBorderRadius: number
+  attachmentsPanelPaddingTop: number
+  attachmentsPanelPaddingRight: number
+  attachmentsPanelPaddingBottom: number
+  attachmentsPanelPaddingLeft: number
+  attachmentsPanelShadow: string
+  attachmentsPreviewGap: number
+  attachmentsPreviewPanelBorderColor: string
+  attachmentsPreviewPanelBorderWidth: number
+  attachmentsPreviewPanelBorderRadius: number
+  attachmentsPreviewPanelShadow: string
+  attachmentsGroupGap: number
+  attachmentsCardBg: string
+  attachmentsCardBorderColor: string
+  attachmentsCardBorderWidth: number
+  attachmentsCardBorderRadius: number
+  attachmentsCardShadow: string
+  attachmentsHeaderBg: string
+  attachmentsHeaderColor: string
+  attachmentsHeaderFontSize: number
+  attachmentsHeaderFontWeight: number
+  attachmentsHeaderPaddingX: number
+  attachmentsHeaderPaddingY: number
+  attachmentsCardBodyPadding: number
+  attachmentsRecordHoverBg: string
+  attachmentsRecordSelectedBg: string
+
+  // --- Viewer Fascicolo: contenitore generale, anteprima e schede Documenti
+  fascicoloPanelBorderColor: string
+  fascicoloPanelBorderWidth: number
+  fascicoloPanelBorderRadius: number
+  fascicoloSidebarPaddingTop: number
+  fascicoloSidebarPaddingRight: number
+  fascicoloSidebarPaddingBottom: number
+  fascicoloSidebarPaddingLeft: number
+  fascicoloPreviewBackgroundColor: string
+  fascicoloPreviewBorderColor: string
+  fascicoloPreviewBorderWidth: number
+  fascicoloPreviewBorderRadius: number
+  fascicoloDocsCardBg: string
+  fascicoloDocsCardBorderColor: string
+  fascicoloDocsCardBorderWidth: number
+  fascicoloDocsCardBorderRadius: number
+  fascicoloDocsCardShadow: string
+  fascicoloDocsGroupGap: number
+  fascicoloDocsHeaderBg: string
+  fascicoloDocsHeaderColor: string
+  fascicoloDocsHeaderFontSize: number
+  fascicoloDocsHeaderFontWeight: number
+  fascicoloDocsHeaderPaddingX: number
+  fascicoloDocsHeaderPaddingY: number
+  fascicoloDocsBodyPadding: number
+  fascicoloDocsTextColor: string
+  fascicoloDocsDisabledTextColor: string
 
   // --- Padding contenuto schede (contenitore esterno di tutte le tab)
   tabPaddingTop: number
@@ -290,9 +353,11 @@ export const defaultConfig: Config = {
   maskBorderColor: '#cbd8e6',
   maskBorderWidth: 1,
   maskBorderRadius: 10,
+  infoMessageBorderRadius: 10,
   maskInnerPadding: 12,
   maskOuterOffset: 12,
   dividerColor: '#cbd8e6',
+  toolbarBottomGap: 15,
 
   titleFontSize: 14,
   statusFontSize: 13,
@@ -320,11 +385,68 @@ export const defaultConfig: Config = {
   formCardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
   formCardHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
   formCardHeaderColor: '#ffffff',
-  formCardHeaderFontSize: 11,
+  formCardHeaderFontSize: 14,
   formCardHeaderFontWeight: 800,
   formCardHeaderPaddingX: 10,
   formCardHeaderPaddingY: 7,
   formCardBodyPadding: 10,
+
+  attachmentsPanelBg: '#ffffff',
+  attachmentsPanelBorderColor: '#c6d7ea',
+  attachmentsPanelBorderWidth: 1,
+  attachmentsPanelBorderRadius: 8,
+  attachmentsPanelPaddingTop: 0,
+  attachmentsPanelPaddingRight: 0,
+  attachmentsPanelPaddingBottom: 0,
+  attachmentsPanelPaddingLeft: 0,
+  attachmentsPanelShadow: 'none',
+  attachmentsPreviewGap: 0,
+  attachmentsPreviewPanelBorderColor: '#c6d7ea',
+  attachmentsPreviewPanelBorderWidth: 1,
+  attachmentsPreviewPanelBorderRadius: 8,
+  attachmentsPreviewPanelShadow: 'none',
+  attachmentsGroupGap: 10,
+  attachmentsCardBg: '#f8fbff',
+  attachmentsCardBorderColor: '#c6d7ea',
+  attachmentsCardBorderWidth: 1,
+  attachmentsCardBorderRadius: 8,
+  attachmentsCardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
+  attachmentsHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
+  attachmentsHeaderColor: '#ffffff',
+  attachmentsHeaderFontSize: 14,
+  attachmentsHeaderFontWeight: 800,
+  attachmentsHeaderPaddingX: 10,
+  attachmentsHeaderPaddingY: 7,
+  attachmentsCardBodyPadding: 10,
+  attachmentsRecordHoverBg: '#f8fbff',
+  attachmentsRecordSelectedBg: '#eff6ff',
+
+  fascicoloPanelBorderColor: '#c6d7ea',
+  fascicoloPanelBorderWidth: 1,
+  fascicoloPanelBorderRadius: 8,
+  fascicoloSidebarPaddingTop: 10,
+  fascicoloSidebarPaddingRight: 10,
+  fascicoloSidebarPaddingBottom: 10,
+  fascicoloSidebarPaddingLeft: 10,
+  fascicoloPreviewBackgroundColor: '#282828',
+  fascicoloPreviewBorderColor: '#c6d7ea',
+  fascicoloPreviewBorderWidth: 1,
+  fascicoloPreviewBorderRadius: 8,
+  fascicoloDocsCardBg: '#f8fbff',
+  fascicoloDocsCardBorderColor: '#c6d7ea',
+  fascicoloDocsCardBorderWidth: 1,
+  fascicoloDocsCardBorderRadius: 8,
+  fascicoloDocsCardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
+  fascicoloDocsGroupGap: 10,
+  fascicoloDocsHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
+  fascicoloDocsHeaderColor: '#ffffff',
+  fascicoloDocsHeaderFontSize: 12,
+  fascicoloDocsHeaderFontWeight: 900,
+  fascicoloDocsHeaderPaddingX: 10,
+  fascicoloDocsHeaderPaddingY: 7,
+  fascicoloDocsBodyPadding: 10,
+  fascicoloDocsTextColor: '#334155',
+  fascicoloDocsDisabledTextColor: '#94a3b8',
 
   // Mantiene come default il comportamento storico delle schede generiche;
   // i quattro lati sono ora indipendenti e configurabili dal setting.
@@ -408,7 +530,7 @@ export const defaultConfig: Config = {
   fieldLayouts: {},
   fieldGap: 12,
 
-  violazioneLayoutLeftPercent: 58,
+  violazioneLayoutLeftPercent: 65,
   violazioneLayoutMinLeftPx: 520,
   violazioneLayoutMinRightPx: 360,
   violazioneSplitterWidth: 14,

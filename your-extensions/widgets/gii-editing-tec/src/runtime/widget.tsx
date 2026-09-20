@@ -7,7 +7,7 @@ import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig, DEFAULT_FIELD_LAYOUTS } from '../config'
 import AnteprimaPanel, { clearGiiAnteprimaDocumentMemory } from '../../../_shared/gii-anteprime/anteprima-panel'
 import { NORMA3_REQ_POINT, parseNorma3Codes, computeReqPoint } from '../../../_shared/gii-anteprime/req-point'
-import GiiAttachmentViewer, { type GiiAttachmentViewerItem, filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
+import GiiAttachmentViewer, { GII_ALLOWED_ATTACHMENT_UPLOAD_HINT, type GiiAttachmentViewerItem, filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 import { getGiiPracticeContextStamp, isGiiPracticeContextStampCurrent, isGiiPracticePayloadCurrent, isGiiPracticeSelectionContextCurrent, stampGiiPracticePayload, writeGiiPracticeSelectionContext, type GiiPracticeContextStamp } from '../../../_shared/gii-selection/practice-context'
 
 type SelState = {
@@ -2266,10 +2266,10 @@ const _defaultFormStyle = {
   fieldDisabledBg: '#e8edf3', fieldDisabledColor: '#1f2937',
   sectionGap: 10,
   cardBg: '#f8fbff', cardBorderColor: '#c6d7ea', cardBorderWidth: 1, cardBorderRadius: 8, cardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
-  cardHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)', cardHeaderColor: '#ffffff', cardHeaderFontSize: 11,
+  cardHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)', cardHeaderColor: '#ffffff', cardHeaderFontSize: 14,
   cardHeaderFontWeight: 800, cardHeaderPaddingX: 10, cardHeaderPaddingY: 7, cardBodyPadding: 10,
   norma3FontSize: 12, norma3GradeColumnWidth: 142, norma3RowGap: 0,
-  violazioneLeftPercent: 58, violazioneMinLeftPx: 520, violazioneMinRightPx: 360, violazioneSplitterWidth: 14, violazioneSplitterColor: '#94a3b8',
+  violazioneLeftPercent: 65, violazioneMinLeftPx: 520, violazioneMinRightPx: 360, violazioneSplitterWidth: 14, violazioneSplitterColor: '#94a3b8',
   violazioneDescrizioneRows: 5, violazioneCircostanzeRows: 4
 }
 const FormStyleCtx = React.createContext(_defaultFormStyle)
@@ -4585,12 +4585,14 @@ function NuovaPraticaForm (p: {
 
   const defaultViolazioneColumnPercents = React.useMemo<[number, number]>(() => {
     const raw = Number((cfg as any).violazioneLayoutLeftPercent)
-    const left = Math.max(30, Math.min(80, Number.isFinite(raw) ? raw : 58))
+    const left = Math.max(30, Math.min(80, Number.isFinite(raw) ? raw : 65))
     return [left, 100 - left]
   }, [cfg])
   const [violazioneColumnPercents, setViolazioneColumnPercents] = React.useState<[number, number]>(defaultViolazioneColumnPercents)
   const [draggingViolazioneSplitter, setDraggingViolazioneSplitter] = React.useState(false)
   const violazioneGridRef = React.useRef<HTMLDivElement | null>(null)
+  const tabContentRef = React.useRef<HTMLDivElement | null>(null)
+  const [violazioneScrollbarWidth, setViolazioneScrollbarWidth] = React.useState(0)
   const violazioneColumnsDirty = Math.abs(violazioneColumnPercents[0] - defaultViolazioneColumnPercents[0]) > 0.05
     || Math.abs(violazioneColumnPercents[1] - defaultViolazioneColumnPercents[1]) > 0.05
 
@@ -4766,6 +4768,32 @@ function NuovaPraticaForm (p: {
   const [isExternalNavMode, setIsExternalNavMode] = React.useState<boolean>(true)
   const skipNpTabSyncRef = React.useRef(false)
   const tabResetFirstRef = React.useRef(true)
+
+  React.useLayoutEffect(() => {
+    const scrollHost = tabContentRef.current
+    if (npTab !== 'violazione' || !scrollHost) {
+      setViolazioneScrollbarWidth(0)
+      return
+    }
+
+    const measure = () => {
+      const width = Math.max(0, scrollHost.offsetWidth - scrollHost.clientWidth)
+      setViolazioneScrollbarWidth(prev => Math.abs(prev - width) < 0.5 ? prev : width)
+    }
+
+    // Misura subito nel layout effect: la compensazione viene applicata prima del paint,
+    // evitando il frame intermedio in cui la colonna destra cambia larghezza a vista.
+    measure()
+    const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null
+    resizeObserver?.observe(scrollHost)
+    if (violazioneGridRef.current) resizeObserver?.observe(violazioneGridRef.current)
+    window.addEventListener('resize', measure)
+
+    return () => {
+      resizeObserver?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [npTab])
 
   // Pulisci solo le richieste one-shot, conservando l'eventuale scheda richiesta in apertura.
   React.useEffect(() => {
@@ -5140,6 +5168,7 @@ function NuovaPraticaForm (p: {
   const createStartedAtRef = React.useRef<number>(Date.now())
   const [attachmentFiles, setAttachmentFiles] = React.useState<File[]>([])
   const [attachmentInputKey, setAttachmentInputKey] = React.useState(0)
+  const attachmentToolbarUploadInputRef = React.useRef<HTMLInputElement>(null)
   const [attachments, setAttachments] = React.useState<Array<{ id: number; name?: string; size?: number; contentType?: string; url?: string; keywords?: string; __pendingFile?: File; __pendingUpload?: boolean; __pendingReplace?: boolean }>>([])
   const [attachmentsForOid, setAttachmentsForOid] = React.useState<number | null>(null)
   const [attachmentsLoading, setAttachmentsLoading] = React.useState(false)
@@ -5166,6 +5195,9 @@ function NuovaPraticaForm (p: {
       current.contextKey === origin.contextKey
   }, [])
   const visibleTechnicalAttachments = React.useMemo(() => filterGiiAttachmentsForTechnicalRoles((Array.isArray(attachments) ? attachments : []) as any), [attachments])
+  const visibleTechnicalAttachmentsForViewer = React.useMemo(() => (
+    (Array.isArray(visibleTechnicalAttachments) ? visibleTechnicalAttachments : []).map((att: any) => ({ ...att, groupTitle: 'Allegati tecnici' }))
+  ), [visibleTechnicalAttachments])
 
   const [pendingDeleteAttachmentIds, setPendingDeleteAttachmentIds] = React.useState<number[]>([])
   const [pendingDeleteAttachmentNames, setPendingDeleteAttachmentNames] = React.useState<Record<number, string>>({})
@@ -7546,6 +7578,17 @@ ${e?.message || String(e)}`
     cursor: saving ? 'not-allowed' : 'pointer'
   }
 
+  // I pulsanti icona della toolbar sono quadrati e usano come lato l'altezza
+  // effettivamente renderizzata del pulsante Salva (misurata sotto sul toolbarRow).
+  const toolbarIconBtnBase: React.CSSProperties = {
+    ...btnBase,
+    width: 'var(--gii-toolbar-square-button-size)',
+    height: 'var(--gii-toolbar-square-button-size)',
+    padding: 0,
+    position: 'relative',
+    flex: '0 0 var(--gii-toolbar-square-button-size)'
+  }
+
   const tabBtn = (id: string, label: string) => (
     <button key={id} type='button' onClick={() => { setIsExternalNavMode(false); setNpTab(id as any) }} style={{
       padding: '6px 14px', borderRadius: 10, border: `1px solid ${npTab === id ? '#2f6fed' : 'rgba(0,0,0,0.12)'}`,
@@ -7594,11 +7637,13 @@ ${e?.message || String(e)}`
     maskBorderColor: modernColor((cfg as any).maskBorderColor, '#cbd8e6', ['#e5e7eb']),
     maskBorderWidth: numCfg('maskBorderWidth', 1, 0, 8),
     maskBorderRadius: numCfg('maskBorderRadius', 10, 0, 40),
+    infoMessageBorderRadius: numCfg('infoMessageBorderRadius', 10, 0, 40),
     maskInnerPadding: legacyMaskInnerPadding,
     maskInnerPaddingTop: numCfg('maskInnerPaddingTop', legacyMaskInnerPadding, 0, 80),
     maskInnerPaddingRight: numCfg('maskInnerPaddingRight', legacyMaskInnerPadding, 0, 80),
     maskInnerPaddingBottom: numCfg('maskInnerPaddingBottom', legacyMaskInnerPadding, 0, 80),
     maskInnerPaddingLeft: numCfg('maskInnerPaddingLeft', legacyMaskInnerPadding, 0, 80),
+    toolbarBottomGap: numCfg('toolbarBottomGap', 15, 0, 80),
     labelColor: modernColor((cfg as any).formLabelColor, _defaultFormStyle.labelColor, ['#6b7280']),
     labelFontSize: numCfg('formLabelFontSize', _defaultFormStyle.labelFontSize, 8, 24),
     labelFontWeight: numCfg('formLabelFontWeight', _defaultFormStyle.labelFontWeight, 300, 900),
@@ -8698,7 +8743,7 @@ ${e?.message || String(e)}`
             ref={violazioneGridRef}
             style={{
               display: 'grid',
-              gridTemplateColumns: `minmax(0, ${violazioneColumnPercents[0].toFixed(2)}%) ${formStyle.violazioneSplitterWidth}px minmax(0, 1fr)`,
+              gridTemplateColumns: `minmax(0, calc(${violazioneColumnPercents[0].toFixed(2)}% + ${((violazioneScrollbarWidth * violazioneColumnPercents[0]) / 100).toFixed(2)}px)) ${formStyle.violazioneSplitterWidth}px minmax(0, 1fr)`,
               gap: 0,
               alignItems: 'stretch',
               columnGap: 0,
@@ -8864,7 +8909,40 @@ ${e?.message || String(e)}`
   }
 
   const toolbarRowRef = React.useRef<HTMLDivElement | null>(null)
+  const toolbarSaveButtonRef = React.useRef<HTMLButtonElement | null>(null)
   const [toolbarRowMultiline, setToolbarRowMultiline] = React.useState(false)
+
+  React.useLayoutEffect((): (() => void) | void => {
+    const rowEl = toolbarRowRef.current
+    const saveEl = toolbarSaveButtonRef.current
+    if (!rowEl || !saveEl) return
+
+    const syncSquareButtonSize = (): void => {
+      try {
+        const h = saveEl.getBoundingClientRect().height
+        if (Number.isFinite(h) && h > 0) {
+          rowEl.style.setProperty('--gii-toolbar-square-button-size', `${h}px`)
+          rowEl.parentElement?.style.setProperty('--gii-toolbar-reference-button-size', `${h}px`)
+        }
+      } catch {}
+    }
+
+    syncSquareButtonSize()
+
+    let ro: ResizeObserver | null = null
+    try {
+      if (typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(syncSquareButtonSize)
+        ro.observe(saveEl)
+      }
+    } catch { ro = null }
+
+    window.addEventListener('resize', syncSquareButtonSize, true)
+    return (): void => {
+      try { ro?.disconnect() } catch {}
+      window.removeEventListener('resize', syncSquareButtonSize, true)
+    }
+  }, [])
 
   React.useEffect((): (() => void) | void => {
     const el = toolbarRowRef.current
@@ -8899,10 +8977,10 @@ ${e?.message || String(e)}`
     }
   }, [npTab, isReadOnly, readOnlyBannerMounted])
 
-  // Pareggia lo spazio sotto la riga titolo/pulsanti (padding-bottom toolbar + suo border-bottom 1px)
-  // con quello sopra (border + padding del contenitore esterno), così il blocco non risulta
-  // visivamente più vicino al bordo superiore della card che a quello inferiore.
-  const toolbarBottomPad = Math.max(0, Number(formStyle.maskBorderWidth || 0) + Number(formStyle.maskInnerPaddingTop || 0) - 1)
+  // Spazio autonomo sotto la riga titolo/pulsanti. Non dipende dal padding superiore
+  // della maschera, così la distanza dal separatore inferiore può essere regolata senza
+  // spostare anche il contenuto sul bordo superiore.
+  const toolbarBottomPad = Math.max(0, Number(formStyle.toolbarBottomGap || 0))
 
   return (
   <FormStyleCtx.Provider value={formStyle}>
@@ -8930,6 +9008,46 @@ ${e?.message || String(e)}`
         borderBottom: '1px solid rgba(0,0,0,0.08)',
         transition: 'padding 280ms ease'
       }}>
+        {isReadOnly && readOnlyBannerMounted && (
+          <div style={{
+            position: 'absolute',
+            // Il banner resta fermo verticalmente: l'apertura crea spazio spostando solo la riga toolbar.
+            // In questo modo il bordo superiore/radius non viene mai trascinato fuori dalla maschera.
+            top: toolbarRowMultiline ? 0 : 'max(0px, calc((var(--gii-toolbar-reference-button-size, 36px) - 36px) / 2))',
+            transform: 'none',
+            left: 0,
+            right: readOnlyBannerOpen ? 0 : 'auto',
+            width: readOnlyBannerOpen ? 'auto' : 36,
+            height: 36,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: readOnlyBannerOpen ? '6px 10px 6px 6px' : '6px',
+            border: '1px solid #fb923c',
+            borderRadius: formStyle.infoMessageBorderRadius,
+            background: '#fff7ed',
+            color: '#b42318',
+            boxSizing: 'border-box',
+            overflow: 'hidden',
+            zIndex: 2,
+            transition: 'width 280ms ease, background-color 220ms ease, border-color 220ms ease'
+          }}>
+            {readOnlyInfoButton}
+            <span style={{
+              fontSize: Math.max(12, Number(formStyle.msgFontSize || 12)),
+              fontWeight: 700,
+              lineHeight: 1.35,
+              whiteSpace: 'nowrap',
+              opacity: readOnlyBannerOpen ? 1 : 0,
+              transform: readOnlyBannerOpen ? 'translateX(0)' : 'translateX(-8px)',
+              maxWidth: readOnlyBannerOpen ? 900 : 0,
+              overflow: 'hidden',
+              transition: 'opacity 280ms ease, transform 280ms ease, max-width 280ms ease'
+            }}>
+              {readOnlyBannerText}
+            </span>
+          </div>
+        )}
         <div ref={toolbarRowRef} style={{
           position: 'relative',
           display: 'flex',
@@ -8939,47 +9057,6 @@ ${e?.message || String(e)}`
           gap: 8,
           minHeight: isReadOnly && readOnlyBannerMounted ? 36 : undefined
         }}>
-          {isReadOnly && readOnlyBannerMounted && (
-            <div style={{
-              position: 'absolute',
-              // Da chiuso: quadrato 36x36 centrato sulla riga reale (qualunque sia la sua altezza).
-              // Da aperto: stessa posizione di prima (zona padding-top:48 sopra la riga), spostandolo
-              // sopra il bordo superiore della riga della stessa misura del padding-top aggiunto al toolbar.
-              top: readOnlyBannerOpen ? -48 : (toolbarRowMultiline ? 0 : '50%'),
-              transform: readOnlyBannerOpen || toolbarRowMultiline ? 'none' : 'translateY(-50%)',
-              left: 0,
-              right: readOnlyBannerOpen ? 0 : 'auto',
-              width: readOnlyBannerOpen ? 'auto' : 36,
-              height: 36,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: readOnlyBannerOpen ? '6px 10px 6px 6px' : '6px',
-              border: '1px solid #fb923c',
-              borderRadius: readOnlyBannerOpen ? formStyle.maskBorderRadius : 8,
-              background: '#fff7ed',
-              color: '#b42318',
-              boxSizing: 'border-box',
-              overflow: 'hidden',
-              zIndex: 2,
-              transition: 'top 280ms ease, transform 280ms ease, width 280ms ease, background-color 220ms ease, border-color 220ms ease'
-            }}>
-              {readOnlyInfoButton}
-              <span style={{
-                fontSize: Math.max(12, Number(formStyle.msgFontSize || 12)),
-                fontWeight: 700,
-                lineHeight: 1.35,
-                whiteSpace: 'nowrap',
-                opacity: readOnlyBannerOpen ? 1 : 0,
-                transform: readOnlyBannerOpen ? 'translateX(0)' : 'translateX(-8px)',
-                maxWidth: readOnlyBannerOpen ? 900 : 0,
-                overflow: 'hidden',
-                transition: 'opacity 280ms ease, transform 280ms ease, max-width 280ms ease'
-              }}>
-                {readOnlyBannerText}
-              </span>
-            </div>
-          )}
           <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, paddingLeft: isReadOnly && readOnlyBannerMounted ? 44 : 0, transition: 'padding-left 220ms ease', flex: '1 1 280px' }}>
             <div style={{ fontWeight: 700, fontSize: formStyle.titleFontSize, lineHeight: 1.25 }}>
               {toolbarTitleInfo.baseTitle}
@@ -9004,22 +9081,17 @@ ${e?.message || String(e)}`
                 title={!activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0 ? 'Seleziona prima una violazione collegabile alla nota spese.' : 'Sfoglia prezzario'}
                 aria-label='Sfoglia prezzario'
                 style={{
-                  width: 40,
-                  height: 40,
-                  padding: 0,
-                  boxSizing: 'border-box',
+                  ...toolbarIconBtnBase,
                   marginRight: 12,
-                  borderRadius: 8,
-                  border: `2px solid ${noteSpeseBrowseDisabled ? '#e5e7eb' : '#0d3b66'}`,
+                  border: `1px solid ${noteSpeseBrowseDisabled ? '#e5e7eb' : '#0d3b66'}`,
+                  boxShadow: `inset 0 0 0 1px ${noteSpeseBrowseDisabled ? '#e5e7eb' : '#0d3b66'}`,
                   background: '#fff',
                   color: noteSpeseBrowseDisabled ? '#9ca3af' : '#0d3b66',
-                  cursor: noteSpeseBrowseDisabled ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
+                  cursor: noteSpeseBrowseDisabled ? 'not-allowed' : 'pointer'
                 }}
               >
-                <svg width='24' height='24' viewBox='0 0 24 24' fill='none' aria-hidden='true'>
+                <span aria-hidden='true' style={{ visibility: 'hidden', lineHeight: 'normal' }}>M</span>
+                <svg width='24' height='24' viewBox='0 0 24 24' fill='none' aria-hidden='true' style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}>
                   <circle cx='5.5' cy='6' r='1.5' fill='currentColor'/>
                   <line x1='10' y1='6' x2='19' y2='6' stroke='currentColor' strokeWidth='2' strokeLinecap='round'/>
                   <circle cx='5.5' cy='12' r='1.5' fill='currentColor'/>
@@ -9029,10 +9101,44 @@ ${e?.message || String(e)}`
                 </svg>
               </button>
             )}
-            <button type='button' disabled={isReadOnly || saving || !isDirty || !!recuperableTesseraEdit} onClick={handleSave}
+            {npTab === 'allegati' && mode === 'edit' && currentOid != null && (
+              <>
+                <span style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                  {GII_ALLOWED_ATTACHMENT_UPLOAD_HINT}
+                </span>
+                <button
+                  type='button'
+                  onClick={() => {
+                    if (isReadOnly || isRitAgrTecLimitedEdit || attachmentsUploading || saving) return
+                    attachmentToolbarUploadInputRef.current?.click()
+                  }}
+                  disabled={isReadOnly || isRitAgrTecLimitedEdit || attachmentsUploading || saving}
+                  title='Aggiungi allegato'
+                  aria-label='Aggiungi allegato'
+                  style={{
+                    ...toolbarIconBtnBase,
+                    marginRight: 12,
+                    border: (isReadOnly || isRitAgrTecLimitedEdit || attachmentsUploading || saving) ? '1px solid #e5e7eb' : '1px solid #0d3b66',
+                    boxShadow: `inset 0 0 0 1px ${(isReadOnly || isRitAgrTecLimitedEdit || attachmentsUploading || saving) ? '#e5e7eb' : '#0d3b66'}`,
+                    background: '#fff',
+                    color: (isReadOnly || isRitAgrTecLimitedEdit || attachmentsUploading || saving) ? '#9ca3af' : '#0d3b66',
+                    cursor: (isReadOnly || isRitAgrTecLimitedEdit || attachmentsUploading || saving) ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  <span aria-hidden='true' style={{ visibility: 'hidden', lineHeight: 'normal' }}>M</span>
+                  <svg width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false' style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}>
+                    <path d='M21 13.1v5.9c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2v-4'/>
+                    <path d='M3 15V5c0-1.1.9-2 2-2h5.9'/>
+                    <path d='M16.5 3v9'/>
+                    <path d='M12 7.5h9'/>
+                  </svg>
+                </button>
+              </>
+            )}
+            <button ref={toolbarSaveButtonRef} type='button' disabled={isReadOnly || saving || !isDirty || !!recuperableTesseraEdit} onClick={handleSave}
               style={{
                 ...btnBase,
-                border: '1px solid rgba(0,0,0,0.18)',
+                border: (isReadOnly || saving || !isDirty || !!recuperableTesseraEdit) ? 'none' : '1px solid rgba(0,0,0,0.18)',
                 background: (isReadOnly || saving || !isDirty || !!recuperableTesseraEdit) ? '#e5e7eb' : '#1a7f37',
                 color: (isReadOnly || saving || !isDirty || !!recuperableTesseraEdit) ? '#9ca3af' : '#fff',
                 cursor: (isReadOnly || saving || !isDirty || !!recuperableTesseraEdit) ? 'not-allowed' : 'pointer'
@@ -9042,7 +9148,7 @@ ${e?.message || String(e)}`
             <button type='button' disabled={isReadOnly || saving || !isDirty || !!recuperableTesseraEdit} onClick={handleCancel}
               style={{
                 ...btnBase,
-                border: '1px solid rgba(0,0,0,0.24)',
+                border: (isReadOnly || saving || !isDirty || !!recuperableTesseraEdit) ? 'none' : '1px solid rgba(0,0,0,0.24)',
                 background: (isReadOnly || saving || !isDirty || !!recuperableTesseraEdit) ? '#e5e7eb' : '#d92d20',
                 color: (isReadOnly || saving || !isDirty || !!recuperableTesseraEdit) ? '#9ca3af' : '#fff',
                 cursor: (isReadOnly || saving || !isDirty || !!recuperableTesseraEdit) ? 'not-allowed' : 'pointer'
@@ -9054,7 +9160,7 @@ ${e?.message || String(e)}`
                 title={recuperableTesseraEdit ? 'Aggiorna o annulla prima i dati della tessera.' : (isDirty ? 'Salvare o annullare le modifiche prima di chiudere.' : undefined)}
                 style={{
                   ...btnBase,
-                  border: '1px solid rgba(0,0,0,0.24)',
+                  border: (saving || isDirty || !!recuperableTesseraEdit) ? 'none' : '1px solid rgba(0,0,0,0.24)',
                   background: (saving || isDirty || !!recuperableTesseraEdit) ? '#e5e7eb' : '#1d4ed8',
                   color: (saving || isDirty || !!recuperableTesseraEdit) ? '#9ca3af' : '#fff',
                   cursor: (saving || isDirty || !!recuperableTesseraEdit) ? 'not-allowed' : 'pointer'
@@ -9192,7 +9298,7 @@ ${e?.message || String(e)}`
         disabled={isReadOnly && npTab !== 'violazione' && npTab !== 'nota_spese' && npTab !== 'allegati' && npTab !== 'anteprima'}
         style={{ border: 0, padding: 0, margin: 0, minWidth: 0, flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}
       >
-      <div style={tabContentStyle}>
+      <div ref={tabContentRef} style={tabContentStyle}>
 
         {/* DATI GENERALI */}
         {npTab === 'dati_generali' && renderLayoutTab('dati_generali')}
@@ -9604,14 +9710,16 @@ ${e?.message || String(e)}`
 {mode === 'edit' && currentOid != null && (
   <div style={{ display: npTab === 'allegati' ? 'flex' : 'none', flexDirection: 'column', minHeight: 0, height: '100%' }}>
     <GiiAttachmentViewer
-      title='ALLEGATI'
       oidAvailable={mode === 'edit' && currentOid != null}
-      items={visibleTechnicalAttachments as any}
+      items={visibleTechnicalAttachmentsForViewer as any}
       loading={attachmentsLoading}
       busy={attachmentsUploading || saving}
       error={attachmentsError}
       canEdit={!isReadOnly && !isRitAgrTecLimitedEdit}
       uploadInputKey={attachmentInputKey}
+      uploadInputRef={attachmentToolbarUploadInputRef}
+      showUploadControls={false}
+      uploadLabel='Aggiungi allegato'
       onUpload={(files) => {
         if (isReadOnly || isRitAgrTecLimitedEdit) return
         setAttachmentsError(null)
@@ -9661,9 +9769,45 @@ ${e?.message || String(e)}`
       headerFontSize={formStyle.cardHeaderFontSize}
       headerBg={formStyle.cardHeaderBg}
       headerColor={formStyle.cardHeaderColor}
-      headerBorderColor='#c5d9f1'
+      headerBorderColor={String((cfg as any).formCardBorderColor || '#c5d9f1')}
       borderRadius={formStyle.cardBorderRadius}
       innerHeaderColor={formStyle.hdrColor}
+      groupHeaderBg={String((cfg as any).attachmentsHeaderBg || 'linear-gradient(90deg, #0d3b66, #155e9d)')}
+      groupHeaderColor={String((cfg as any).attachmentsHeaderColor || '#ffffff')}
+      groupHeaderPaddingX={Number((cfg as any).attachmentsHeaderPaddingX ?? 10)}
+      groupHeaderPaddingY={Number((cfg as any).attachmentsHeaderPaddingY ?? 7)}
+      groupHeaderFontSize={Number((cfg as any).attachmentsHeaderFontSize ?? 14)}
+      groupHeaderFontWeight={Number((cfg as any).attachmentsHeaderFontWeight ?? 800)}
+      panelBackground={String((cfg as any).attachmentsPanelBg || '#ffffff')}
+      panelBorderColor={String((cfg as any).attachmentsPanelBorderColor || '#c6d7ea')}
+      panelBorderWidth={Number((cfg as any).attachmentsPanelBorderWidth ?? 1)}
+      panelBorderRadius={Number((cfg as any).attachmentsPanelBorderRadius ?? 8)}
+      panelPaddingTop={Number((cfg as any).attachmentsPanelPaddingTop ?? 0)}
+      panelPaddingTopAffectsPreview={false}
+      panelPaddingRight={Number((cfg as any).attachmentsPanelPaddingRight ?? 0)}
+      panelPaddingBottom={Number((cfg as any).attachmentsPanelPaddingBottom ?? 0)}
+      panelPaddingLeft={Number((cfg as any).attachmentsPanelPaddingLeft ?? 0)}
+      panelShadow={String((cfg as any).attachmentsPanelShadow || '').trim() || 'none'}
+      panelContentInset={0}
+      listPaddingRight={0}
+      previewColumnGap={Number((cfg as any).attachmentsPreviewGap ?? 0)}
+      previewColumnWidth='50%'
+      previewPanelBorderColor={String((cfg as any).attachmentsPreviewPanelBorderColor || '#c6d7ea')}
+      previewPanelBorderWidth={Number((cfg as any).attachmentsPreviewPanelBorderWidth ?? 1)}
+      previewPanelBorderRadius={Number((cfg as any).attachmentsPreviewPanelBorderRadius ?? 8)}
+      previewPanelShadow={String((cfg as any).attachmentsPreviewPanelShadow || '').trim() || 'none'}
+      groupSectionStyle
+      groupSectionGap={Number((cfg as any).attachmentsGroupGap ?? 10)}
+      groupCardBg={String((cfg as any).attachmentsCardBg || '#f8fbff')}
+      groupCardBorderColor={String((cfg as any).attachmentsCardBorderColor || '#c6d7ea')}
+      groupCardBorderWidth={Number((cfg as any).attachmentsCardBorderWidth ?? 1)}
+      groupCardBorderRadius={Number((cfg as any).attachmentsCardBorderRadius ?? 8)}
+      groupCardBodyPadding={Number((cfg as any).attachmentsCardBodyPadding ?? 10)}
+      groupCardShadow={String((cfg as any).attachmentsCardShadow || '').trim() || 'none'}
+      recordHoverBackground={String((cfg as any).attachmentsRecordHoverBg || '#f8fbff')}
+      recordSelectedBackground={String((cfg as any).attachmentsRecordSelectedBg || '#eff6ff')}
+      disabledActionBackground='#fff'
+      disabledActionOpacity={1}
     />
   </div>
 )}
@@ -9695,10 +9839,19 @@ ${e?.message || String(e)}`
       paddingRight: anteprimaPadding.x,
       paddingBottom: anteprimaPadding.bottom,
       paddingLeft: anteprimaPadding.x,
-      borderRadius: formStyle.cardBorderRadius,
       overflow: 'hidden'
     }}
   >
+    <div style={{
+      width: '100%',
+      height: '100%',
+      minHeight: 0,
+      boxSizing: 'border-box',
+      border: Number((cfg as any).fascicoloPanelBorderWidth ?? 1) > 0 ? `${Number((cfg as any).fascicoloPanelBorderWidth ?? 1)}px solid ${String((cfg as any).fascicoloPanelBorderColor || '#c6d7ea')}` : 'none',
+      borderRadius: Number((cfg as any).fascicoloPanelBorderWidth ?? 1) > 0 ? Number((cfg as any).fascicoloPanelBorderRadius ?? 8) : 0,
+      overflow: Number((cfg as any).fascicoloPanelBorderWidth ?? 1) > 0 ? 'hidden' : 'visible',
+      background: Number((cfg as any).fascicoloPanelBorderWidth ?? 1) > 0 ? String((cfg as any).fascicoloPreviewBackgroundColor || '#282828') : 'transparent'
+    }}>
     <AnteprimaPanel
       key={`gii-anteprima-${Number(currentOid)}`}
       data={draft}
@@ -9711,15 +9864,39 @@ ${e?.message || String(e)}`
       mapConfig={p.mapConfig}
       mapTarget={p.clickedPointWgs84 || p.existingGeomWgs84 || null}
       notaSpeseConfig={noteSpeseCfg}
-      viewerBackgroundColor={String((cfg as any).anteprimaViewerBg || '#282828')}
+      viewerBackgroundColor={String((cfg as any).fascicoloPreviewBackgroundColor || '#282828')}
       pdfHeaderBackgroundColor={String((cfg as any).anteprimaPdfHeaderBg || '#282828')}
       pdfPageAreaBackgroundColor={String((cfg as any).anteprimaPdfAreaBg || '#282828')}
       pdfThumbnailsBackgroundColor={String((cfg as any).anteprimaPdfThumbnailsBg || '#1f1f1f')}
       pdfToolbarBackgroundColor={String((cfg as any).anteprimaPdfToolbarBg || '#3c3c3c')}
       sidebarBackgroundColor={String((cfg as any).anteprimaSidebarBg || '#eef4fb')}
       sidebarBorderColor={String((cfg as any).anteprimaSidebarBorderColor || '#b8c7d9')}
-      sidebarBorderWidth={Number((cfg as any).anteprimaSidebarBorderWidth ?? 1)}
+      sidebarBorderWidth={0}
+      sidebarBorderMode='left'
+      sidebarPaddingTop={Number((cfg as any).fascicoloSidebarPaddingTop ?? 10)}
+      sidebarPaddingRight={Number((cfg as any).fascicoloSidebarPaddingRight ?? 10)}
+      sidebarPaddingBottom={Number((cfg as any).fascicoloSidebarPaddingBottom ?? 10)}
+      sidebarPaddingLeft={Number((cfg as any).fascicoloSidebarPaddingLeft ?? 10)}
+      previewBorderColor={String((cfg as any).fascicoloPreviewBorderColor || '#c6d7ea')}
+      previewBorderWidth={Number((cfg as any).fascicoloPreviewBorderWidth ?? 1)}
+      previewBorderRadius={Number((cfg as any).fascicoloPreviewBorderRadius ?? 8)}
+      docsCardBg={String((cfg as any).fascicoloDocsCardBg || '#f8fbff')}
+      docsCardBorderColor={String((cfg as any).fascicoloDocsCardBorderColor || '#c6d7ea')}
+      docsCardBorderWidth={Number((cfg as any).fascicoloDocsCardBorderWidth ?? 1)}
+      docsCardBorderRadius={Number((cfg as any).fascicoloDocsCardBorderRadius ?? 8)}
+      docsCardShadow={String((cfg as any).fascicoloDocsCardShadow || 'none')}
+      docsGroupGap={Number((cfg as any).fascicoloDocsGroupGap ?? 10)}
+      docsHeaderBg={String((cfg as any).fascicoloDocsHeaderBg || 'linear-gradient(90deg, #0d3b66, #155e9d)')}
+      docsHeaderColor={String((cfg as any).fascicoloDocsHeaderColor || '#ffffff')}
+      docsHeaderFontSize={Number((cfg as any).fascicoloDocsHeaderFontSize ?? 12)}
+      docsHeaderFontWeight={Number((cfg as any).fascicoloDocsHeaderFontWeight ?? 900)}
+      docsHeaderPaddingX={Number((cfg as any).fascicoloDocsHeaderPaddingX ?? 10)}
+      docsHeaderPaddingY={Number((cfg as any).fascicoloDocsHeaderPaddingY ?? 7)}
+      docsBodyPadding={Number((cfg as any).fascicoloDocsBodyPadding ?? 10)}
+      docsTextColor={String((cfg as any).fascicoloDocsTextColor || '#334155')}
+      docsDisabledTextColor={String((cfg as any).fascicoloDocsDisabledTextColor || '#94a3b8')}
     />
+    </div>
   </div>
 )}
 
