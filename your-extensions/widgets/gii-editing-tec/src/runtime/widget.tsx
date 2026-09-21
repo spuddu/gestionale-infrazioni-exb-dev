@@ -7563,6 +7563,11 @@ ${e?.message || String(e)}`
     { id: 'allegati', label: 'Allegati' }
   ] as const
 
+  const toolbarRowRef = React.useRef<HTMLDivElement | null>(null)
+  const [toolbarSaveButtonEl, setToolbarSaveButtonEl] = React.useState<HTMLButtonElement | null>(null)
+  const [toolbarSquareButtonSize, setToolbarSquareButtonSize] = React.useState<number | null>(null)
+  const [toolbarRowMultiline, setToolbarRowMultiline] = React.useState(false)
+
   const btnBase: React.CSSProperties = {
     padding: '7px 16px', borderRadius: 8, border: 'none',
     fontWeight: 700, fontSize: 13,
@@ -7579,14 +7584,16 @@ ${e?.message || String(e)}`
   }
 
   // I pulsanti icona della toolbar sono quadrati e usano come lato l'altezza
-  // effettivamente renderizzata del pulsante Salva (misurata sotto sul toolbarRow).
+  // effettivamente renderizzata del pulsante Salva. La misura è mantenuta in stato
+  // React, così non dipende dal timing di una variabile CSS valorizzata dopo il mount.
   const toolbarIconBtnBase: React.CSSProperties = {
     ...btnBase,
-    width: 'var(--gii-toolbar-square-button-size)',
-    height: 'var(--gii-toolbar-square-button-size)',
+    width: toolbarSquareButtonSize ?? undefined,
+    height: toolbarSquareButtonSize ?? undefined,
     padding: 0,
     position: 'relative',
-    flex: '0 0 var(--gii-toolbar-square-button-size)'
+    flex: toolbarSquareButtonSize != null ? `0 0 ${toolbarSquareButtonSize}px` : '0 0 auto',
+    visibility: toolbarSquareButtonSize != null ? 'visible' : 'hidden'
   }
 
   const tabBtn = (id: string, label: string) => (
@@ -8908,21 +8915,18 @@ ${e?.message || String(e)}`
     )
   }
 
-  const toolbarRowRef = React.useRef<HTMLDivElement | null>(null)
-  const toolbarSaveButtonRef = React.useRef<HTMLButtonElement | null>(null)
-  const [toolbarRowMultiline, setToolbarRowMultiline] = React.useState(false)
-
   React.useLayoutEffect((): (() => void) | void => {
-    const rowEl = toolbarRowRef.current
-    const saveEl = toolbarSaveButtonRef.current
-    if (!rowEl || !saveEl) return
+    const saveEl = toolbarSaveButtonEl
+    if (!saveEl) {
+      setToolbarSquareButtonSize(null)
+      return
+    }
 
     const syncSquareButtonSize = (): void => {
       try {
         const h = saveEl.getBoundingClientRect().height
         if (Number.isFinite(h) && h > 0) {
-          rowEl.style.setProperty('--gii-toolbar-square-button-size', `${h}px`)
-          rowEl.parentElement?.style.setProperty('--gii-toolbar-reference-button-size', `${h}px`)
+          setToolbarSquareButtonSize(prev => (prev != null && Math.abs(prev - h) < 0.1) ? prev : h)
         }
       } catch {}
     }
@@ -8942,7 +8946,7 @@ ${e?.message || String(e)}`
       try { ro?.disconnect() } catch {}
       window.removeEventListener('resize', syncSquareButtonSize, true)
     }
-  }, [])
+  }, [toolbarSaveButtonEl])
 
   React.useEffect((): (() => void) | void => {
     const el = toolbarRowRef.current
@@ -9135,7 +9139,7 @@ ${e?.message || String(e)}`
                 </button>
               </>
             )}
-            <button ref={toolbarSaveButtonRef} type='button' disabled={isReadOnly || saving || !isDirty || !!recuperableTesseraEdit} onClick={handleSave}
+            <button ref={setToolbarSaveButtonEl} type='button' disabled={isReadOnly || saving || !isDirty || !!recuperableTesseraEdit} onClick={handleSave}
               style={{
                 ...btnBase,
                 border: (isReadOnly || saving || !isDirty || !!recuperableTesseraEdit) ? 'none' : '1px solid rgba(0,0,0,0.18)',

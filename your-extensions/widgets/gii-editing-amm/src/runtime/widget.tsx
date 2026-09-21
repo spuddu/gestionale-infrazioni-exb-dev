@@ -1835,17 +1835,31 @@ type RiaIntegrationDocumentInfo = {
 type RiaIntegrationCycleInfo = {
   requested: boolean
   requestRole: string
+  requestDestination: string
   requestUsername: string
   requestOperatorName: string
   requestAt: any
   requestNote: string
   requestTargets: string[]
   requestMotivation: string
+  // `received` descrive il successivo passaggio RIA -> IA e resta separato
+  // dal rientro tecnico DT -> RIA, che serve esclusivamente alla lettura del ciclo.
   received: boolean
   responseUsername: string
   responseOperatorName: string
   responseAt: any
   responseNote: string
+  technicalReceived: boolean
+  technicalResponseRole: string
+  technicalResponseUsername: string
+  technicalResponseOperatorName: string
+  technicalResponseAt: any
+  technicalResponseNote: string
+  previousIaOutcomeCode: number | null
+  previousIaOutcomeAt: any
+  previousIaOutcomeUsername: string
+  previousIaOutcomeOperatorName: string
+  previousIaOutcomeNote: string
   modifiedFields: string[]
   documents: RiaIntegrationDocumentInfo[]
 }
@@ -1853,6 +1867,7 @@ type RiaIntegrationCycleInfo = {
 const EMPTY_RIA_INTEGRATION_CYCLE: RiaIntegrationCycleInfo = {
   requested: false,
   requestRole: '',
+  requestDestination: '',
   requestUsername: '',
   requestOperatorName: '',
   requestAt: null,
@@ -1864,6 +1879,17 @@ const EMPTY_RIA_INTEGRATION_CYCLE: RiaIntegrationCycleInfo = {
   responseOperatorName: '',
   responseAt: null,
   responseNote: '',
+  technicalReceived: false,
+  technicalResponseRole: '',
+  technicalResponseUsername: '',
+  technicalResponseOperatorName: '',
+  technicalResponseAt: null,
+  technicalResponseNote: '',
+  previousIaOutcomeCode: null,
+  previousIaOutcomeAt: null,
+  previousIaOutcomeUsername: '',
+  previousIaOutcomeOperatorName: '',
+  previousIaOutcomeNote: '',
   modifiedFields: [],
   documents: []
 }
@@ -1955,11 +1981,10 @@ async function loadCurrentRiaIntegrationCycle (parentGlobalIdRaw: any, iaOutcome
     const res = await fl.queryFeatures(q)
     const rows = (res?.features || []).map((feature: any) => feature?.attributes || {}).filter(Boolean)
     const iaOutcomeAtMs = workflowTimestamp(iaOutcomeAtRaw)
-    // Finché l'esito IA è ancora valorizzato lo usiamo solo come limite per
-    // individuare una richiesta ancora in attesa. Dopo il rientro tecnico RIA -> IA
-    // quei campi vengono azzerati per aprire il nuovo lavoro dell'IA: il ciclo
-    // concluso va quindi ricostruito dalla coppia richiesta/ritorno presente nel LOG,
-    // senza ripescare rimandi più vecchi della stessa pratica.
+    // L'ultimo esito IA resta valorizzato fino alla nuova valutazione. Lo usiamo
+    // quindi come limite temporale per distinguere il ciclo di integrazione corrente
+    // dai rimandi più vecchi della stessa pratica; richiesta e rientro vengono poi
+    // ricostruiti dalla coppia strutturata presente nel LOG.
     const cycleFloorMs = iaOutcomeAtMs > 0 ? iaOutcomeAtMs - 2000 : 0
     const requestEvents = new Set([
       'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE',
@@ -1967,69 +1992,117 @@ async function loadCurrentRiaIntegrationCycle (parentGlobalIdRaw: any, iaOutcome
       'FASCICOLO_RIMANDATO_INTEGRAZIONE',
       'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE'
     ])
-    const responseEvents = new Set([
-      'ESITO_INTEGRAZIONE_TRASMESSO',
-      'FASCICOLO_TRASMESSO_VERIFICA'
-    ])
-
-    // Il rientro mostrato all'IA è sempre l'ultimo RIA -> IA pertinente. Il ritorno
-    // di un'integrazione tecnica richiesta dal RIA è FASCICOLO_TRASMESSO_VERIFICA;
-    // ESITO_INTEGRAZIONE_TRASMESSO resta invece il ritorno a seguito di una richiesta
-    // effettivamente partita dall'IA.
-    let responseIndex = -1
+    // Prima individuiamo la RICHIESTA corrente e solo dopo cerchiamo il suo
+    // eventuale rientro. Partire dall'ultimo RIA -> IA, come avveniva prima,
+    // poteva agganciare un ciclo precedente e nascondere il nuovo rimando RIA -> RIT.
+    let requestIndex = -1
     for (let index = rows.length - 1; index >= 0; index--) {
       const attrs = rows[index]
       const event = String(attrs?.evento_chiusura || '').trim().toUpperCase()
+      if (!requestEvents.has(event)) continue
+      const rowAtMs = workflowTimestamp(attrs?.dt_chiusura)
+      if (cycleFloorMs > 0 && rowAtMs > 0 && rowAtMs < cycleFloorMs) break
       const role = String(attrs?.ruolo_competente || '').trim().toUpperCase()
       const destination = String(attrs?.ruolo_destinatario || '').trim().toUpperCase()
-      if (responseEvents.has(event) && role === 'RIA' && destination === 'IA') {
-        responseIndex = index
-        break
-      }
-    }
-
-    let requestIndex = -1
-    if (responseIndex >= 0) {
-      const responseEvent = String(rows[responseIndex]?.evento_chiusura || '').trim().toUpperCase()
-      // Si risale dal rientro alla richiesta che lo ha realmente generato:
-      // - FASCICOLO_TRASMESSO_VERIFICA => richiesta tecnica RIA -> RIT;
-      // - ESITO_INTEGRAZIONE_TRASMESSO => richiesta IA -> RIA.
-      // Cercare all'indietro evita di associare il rientro a un vecchio rimando CS/RIT.
-      for (let index = responseIndex - 1; index >= 0; index--) {
-        const attrs = rows[index]
-        const event = String(attrs?.evento_chiusura || '').trim().toUpperCase()
-        if (!requestEvents.has(event)) continue
-        const role = String(attrs?.ruolo_competente || '').trim().toUpperCase()
-        const destination = String(attrs?.ruolo_destinatario || '').trim().toUpperCase()
-        const matchesResponse = responseEvent === 'FASCICOLO_TRASMESSO_VERIFICA'
-          ? role === 'RIA' && destination === 'RIT'
-          : role === 'IA' && destination === 'RIA'
-        if (!matchesResponse) continue
-        requestIndex = index
-        break
-      }
-    } else {
-      // Nessun rientro ancora disponibile: manteniamo il comportamento della
-      // richiesta corrente, limitandolo all'ultimo esito IA quando presente.
-      for (let index = rows.length - 1; index >= 0; index--) {
-        const attrs = rows[index]
-        const event = String(attrs?.evento_chiusura || '').trim().toUpperCase()
-        const rowAtMs = workflowTimestamp(attrs?.dt_chiusura)
-        if (!requestEvents.has(event)) continue
-        if (cycleFloorMs > 0 && rowAtMs > 0 && rowAtMs < cycleFloorMs) break
-        requestIndex = index
-        break
-      }
+      const isTechnicalRiaRequest = role === 'RIA' && destination.startsWith('RIT')
+      const isIaRequestToRia = role === 'IA' && (destination === 'RIA' || destination.startsWith('RIA_'))
+      if (!isTechnicalRiaRequest && !isIaRequestToRia) continue
+      requestIndex = index
+      break
     }
     if (requestIndex < 0) return { ...EMPTY_RIA_INTEGRATION_CYCLE }
 
     const requestAttrs = rows[requestIndex]
     const requestAtMs = workflowTimestamp(requestAttrs?.dt_chiusura)
+    const requestRoleForCycle = String(requestAttrs?.ruolo_competente || '').trim().toUpperCase()
+    const requestDestinationForCycle = String(requestAttrs?.ruolo_destinatario || '').trim().toUpperCase()
+
+    // `responseIndex` resta il passaggio che riapre il lavoro dell'IA:
+    // - richiesta RIA -> RIT: il successivo RIA -> IA con FASCICOLO_TRASMESSO_VERIFICA;
+    // - richiesta IA -> RIA: il successivo RIA -> IA con ESITO_INTEGRAZIONE_TRASMESSO.
+    let responseIndex = -1
+    for (let index = requestIndex + 1; index < rows.length; index++) {
+      const attrs = rows[index]
+      const event = String(attrs?.evento_chiusura || '').trim().toUpperCase()
+      const role = String(attrs?.ruolo_competente || '').trim().toUpperCase()
+      const destination = String(attrs?.ruolo_destinatario || '').trim().toUpperCase()
+      if (role !== 'RIA' || !(destination === 'IA' || destination.startsWith('IA_'))) continue
+      const matches = requestRoleForCycle === 'RIA' && requestDestinationForCycle.startsWith('RIT')
+        ? event === 'FASCICOLO_TRASMESSO_VERIFICA'
+        : event === 'ESITO_INTEGRAZIONE_TRASMESSO'
+      if (!matches) continue
+      responseIndex = index
+      break
+    }
+
     const responseAttrs: any = responseIndex > requestIndex ? rows[responseIndex] : null
     if (!responseAttrs) responseIndex = -1
 
     const responseAtMs = workflowTimestamp(responseAttrs?.dt_chiusura)
-    const endIndex = responseIndex >= 0 ? responseIndex : rows.length - 1
+
+    // Nel rimando tecnico RIA -> RIT il "Rientro" amministrativo si compie quando
+    // l'esito tecnico raggiunge nuovamente il richiedente RIA, cioè con DT/DIR -> RIA.
+    // Il successivo RIA -> IA è un nuovo passaggio procedurale e non deve essere
+    // confuso con il rientro mostrato nella card del ciclo.
+    let technicalResponseIndex = -1
+    if (requestRoleForCycle === 'RIA' && requestDestinationForCycle.startsWith('RIT')) {
+      const lastCandidateIndex = responseIndex >= 0 ? responseIndex - 1 : rows.length - 1
+      for (let index = requestIndex + 1; index <= lastCandidateIndex; index++) {
+        const attrs = rows[index]
+        const event = String(attrs?.evento_chiusura || '').trim().toUpperCase()
+        const role = String(attrs?.ruolo_competente || '').trim().toUpperCase()
+        const destination = String(attrs?.ruolo_destinatario || '').trim().toUpperCase()
+        if (event !== 'ESITO_INTEGRAZIONE_TRASMESSO') continue
+        if (!(role === 'DT' || role === 'DIR' || role.startsWith('DT_') || role.startsWith('DIR_'))) continue
+        if (!(destination === 'RIA' || destination.startsWith('RIA_'))) continue
+        technicalResponseIndex = index
+      }
+    }
+    const technicalResponseAttrs: any = technicalResponseIndex >= 0 ? rows[technicalResponseIndex] : null
+    const technicalResponseAtMs = workflowTimestamp(technicalResponseAttrs?.dt_chiusura)
+
+    // Recupera l'esito IA del SOLO ciclo amministrativo immediatamente precedente
+    // alla richiesta corrente. Non dobbiamo mai scorrere all'indietro fino a un
+    // esito piu' vecchio: in alcune versioni il ciclo IA piu' recente veniva chiuso
+    // sovrascrivendo valori_dopo_json e il vecchio algoritmo finiva per mostrare,
+    // ad esempio, una NON CONFORMITA' di giorni prima al posto dell'ultimo CONFORME.
+    let previousIaOutcomeCode: number | null = null
+    let previousIaOutcomeAt: any = null
+    let previousIaOutcomeUsername = ''
+    let previousIaOutcomeNote = ''
+    let latestIaAttrs: any = null
+    for (let index = requestIndex - 1; index >= 0; index--) {
+      const attrs = rows[index]
+      const role = String(attrs?.ruolo_competente || '').trim().toUpperCase()
+      if (role !== 'IA') continue
+      latestIaAttrs = attrs
+      break
+    }
+    if (latestIaAttrs) {
+      const after = parseJsonObject(latestIaAttrs?.valori_dopo_json)
+      const storedCode = parseNumberInput(pickAttrCI(after, ['esito_IA', 'ESITO_IA']))
+      const latestIaEvent = String(latestIaAttrs?.evento_chiusura || '').trim().toUpperCase()
+      if (storedCode === 1 || storedCode === 2 || storedCode === 3) {
+        previousIaOutcomeCode = storedCode
+        previousIaOutcomeAt = pickAttrCI(after, ['dt_esito_IA', 'DT_ESITO_IA']) || null
+        previousIaOutcomeNote = String(pickAttrCI(after, ['note_IA', 'NOTE_IA']) || '').trim()
+      } else if (latestIaEvent === 'FASCICOLO_TRASMESSO_VERIFICA') {
+        // La trasmissione del fascicolo/determinazione al RIA e' possibile solo dopo
+        // un esito IA conforme. Per i cicli storici danneggiati possiamo quindi
+        // ricostruire correttamente il giudizio, ma NON inventiamo la data esatta:
+        // se dt_esito_IA non e' piu' nel log, resta non disponibile.
+        previousIaOutcomeCode = 2
+      } else if (latestIaEvent === 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE') {
+        // Nel modello IA la non conformita' coincide con il rimando al RIA.
+        previousIaOutcomeCode = 1
+        previousIaOutcomeNote = String(latestIaAttrs?.note_chiusura || '').trim()
+      }
+      previousIaOutcomeUsername = String(latestIaAttrs?.utente_operatore || '').trim()
+    }
+
+    const endIndex = technicalResponseIndex >= 0
+      ? technicalResponseIndex
+      : (responseIndex >= 0 ? responseIndex : rows.length - 1)
     const modifiedFields = new Set<string>()
     const documentsByKey = new Map<string, RiaIntegrationDocumentInfo>()
     const auditFloorMs = requestAtMs > 0 ? requestAtMs - 2000 : 0
@@ -2055,17 +2128,23 @@ async function loadCurrentRiaIntegrationCycle (parentGlobalIdRaw: any, iaOutcome
 
     const requestNote = String(requestAttrs?.note_chiusura || '').trim()
     const parsedRequest = parseAdministrativeIntegrationRequestNote(requestNote)
-    const requestRole = String(requestAttrs?.ruolo_competente || '').trim().toUpperCase()
+    const requestRole = requestRoleForCycle
+    const requestDestination = requestDestinationForCycle
     const requestUsername = String(requestAttrs?.utente_operatore || '').trim()
     const responseUsername = String(responseAttrs?.utente_operatore || '').trim()
-    const [requestOperatorName, responseOperatorName] = await Promise.all([
+    const technicalResponseRole = String(technicalResponseAttrs?.ruolo_competente || '').trim().toUpperCase()
+    const technicalResponseUsername = String(technicalResponseAttrs?.utente_operatore || '').trim()
+    const [requestOperatorName, responseOperatorName, technicalResponseOperatorName, previousIaOutcomeOperatorName] = await Promise.all([
       resolveHistoricalAmmOperatorName(requestUsername, requestRole),
-      responseAttrs ? resolveHistoricalAmmOperatorName(responseUsername, 'RIA') : Promise.resolve('')
+      responseAttrs ? resolveHistoricalAmmOperatorName(responseUsername, 'RIA') : Promise.resolve(''),
+      technicalResponseAttrs ? resolveHistoricalAmmOperatorName(technicalResponseUsername, technicalResponseRole) : Promise.resolve(''),
+      previousIaOutcomeUsername ? resolveHistoricalAmmOperatorName(previousIaOutcomeUsername, 'IA') : Promise.resolve('')
     ])
 
     return {
       requested: true,
       requestRole,
+      requestDestination,
       requestUsername,
       requestOperatorName,
       requestAt: requestAtMs || requestAttrs?.dt_chiusura || null,
@@ -2077,6 +2156,17 @@ async function loadCurrentRiaIntegrationCycle (parentGlobalIdRaw: any, iaOutcome
       responseOperatorName,
       responseAt: responseAtMs || responseAttrs?.dt_chiusura || null,
       responseNote: String(responseAttrs?.note_chiusura || '').trim(),
+      technicalReceived: !!technicalResponseAttrs,
+      technicalResponseRole,
+      technicalResponseUsername,
+      technicalResponseOperatorName,
+      technicalResponseAt: technicalResponseAtMs || technicalResponseAttrs?.dt_chiusura || null,
+      technicalResponseNote: String(technicalResponseAttrs?.note_chiusura || '').trim(),
+      previousIaOutcomeCode,
+      previousIaOutcomeAt,
+      previousIaOutcomeUsername,
+      previousIaOutcomeOperatorName,
+      previousIaOutcomeNote,
       modifiedFields: Array.from(modifiedFields),
       documents: Array.from(documentsByKey.values())
     }
@@ -6020,9 +6110,17 @@ function AdministrativeIntegrationCycleCards (props: { cycle: RiaIntegrationCycl
   const st = useAdminStyle()
   const cycle = props.cycle || EMPTY_RIA_INTEGRATION_CYCLE
   const requestOperator = cleanAmmOperatorLabel(cycle.requestOperatorName || cycle.requestUsername)
-  const responseOperator = cleanAmmOperatorLabel(cycle.responseOperatorName || cycle.responseUsername)
+  const isTechnicalRiaCycle =
+    normalizeRole(cycle.requestRole) === 'RIA' && normalizeRole(cycle.requestDestination).startsWith('RIT')
+  const responseReceived = isTechnicalRiaCycle ? cycle.technicalReceived : cycle.received
+  const responseOperator = cleanAmmOperatorLabel(
+    isTechnicalRiaCycle
+      ? (cycle.technicalResponseOperatorName || cycle.technicalResponseUsername)
+      : (cycle.responseOperatorName || cycle.responseUsername)
+  )
+  const responseNote = isTechnicalRiaCycle ? cycle.technicalResponseNote : cycle.responseNote
   const requestAt = formatDateTimeValue(cycle.requestAt)
-  const responseAt = formatDateTimeValue(cycle.responseAt)
+  const responseAt = formatDateTimeValue(isTechnicalRiaCycle ? cycle.technicalResponseAt : cycle.responseAt)
   const fieldLabels = cycle.modifiedFields
     .map(fieldName => integrationModifiedFieldLabel(fieldName, props.fields))
     .filter(Boolean)
@@ -6033,10 +6131,10 @@ function AdministrativeIntegrationCycleCards (props: { cycle: RiaIntegrationCycl
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere'
   }
-  const hasResponseAnnotations = !!cycle.responseNote
+  const hasResponseAnnotations = !!responseNote
   const hasResponseData = fieldLabels.length > 0
   const hasResponseDocuments = cycle.documents.length > 0
-  const responseContent = !cycle.received
+  const responseContent = !responseReceived
     ? 'In attesa del rientro'
     : hasResponseData && hasResponseDocuments
       ? 'Dati e documenti integrati'
@@ -6065,24 +6163,24 @@ function AdministrativeIntegrationCycleCards (props: { cycle: RiaIntegrationCycl
         </div>
 
         <div style={{ minWidth: 0, padding: '2px 0 2px 14px', borderLeft: `1px solid ${st.integrationCycleVerticalSeparatorColor || '#93c5fd'}`, display: 'grid', gap: 9 }}>
-          <div style={{ color: cycle.received ? '#1d4ed8' : '#64748b', fontSize: adminFieldFontSize(st), fontWeight: 900 }}>
+          <div style={{ color: responseReceived ? '#1d4ed8' : '#64748b', fontSize: adminFieldFontSize(st), fontWeight: 900 }}>
             Rientro
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 10 }}>
             <StatusSummaryItem label='Mittente' value={responseOperator || '—'} tone='auto' />
             <StatusSummaryItem label='Data ricezione' value={responseAt || '—'} tone='auto' />
-            <StatusSummaryItem label='Contenuto' value={responseContent} tone={cycle.received ? 'auto' : 'normal'} />
+            <StatusSummaryItem label='Contenuto' value={responseContent} tone={responseReceived ? 'auto' : 'normal'} />
           </div>
-          {!cycle.received ? (
+          {!responseReceived ? (
             <div style={{ color: '#64748b', fontSize: adminFieldFontSize(st), lineHeight: 1.45 }}>
               Il rimando è stato disposto. L’esito dell’integrazione non è ancora disponibile.
             </div>
           ) : (
             <>
-              {cycle.responseNote && (
+              {responseNote && (
                 <div style={detailTextStyle}>
                   <span style={{ color: '#475569', fontWeight: 800 }}>Annotazioni: </span>
-                  {cycle.responseNote}
+                  {responseNote}
                 </div>
               )}
               {fieldLabels.length > 0 && (
@@ -6211,10 +6309,11 @@ function IaVerificationSummary (props: {
   const iaEsitoAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_IA']))
   const iaPresaInCaricoAt = workflowTimestamp(pickAttrCI(d, ['dt_presa_in_carico_IA']))
   const workflowParentGlobalId = String(pickAttrCI(d, ['GlobalID', 'globalid', 'GLOBALID']) || '').trim()
+  const canSeeAdministrativeIntegrationCycle = isAllowedAdminRole(role)
   const [riaIntegrationCycle, setRiaIntegrationCycle] = React.useState<RiaIntegrationCycleInfo>({ ...EMPTY_RIA_INTEGRATION_CYCLE })
   React.useEffect(() => {
     let cancelled = false
-    if (role !== 'IA' || !workflowParentGlobalId) {
+    if (!canSeeAdministrativeIntegrationCycle || !workflowParentGlobalId) {
       setRiaIntegrationCycle({ ...EMPTY_RIA_INTEGRATION_CYCLE })
       return () => { cancelled = true }
     }
@@ -6229,7 +6328,7 @@ function IaVerificationSummary (props: {
       cancelled = true
       window.removeEventListener('gii-log-eventi-cicli-changed', loadCycle)
     }
-  }, [role, workflowParentGlobalId, iaPresaInCaricoAt, iaEsitoAt])
+  }, [canSeeAdministrativeIntegrationCycle, workflowParentGlobalId, iaPresaInCaricoAt, iaEsitoAt])
   const riaIntegrationRequestAt = workflowTimestamp(riaIntegrationCycle.requestAt)
   const riaIntegrationResponseAt = workflowTimestamp(riaIntegrationCycle.responseAt)
   // Quando la risposta RIA e' disponibile, e' quella risposta ad aprire il nuovo
@@ -6249,7 +6348,7 @@ function IaVerificationSummary (props: {
   // a una bozza già trasmessa al RIA possiamo usarlo come segnale immediato e
   // lasciare al LOG il solo compito di arricchire il pannello con autore/data/note.
   const immediateRiaIntegrationReturn = (() => {
-    if (role !== 'IA') return false
+    if (!canSeeAdministrativeIntegrationCycle) return false
     const from = String(pickAttrCI(d, ['GII_da', 'gii_da']) || '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
     const to = String(pickAttrCI(d, ['GII_a', 'gii_a']) || '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
     const transmitted = parseNumberInput(pickAttrCI(d, ['GII_trasm', 'gii_trasm'])) === 1
@@ -6261,11 +6360,26 @@ function IaVerificationSummary (props: {
       !rimando &&
       (statoBozza === 'TRASMESSA_RIA' || statoBozza === 'BOZZA_TRASMESSA_RIA')
   })()
-  const hasLoggedRiaIntegrationResponse = role === 'IA' && integrationResponseOpensNewEvaluation
+  const hasLoggedRiaIntegrationResponse = canSeeAdministrativeIntegrationCycle && integrationResponseOpensNewEvaluation
   const hasCurrentRiaIntegrationResponse =
     (immediateRiaIntegrationReturn && (!riaIntegrationCycle.requested || integrationRequestStillCurrent)) ||
     hasLoggedRiaIntegrationResponse
-  const hasActiveAdministrativeIntegrationCycle = role === 'IA' && integrationRequestStillCurrent
+  // Il rimando tecnico RIA -> RIT deve rendere visibile immediatamente l'intero
+  // ciclo Rimando/Rientro, anche prima che il LOG asincrono venga ricostruito.
+  // In questo modo il lato Rientro resta già presente (vuoto) mentre la pratica è
+  // ancora nella catena tecnica, coerentemente con la rappresentazione del ciclo.
+  const currentWorkflowFrom = normalizeRole(pickAttrCI(d, ['GII_da', 'gii_da']))
+  const currentWorkflowTo = normalizeRole(pickAttrCI(d, ['GII_a', 'gii_a']))
+  const currentWorkflowTransmitted = parseNumberInput(pickAttrCI(d, ['GII_trasm', 'gii_trasm'])) === 1
+  const currentWorkflowRimando = parseNumberInput(pickAttrCI(d, ['GII_rim', 'gii_rim'])) === 1
+  const pendingTechnicalRiaIntegration =
+    canSeeAdministrativeIntegrationCycle &&
+    (currentWorkflowFrom === 'RIA' || currentWorkflowFrom === 'RIA_AMM') &&
+    currentWorkflowTo.startsWith('RIT') &&
+    currentWorkflowTransmitted &&
+    (currentWorkflowRimando || riaEsitoCode === 1)
+  const hasActiveAdministrativeIntegrationCycle =
+    canSeeAdministrativeIntegrationCycle && (integrationRequestStillCurrent || pendingTechnicalRiaIntegration)
   const iaSummaryTitle = 'Ultimo esito espresso'
   const noteLabel = esitoCode === 1
     ? 'Richiesta di integrazione'
@@ -6317,7 +6431,7 @@ function IaVerificationSummary (props: {
       ? (attoContestazioneOutcomeCycle ? 'Approvazione dell’Atto di contestazione' : 'Approvazione dell’istruttoria amministrativa')
       : 'Esito della verifica del Responsabile'
   const riaNoteText = riaEsitoCode === 1
-    ? `${riaReturnOutcomeText}${riaNoteClean ? `\n\nMotivazione: ${riaNoteClean}` : ''}`
+    ? `${riaReturnOutcomeText}${riaNoteClean ? `\nMotivazione: ${riaNoteClean}` : ''}`
     : riaEsitoCode === 3
       ? `${riaRejectedOutcomeText}${riaNoteClean ? `\n\nMotivazione: ${riaNoteClean}` : ''}`
       : `${riaApprovalOutcomeText}${riaNoteClean ? `\n\nNote: ${riaNoteClean}` : ''}`
@@ -6338,27 +6452,66 @@ function IaVerificationSummary (props: {
     return () => { cancelled = true }
   }, [riaParentGlobalId, riaHaApprovato, riaHaRichiestoIntegrazioni, riaEsitoCode, riaDataEsitoRaw])
   const riaDataEsito = formatDateTimeValue(riaDataEsitoRaw)
-  const showRiaOutcomeAsPrimary = !hasCurrentRiaIntegrationResponse && (riaHaRichiestoIntegrazioni || riaHaApprovato)
+  const displayedRiaIntegrationCycle: RiaIntegrationCycleInfo = integrationRequestStillCurrent
+    ? riaIntegrationCycle
+    : pendingTechnicalRiaIntegration
+      ? {
+          ...EMPTY_RIA_INTEGRATION_CYCLE,
+          requested: true,
+          requestRole: 'RIA',
+          requestDestination: currentWorkflowTo || 'RIT',
+          requestOperatorName: cleanAmmOperatorLabel(riaNome),
+          requestAt: riaDataEsitoRaw || null,
+          requestNote: riaNote,
+          requestMotivation: parseAdministrativeIntegrationRequestNote(riaNote).motivation || riaRimandoReason || riaNoteClean,
+          received: false
+        }
+      : riaIntegrationCycle
+
+  // L'esito espresso dall'IA è un dato storico del ciclo e non deve sparire
+  // durante la risalita tecnica. Per le pratiche già transitate con versioni che
+  // lo azzeravano al passaggio DT -> RIA lo ricostruiamo dal LOG, senza scrivere
+  // nulla sul record. Le nuove trasmissioni, invece, non lo cancelleranno più.
+  const historicalIaOutcomeCode = !hasEsito && riaIntegrationCycle.requested
+    ? riaIntegrationCycle.previousIaOutcomeCode
+    : null
+  const displayedIaOutcomeCode = hasEsito ? esitoCode : historicalIaOutcomeCode
+  const displayedIaOutcomeLabel = displayedIaOutcomeCode === 1
+    ? 'Non conforme'
+    : displayedIaOutcomeCode === 2
+      ? 'Conforme'
+      : displayedIaOutcomeCode === 3
+        ? 'Respinta'
+        : (esitoLabel || '')
+  const displayedIaOperator = hasEsito
+    ? cleanAmmOperatorLabel(tecnico)
+    : cleanAmmOperatorLabel(riaIntegrationCycle.previousIaOutcomeOperatorName || riaIntegrationCycle.previousIaOutcomeUsername || tecnico)
+  const displayedIaOutcomeAt = hasEsito
+    ? dataEsito
+    : formatDateTimeValue(riaIntegrationCycle.previousIaOutcomeAt)
+  const displayedIaNote = hasEsito ? note : riaIntegrationCycle.previousIaOutcomeNote
+
+  const showRiaOutcomeAsPrimary = !hasActiveAdministrativeIntegrationCycle && !hasCurrentRiaIntegrationResponse && (riaHaRichiestoIntegrazioni || riaHaApprovato)
   const primarySummaryTitle = showRiaOutcomeAsPrimary
     ? 'Esito del Responsabile dell’istruttoria amministrativa'
     : iaSummaryTitle
   const primaryEsitoLabel = showRiaOutcomeAsPrimary
     ? (riaHaApprovato ? (attoContestazioneOutcomeCycle ? 'Atto di contestazione approvato' : 'Istruttoria amministrativa approvata') : 'Integrazioni/rettifiche richieste')
-    : (esitoLabel || '—')
+    : (displayedIaOutcomeLabel || '—')
   const primaryOperatoreLabel = showRiaOutcomeAsPrimary
     ? 'Responsabile dell’istruttoria amministrativa'
     : 'Istruttore'
   const primaryOperatoreValue = showRiaOutcomeAsPrimary
     ? cleanAmmOperatorLabel(riaNome)
-    : cleanAmmOperatorLabel(tecnico)
+    : displayedIaOperator
   const primaryDateLabel = showRiaOutcomeAsPrimary
     ? (riaHaApprovato ? 'Data e ora approvazione' : 'Data e ora esito')
     : 'Data e ora esito'
-  const primaryDateValue = showRiaOutcomeAsPrimary ? riaDataEsito : dataEsito
+  const primaryDateValue = showRiaOutcomeAsPrimary ? riaDataEsito : displayedIaOutcomeAt
   const primaryTone = showRiaOutcomeAsPrimary
     ? (riaHaApprovato ? 'auto' : 'warn')
-    : (esitoCode === 1 ? 'warn' : esitoCode === 2 ? 'ok' : 'auto')
-  const hasIaVerification = hasEsito || !!note
+    : (displayedIaOutcomeCode === 1 ? 'warn' : displayedIaOutcomeCode === 2 ? 'ok' : 'auto')
+  const hasIaVerification = displayedIaOutcomeCode != null || !!displayedIaNote
   // Il ciclo di integrazione integra il riepilogo dell'esito precedente: non lo
   // sostituisce. L'IA deve continuare a vedere l'esito che ha originato il rimando
   // insieme alla richiesta e alla successiva risposta del RIA.
@@ -6427,7 +6580,7 @@ function IaVerificationSummary (props: {
             )}
             {hasActiveAdministrativeIntegrationCycle && (
               <div style={{ borderTop: hasPrimaryVerification ? `1px solid ${st.integrationCycleHorizontalSeparatorColor || '#d8e6f7'}` : 'none', paddingTop: hasPrimaryVerification ? 10 : 0 }}>
-                <AdministrativeIntegrationCycleCards cycle={riaIntegrationCycle} fields={props.fields} />
+                <AdministrativeIntegrationCycleCards cycle={displayedRiaIntegrationCycle} fields={props.fields} />
               </div>
             )}
             {hasRiaEsito && (
@@ -13261,7 +13414,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           })
           return
         }
-        if (isIaProfile && !isWorkflowAdminAccount && !isPracticeAssignedToCurrentIa(liveAttrs, profile)) {
+        const iaAssignedLive = !isIaProfile || isWorkflowAdminAccount || isPracticeAssignedToCurrentIa(liveAttrs, profile)
+        // L'intent read-only viene prodotto dal pannello Azioni dopo una selezione valida
+        // nell'Elenco pratiche. In consultazione l'assegnazione live non deve diventare
+        // un secondo diniego di accesso: continua invece a essere obbligatoria per le
+        // aperture operative/editabili.
+        const validReadOnlyConsultation =
+          isIaProfile &&
+          candidateSelection?.source === 'editIntent' &&
+          candidateSelection?.readOnly === true &&
+          isGiiPracticeSelectionContextCurrent()
+        if (isIaProfile && !isWorkflowAdminAccount && !iaAssignedLive && !validReadOnlyConsultation) {
           setIaAccess({
             status: 'denied',
             selectionKey: candidateSelectionKey,
@@ -13846,13 +14009,25 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     try {
       const openFeature = await findOpenAmmCycle(parentGlobalId, roleForLog)
       if (openFeature?.attributes) {
+        // Il ciclo IA APERTO contiene gia' l'audit dell'esito espresso (esito_IA,
+        // dt_esito_IA, eventuale nota). La chiusura per trasmissione del fascicolo
+        // non deve sostituirlo con il solo delta della trasmissione: in caso contrario
+        // si perde proprio l'ultimo esito che serve allo storico dell'iter.
+        const existingOld = parseJsonObject(openFeature.attributes.valori_prima_json)
+        const existingNew = parseJsonObject(openFeature.attributes.valori_dopo_json)
+        const merged = mergeAuditCycleMaps(existingOld, existingNew, delta.oldMap, delta.newMap)
+        const mergedNum = merged.fields.length
         const updateAttrs = filterAttrsForLayer({
           ...baseAttrs,
           [String(logLayer.objectIdField || 'OBJECTID')]: getLogObjectIdValue(openFeature.attributes, logLayer),
           utente_operatore: username || openFeature.attributes.utente_operatore || '',
           dt_apertura: openFeature.attributes.dt_apertura || null,
           numero_ciclo_ruolo: openFeature.attributes.numero_ciclo_ruolo || null,
-          session_id: openFeature.attributes.session_id || `ia-bozza-${now}`
+          session_id: openFeature.attributes.session_id || `ia-bozza-${now}`,
+          num_campi_modificati: mergedNum,
+          campi_modificati: merged.fields.join(', '),
+          valori_prima_json: mergedNum > 0 ? JSON.stringify(merged.oldMap) : '',
+          valori_dopo_json: mergedNum > 0 ? JSON.stringify(merged.newMap) : ''
         }, logFields)
         const res = await logLayer.applyEdits({ updateFeatures: [{ attributes: updateAttrs }] })
         const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
@@ -16064,6 +16239,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         overscrollBehavior: 'contain'
       }
 
+  const ammToolbarRowRef = React.useRef<HTMLDivElement | null>(null)
+  const [ammToolbarSaveButtonEl, setAmmToolbarSaveButtonEl] = React.useState<HTMLButtonElement | null>(null)
+  const [ammToolbarSquareButtonSize, setAmmToolbarSquareButtonSize] = React.useState<number | null>(null)
+
   const editBtnBase: React.CSSProperties = {
     padding: '7px 16px',
     borderRadius: 8,
@@ -16082,13 +16261,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     cursor: saving ? 'not-allowed' : 'pointer'
   }
   // I pulsanti grafici della toolbar usano come lato l'altezza reale del pulsante Salva.
+  // La misura è mantenuta in stato React per evitare dipendenze dal timing del mount.
   const ammToolbarIconBtnBase: React.CSSProperties = {
     ...editBtnBase,
-    width: 'var(--gii-amm-toolbar-square-button-size)',
-    height: 'var(--gii-amm-toolbar-square-button-size)',
+    width: ammToolbarSquareButtonSize ?? undefined,
+    height: ammToolbarSquareButtonSize ?? undefined,
     padding: 0,
     position: 'relative',
-    flex: '0 0 var(--gii-amm-toolbar-square-button-size)'
+    flex: ammToolbarSquareButtonSize != null ? `0 0 ${ammToolbarSquareButtonSize}px` : '0 0 auto',
+    visibility: ammToolbarSquareButtonSize != null ? 'visible' : 'hidden'
   }
   const saveDisabled = saving || !isDirty || !canEdit
   const cancelDisabled = saving || !isDirty
@@ -16108,20 +16289,18 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const pulseSave = pulseSaveDetermination || pulseSaveProtocol
   const pulseSaveTitle = pulseSaveDetermination ? 'Azione successiva: salva numero e data della determina' : 'Azione successiva: salva numero e data di protocollo'
 
-  const ammToolbarRowRef = React.useRef<HTMLDivElement | null>(null)
-  const ammToolbarSaveButtonRef = React.useRef<HTMLButtonElement | null>(null)
-
   React.useLayoutEffect((): (() => void) | void => {
-    const rowEl = ammToolbarRowRef.current
-    const saveEl = ammToolbarSaveButtonRef.current
-    if (!rowEl || !saveEl) return
+    const saveEl = ammToolbarSaveButtonEl
+    if (!saveEl) {
+      setAmmToolbarSquareButtonSize(null)
+      return
+    }
 
     const syncSquareButtonSize = (): void => {
       try {
         const h = saveEl.getBoundingClientRect().height
         if (Number.isFinite(h) && h > 0) {
-          rowEl.style.setProperty('--gii-amm-toolbar-square-button-size', `${h}px`)
-          rowEl.parentElement?.style.setProperty('--gii-amm-toolbar-reference-button-size', `${h}px`)
+          setAmmToolbarSquareButtonSize(prev => (prev != null && Math.abs(prev - h) < 0.1) ? prev : h)
         }
       } catch {}
     }
@@ -16139,7 +16318,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       try { ro?.disconnect() } catch {}
       window.removeEventListener('resize', syncSquareButtonSize, true)
     }
-  }, [])
+  }, [ammToolbarSaveButtonEl])
 
   const readOnlyInfoButton = readOnlyBannerMessage ? (
     <button
@@ -16391,7 +16570,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               )}
               <span style={{ position: 'relative', display: 'inline-flex' }}>
                 {pulseSave && <NextActionPulse floating title={pulseSaveTitle} />}
-                <button ref={ammToolbarSaveButtonRef} type='button' disabled={saveDisabled} onClick={handleSave}
+                <button ref={setAmmToolbarSaveButtonEl} type='button' disabled={saveDisabled} onClick={handleSave}
                   style={{
                     ...editBtnBase,
                     border: saveDisabled ? 'none' : '1px solid rgba(0,0,0,0.18)',

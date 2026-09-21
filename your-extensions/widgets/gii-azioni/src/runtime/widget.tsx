@@ -1573,11 +1573,12 @@ function actionButtonStyle (bg: string, disabled: boolean, ui?: { btnBorderRadiu
 }
 
 type Pending = null | 'TAKE' | 'ASSEGNA_IT' | 'ASSEGNA_IA' | 'INVIA_IA' | 'RESTITUISCI_IA' | 'INTEGRAZIONE' | 'INTEGRAZIONE_IA' | 'INTEGRAZIONE_TECNICA' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'ELIMINA'
+type PendingInviaIaContext = null | 'IA_INTEGRATION_OUTCOME'
 
 type WorkflowEsitoChoice = '' | 'CONFORME' | 'DA_INTEGRARE' | 'RESPINTA'
 
 type DirectPracticeAccessGate = {
-  status: 'idle' | 'checking' | 'allowed' | 'denied' | 'unavailable'
+  status: 'idle' | 'checking' | 'allowed' | 'consultation' | 'denied' | 'unavailable'
 }
 
 function ActionsPanel (props: {
@@ -1644,6 +1645,11 @@ function ActionsPanel (props: {
 
   // lock procedura: solo quando parte un’azione (pending) o quando salvo (loading)
   const [pending, setPending] = React.useState<Pending>(null)
+  // Quando si apre un'azione di trasmissione congeliamo il contesto corrente:
+  // durante refresh/aggiornamenti asincroni il popup non deve cambiare natura
+  // da "esito integrazione" a normale approvazione (o viceversa).
+  const [pendingIntegrationResponseContext, setPendingIntegrationResponseContext] = React.useState<boolean | null>(null)
+  const [pendingInviaIaContext, setPendingInviaIaContext] = React.useState<PendingInviaIaContext>(null)
   const [actionsMenuOpen, setActionsMenuOpen] = React.useState(false)
   const [workflowSubmitting, setWorkflowSubmitting] = React.useState(false)
 
@@ -3284,6 +3290,11 @@ function ActionsPanel (props: {
 
 
   const dtRiOnlyIntegrationTargets = ['Occorrenza', 'Grado di gravità']
+  // Valori esclusivamente interni: identificano quale sezione del popup RIA
+  // ha determinato il routing, senza introdurre motivazioni tecniche visibili.
+  const RIA_ADMIN_NON_CONFORMITY_REASON = '__RIA_ADMIN_NON_CONFORMITY__'
+  const RIA_TECH_NON_CONFORMITY_REASON = '__RIA_TECH_NON_CONFORMITY__'
+
   const isDtIntegrationOnlyRiCompetence = (): boolean => {
     if (role !== 'DT') return false
     if (String(integrationReason || '').trim() !== 'Necessità di integrazione o rettifica') return false
@@ -3291,16 +3302,29 @@ function ActionsPanel (props: {
     return selected.length > 0 && selected.every(v => dtRiOnlyIntegrationTargets.includes(v))
   }
 
+  const getRiaAutomaticIntegrationDestination = (): string => {
+    if (role !== 'RIA') return ''
+    const reason = String(integrationReason || '').trim()
+    const selected = (integrationTargets || []).map(v => String(v || '').trim()).filter(Boolean)
+    if (selected.length === 0) return ''
+
+    // Il popup RIA non chiede più di scegliere il destinatario né una motivazione
+    // preliminare: la sezione in cui viene selezionato l'aspetto determina il routing.
+    if (reason === RIA_ADMIN_NON_CONFORMITY_REASON) return 'IA'
+    if (reason === RIA_TECH_NON_CONFORMITY_REASON) return 'RIT'
+    return ''
+  }
+
   const getPrevRoleForIntegration = (target?: 'IA' | 'TECNICA'): string => {
     if (role === 'CS')     return 'IT'
     if (role === 'RIT')     return 'IT'
     if (role === 'DT')     return isDtIntegrationOnlyRiCompetence() ? 'RIT' : 'IT'
     if (role === 'RIA') {
-      // RIA ha due percorsi distinti di richiesta integrazione:
-      // - amministrativa verso il IA assegnato;
-      // - tecnica verso il RIT dell'area di provenienza (AGR o TEC).
+      // Le vecchie chiavi restano gestite per compatibilità, ma il percorso
+      // ordinario usa un solo esito "Non conforme" e instrada automaticamente.
       if (target === 'IA') return 'IA'
-      return 'RIT'
+      if (target === 'TECNICA') return 'RIT'
+      return getRiaAutomaticIntegrationDestination()
     }
     // IA: sia il visto positivo sia il rimando/non conformità rientrano al RIA.
     // Il IA non gestisce più un invio separato dalla maschera amministrativa.
@@ -3398,6 +3422,9 @@ function ActionsPanel (props: {
 
   const iaGateStatus = props.accessGate?.status || 'idle'
   const iaAccessDenied = role === 'IA' && iaGateStatus === 'denied'
+  // Se la verifica live conferma che la pratica non è più assegnata all'IA corrente,
+  // la selezione resta consultabile ma non può mai diventare operativa/editabile.
+  const iaForcedConsultation = role === 'IA' && iaGateStatus === 'consultation'
 
   const isMeaningfulAudit = (v: any): boolean => !(v === null || v === undefined || v === '' || v === 0 || v === '0')
   const roleEsitoValue = data && roleEsitoField ? pickAttrCI(data, [roleEsitoField, roleEsitoField.toUpperCase()]) : null
@@ -3440,7 +3467,22 @@ function ActionsPanel (props: {
   const iaLastPresaMs = parseIaRetakeMs(pickAttrCI(data, ['dt_presa_in_carico_IA', 'DT_PRESA_IN_CARICO_IA']))
   const iaRiaReturnEsito = toNumOrNull(pickAttrCI(data, ['esito_RIA', 'ESITO_RIA']))
   const iaRiaReturnStato = toNumOrNull(pickAttrCI(data, ['stato_RIA', 'STATO_RIA']))
+
+  // Un timestamp/stato recente del RIA non significa automaticamente "rientro a IA".
+  // Il rientro esiste solo se il routing corrente è effettivamente RIA -> IA.
+  // È essenziale per i rimandi amministrativi verso la catena tecnica (es. RIA -> RIT):
+  // in quel caso IA deve poter consultare la pratica, non risultare "da riprendere in carico".
+  const iaRoutingFromToken = String(pickAttrCI(data, ['GII_da', 'gii_da']) || '')
+    .trim().toUpperCase().replace(/[\s_-]+/g, '')
+  const iaRoutingToToken = String(pickAttrCI(data, ['GII_a', 'gii_a']) || '')
+    .trim().toUpperCase().replace(/[\s_-]+/g, '')
+  const iaCurrentRouteIsRiaToIa =
+    iaRoutingFromToken.startsWith('RIA') && iaRoutingToToken.startsWith('IA')
+  const iaExplicitlyRoutedElsewhere =
+    role === 'IA' && !!iaRoutingToToken && !iaRoutingToToken.startsWith('IA')
+
   const iaHasReturnFromRia = role === 'IA' &&
+    iaCurrentRouteIsRiaToIa &&
     (!determinazioneAdottataCorrente || attoContestazioneWorkflowAttivo) &&
     iaLastRiaReturnMs !== null &&
     (
@@ -3515,6 +3557,7 @@ function ActionsPanel (props: {
     !loading &&
     pending === null &&
     canShowEdit &&
+    !iaForcedConsultation &&
     !!isOwnedByCurrentRole &&
     inChargeByRole &&
     !roleClosedOrForwarded &&
@@ -3524,6 +3567,8 @@ function ActionsPanel (props: {
   const roleToBeTakenInCharge =
     role !== 'DA' &&
     isOwnedByCurrentRole &&
+    !iaForcedConsultation &&
+    !iaExplicitlyRoutedElsewhere &&
     !riaBlockedByIaVistoOnly &&
     (
       statoRoleNum === STATO_DA_PRENDERE ||
@@ -3631,6 +3676,8 @@ function ActionsPanel (props: {
     setActionsMenuOpen(false)
     setWorkflowSubmitting(false)
     setPending(null)
+    setPendingIntegrationResponseContext(null)
+    setPendingInviaIaContext(null)
     setLoading(false)
     setMsg(null)
     setConfirmAttempted(false)
@@ -3745,6 +3792,8 @@ function ActionsPanel (props: {
 
     setMsg(null)
     setPending(null)
+    setPendingIntegrationResponseContext(null)
+    setPendingInviaIaContext(null)
     setActionsMenuOpen(false)
     setWorkflowSubmitting(false)
     setLoading(false)
@@ -4139,12 +4188,11 @@ function ActionsPanel (props: {
     !riaperturaAmmCompleta
 
   // Caso specifico RIA: rientro da integrazione tecnica.
-  // Dopo il giro RIA → RIT_AGR o RIT_TEC → DT_AGR o DT_TEC → RIA, il rientro
-  // verso il IA originario è una restituzione/trasmissione (blu).
-  // Dopo una normale trasmissione IA → RIA, invece, RIA deve poter
-  // chiedere una vera integrazione amministrativa all’IA (arancio).
-  // Per distinguere i due casi usiamo esclusivamente il tag strutturato di routing GII_da.
-  // Nessun significato viene ricavato dallo username dell'operatore.
+  // Dopo il giro RIA → RIT_AGR/RIT_TEC → DT_AGR/DT_TEC → RIA, l'esito
+  // dell'integrazione è tornato al ruolo che l'aveva richiesta. Il sottociclo
+  // tecnico è quindi chiuso e il RIA riprende la propria verifica ordinaria:
+  // può validare l'istruttoria oppure rimandarla di nuovo per integrazione.
+  // Il tag strutturato GII_da serve soltanto a riconoscere la provenienza tecnica.
   const giiDaRaw = String(pickAttrCI(data, ['GII_da', 'gii_da', 'Da', 'DA']) || '').trim()
   const giiDaNorm = giiDaRaw.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
   const riaSenderIsTecnico = role === 'RIA' && ['DIR-AGR', 'DIR-TEC', 'DT-AGR', 'DT-TEC'].includes(giiDaNorm)
@@ -4227,7 +4275,7 @@ function ActionsPanel (props: {
     effectiveStatoNum === STATO_PRESA_IN_CARICO
 
   // Regola CS: prima di assegnare a IT, può solo "Assegna IT" oppure "Respingi".
-  const canStartIntegrazione =
+  const canStartIntegrazioneStandard =
     canStartEsito &&
     iaHaNonConformitaCorrente &&
     !iaRimandoRiaInibitoDopoEmailDirettore &&
@@ -4235,22 +4283,14 @@ function ActionsPanel (props: {
     !(role === 'CS' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
     role !== 'IT'
 
-  // RIA → IA: la destinazione verso IA ha tre significati distinti.
-  // - prima ricezione tecnica: Assegna all’IA;
-  // - rientro da integrazione tecnica già richiesta da RIA: Invia all’IA;
-  // - controllo dell'istruttoria dell’IA: Rimanda all’IA con motivazione.
-  // Un rientro di integrazione tecnica all'interno di un ciclo amministrativo
-  // gia' assegnato deve tornare allo stesso IA. Non deve riaprire la scelta
-  // dell'assegnatario: la riassegnazione e' ammessa solo per una vera nuova
-  // assegnazione / riapertura amministrativa.
-  const riaMustReturnToAssignedIa =
-    role === 'RIA' &&
-    hasIaAssigned &&
-    riaIncomingTechnicalIntegrationOutcome
-
+  // RIA → IA: distinguere il normale esito della verifica del RIA
+  // da una vera risposta a una richiesta di integrazione proveniente dall'IA.
+  // Quando l'esito dell'integrazione tecnica RIA → RIT → DT → RIA rientra al
+  // richiedente (RIA), il sottociclo di integrazione è concluso: il RIA riprende
+  // la propria verifica ordinaria e può validare oppure rimandare nuovamente.
+  // Non esiste quindi un inoltro automatico del "fascicolo integrato" all'IA.
   const riaShouldAssignIa =
     role === 'RIA' &&
-    !riaMustReturnToAssignedIa &&
     (
       riaperturaWorkflowDaAvviare ||
       !hasIaAssigned ||
@@ -4261,7 +4301,7 @@ function ActionsPanel (props: {
     canStartEsito &&
     role === 'RIA' &&
     hasIaAssigned &&
-    (isRientroTecnicoDaDt || riaIncomingIaIntegrationRequest)
+    riaIncomingIaIntegrationRequest
 
   // Compatibilità interna: il vecchio pending RESTITUISCI_IA non viene più
   // proposto all'utente, ma resta gestito per evitare rotture se qualche stato
@@ -4273,7 +4313,7 @@ function ActionsPanel (props: {
     role === 'RIA' &&
     (!determinazioneAdottataCorrente || riaAttoContestazioneDaVerificare) &&
     hasIaAssigned &&
-    !riaSenderIsTecnico &&
+    (!riaSenderIsTecnico || isRientroTecnicoDaDt) &&
     !riaIncomingIaIntegrationRequest &&
     currentIntegrationRequester !== 'IA'
 
@@ -4281,6 +4321,20 @@ function ActionsPanel (props: {
     canStartEsito &&
     role === 'RIA' &&
     !determinazioneAdottataCorrente
+
+  // RIA: l'utente non sceglie più il destinatario del rimando.
+  // Espone un solo esito negativo ("Non conforme"); il sistema determina
+  // automaticamente IA oppure RIT dalle motivazioni/oggetti selezionati.
+  // Manteniamo i due guardiani specifici per non allargare le possibilità
+  // rispetto al workflow già consolidato nei diversi stadi documentali.
+  const canStartIntegrazioneRiaAuto =
+    role === 'RIA' &&
+    !riaIncomingIaIntegrationRequest &&
+    (canStartIntegrazioneIa || canStartIntegrazioneTecnica)
+
+  const canStartIntegrazione = role === 'RIA'
+    ? canStartIntegrazioneRiaAuto
+    : canStartIntegrazioneStandard
 
   const iaConformitaGiaApposta = role === 'IA' && esitoIaNum === ESITO_APPROVATA
   const riaHaRimandatoAIaDopoVisto = role === 'IA' && iaConformitaGiaApposta && (
@@ -4294,7 +4348,7 @@ function ActionsPanel (props: {
     role !== 'IA' &&
     iaPuoApporreAttestazione &&
     !(role === 'CS' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
-    !(role === 'RIA' && !currentIntegrationRequester && !riaBozzaDeterminazioneDaVerificare && !riaAttoContestazioneDaVerificare)
+    !(role === 'RIA' && !currentIntegrationRequester && !riaBozzaDeterminazioneDaVerificare && !riaAttoContestazioneDaVerificare && !isRientroTecnicoDaDt)
 
   const canStartRespingi =
     canStartEsito &&
@@ -4366,12 +4420,23 @@ function ActionsPanel (props: {
   )
   const isInitialItTransmissionForUi = role === 'IT' && origineNum === 2 && !itAssignedByCsForUi && !numeroRapportoTecnicoCorrente
   const incomingWorkflowEventForUi = String(incomingWorkflowForUi?.evento || '').trim().toUpperCase()
-  const isRiaTechnicalIntegrationReturnForUi = role === 'RIA' && isRientroTecnicoDaDt
   const isRiaIaIntegrationResponseForUi = role === 'RIA' && riaIncomingIaIntegrationRequest
-  const isIntegrationResponseForUi = isRiaTechnicalIntegrationReturnForUi || isRiaIaIntegrationResponseForUi || Boolean(currentIntegrationRequesterLabel) || (
+  // Il rientro tecnico DT → RIA chiude il sottociclo di integrazione al
+  // richiedente. Da quel momento il RIA torna alla verifica ordinaria: l'azione
+  // successiva non è una "trasmissione esito integrazione".
+  const isIntegrationResponseForUi = isRiaIaIntegrationResponseForUi || Boolean(currentIntegrationRequesterLabel) || (
     !!fwdDest &&
     hasPendingIntegrationRequesterAtOrAboveDest(fwdDest)
   )
+  const isIntegrationResponseForWorkflowUi =
+    (pending === 'APPROVA' || pending === 'INVIA_IA') && pendingIntegrationResponseContext != null
+      ? pendingIntegrationResponseContext
+      : isIntegrationResponseForUi
+  // Per INVIA_IA congela il contesto della vera risposta a una richiesta
+  // di integrazione proveniente dall'IA; i refresh asincroni non devono cambiare
+  // la natura del popup mentre è aperto.
+  const pendingInviaIaOutcomeForUi =
+    pending === 'INVIA_IA' && pendingInviaIaContext === 'IA_INTEGRATION_OUTCOME'
   const isCsInitialRilevazioneForUi = role === 'CS' && (
     incomingWorkflowEventForUi === 'NUOVA_RILEVAZIONE_TRASMESSA' ||
     (!incomingWorkflowEventForUi && !hasTiAnyEvidence)
@@ -4389,10 +4454,10 @@ function ActionsPanel (props: {
     // Le verifiche documentali amministrative hanno un contesto più specifico
     // solo quando non è in corso il rientro di un'integrazione.
     if (riaAttoContestazioneDaVerificare) {
-      return 'L’istruttoria contenente la bozza dell’Atto di accertamento verrà presa in carico per la verifica.'
+      return 'L’istruttoria verrà presa in carico.'
     }
     if (riaBozzaDeterminazioneDaVerificare) {
-      return 'L’istruttoria contenente la bozza di determinazione verrà presa in carico per la verifica.'
+      return 'L’istruttoria verrà presa in carico.'
     }
 
     if (ev === 'NUOVA_RILEVAZIONE_TRASMESSA') {
@@ -4420,7 +4485,7 @@ function ActionsPanel (props: {
       ? 'L’istruttoria verrà presa in carico.'
       : 'La rilevazione verrà presa in carico.'
   }
-  const contextualPositiveActionLabel = isIntegrationResponseForUi
+  const contextualPositiveActionLabel = isIntegrationResponseForWorkflowUi
     ? 'Trasmetti esito integrazione'
     : role === 'IT'
       ? (isInitialItTransmissionForUi ? 'Trasmetti nuova rilevazione' : 'Trasmetti istruttoria')
@@ -4440,7 +4505,7 @@ function ActionsPanel (props: {
 
   const approvaBtnLabel = contextualPositiveActionLabel
 
-  const approvaDoneLabel = isIntegrationResponseForUi
+  const approvaDoneLabel = isIntegrationResponseForWorkflowUi
     ? 'Esito integrazione trasmesso'
     : role === 'IT'
       ? (isInitialItTransmissionForUi ? 'Nuova rilevazione trasmessa' : 'Istruttoria trasmessa per verifica')
@@ -4489,19 +4554,26 @@ function ActionsPanel (props: {
   const rimandoGenericTargetLabel = role === 'DT' && !dtRimandoRouteReady
     ? ''
     : formatRimandoRoleLabel(rimandoGenericDest)
-  const rimandoGenericButtonLabel = role === 'DT'
-    ? 'Rimanda per integrazione'
-    : (rimandoGenericDest ? `Rimanda ${getRoleRecipientPhrase(rimandoGenericDest)}` : 'Rimanda')
+  const rimandoGenericButtonLabel = role === 'RIA'
+    ? 'Non conforme'
+    : role === 'DT'
+      ? 'Rimanda per integrazione'
+      : (rimandoGenericDest ? `Rimanda ${getRoleRecipientPhrase(rimandoGenericDest)}` : 'Rimanda')
   const rimandoIaButtonLabel = `Rimanda ${getRoleRecipientPhrase('IA')}`
   const rimandoTecnicaTargetLabel = getRiTecnicoTargetLabel()
   const rimandoTecnicaButtonLabel = `Rimanda al ${rimandoTecnicaTargetLabel}`
+  const riaAutomaticIntegrationDestination = role === 'RIA' && pending === 'INTEGRAZIONE'
+    ? getRiaAutomaticIntegrationDestination()
+    : ''
   const pendingRimandoTargetLabel = role === 'RIA' && pending === 'INTEGRAZIONE_IA'
     ? getRoleLabelForMenu('IA')
     : role === 'RIA' && pending === 'INTEGRAZIONE_TECNICA'
       ? rimandoTecnicaTargetLabel
-      : pending === 'INTEGRAZIONE'
-        ? rimandoGenericTargetLabel
-        : ''
+      : role === 'RIA' && pending === 'INTEGRAZIONE'
+        ? (riaAutomaticIntegrationDestination ? formatRimandoRoleLabel(riaAutomaticIntegrationDestination) : '')
+        : pending === 'INTEGRAZIONE'
+          ? rimandoGenericTargetLabel
+          : ''
 
   // IT: eliminazione consentita solo per pratiche originate da sé (origine=IT) e mai inoltrate a CS.
   const currentUsername = String((window as any).__giiUserRole?.username || (window as any).__giiUser?.username || '').trim()
@@ -4589,7 +4661,7 @@ function ActionsPanel (props: {
 
   const approvaMenuLabel = contextualPositiveActionLabel
 
-  const approvaMenuDesc = isIntegrationResponseForUi
+  const approvaMenuDesc = isIntegrationResponseForWorkflowUi
     ? (role === 'RIA' && (fwdDest === 'IA' || currentIntegrationRequester === 'IA')
         ? 'Trasmette all’Istruttore amministrativo l’esito dell’integrazione.'
         : fwdDest
@@ -4610,7 +4682,7 @@ function ActionsPanel (props: {
             : role === 'RIA' && riaAttoContestazioneDaVerificare
               ? 'Approva l’Atto di accertamento e trasmette l’istruttoria all’Istruttore amministrativo.'
               : role === 'RIA'
-                ? 'Valida l’istruttoria e la trasmette all’Istruttore amministrativo.'
+                ? 'Valida l’istruttoria e la trasmette all’Istruttore amministrativo assegnato.'
                 : role === 'IA'
                   ? 'Registra l’istruttoria come conforme. L’istruttoria resta all’Istruttore amministrativo per la predisposizione degli elaborati successivi.'
                   : fwdDestLabel
@@ -4620,9 +4692,10 @@ function ActionsPanel (props: {
 
   const rimandoTecnicaMenuDesc = 'Rimando all’istruttoria tecnica.'
 
-  // RIA non deve vedere contemporaneamente una trasmissione e una restituzione
-  // verso lo stesso IA: per l'utente sarebbero due scelte indistinguibili.
-  const hideRiaForwardToIa = role === 'RIA' && fwdDest === 'IA' && !riaStaApprovandoPropostaContestazione && !riaBozzaDeterminazioneDaVerificare && !riaAttoContestazioneDaVerificare
+  // RIA esprime sempre un esito della verifica quando il nodo è operativo.
+  // La scelta positiva deve quindi restare visibile come "Conforme"; eventuali
+  // risposte speciali a una richiesta IA sono già governate da INVIA_IA.
+  const hideRiaForwardToIa = false
 
   const workflowMenuSections: WorkflowMenuSection[] = hasSel && role !== 'DA' ? ([
     {
@@ -4656,12 +4729,10 @@ function ActionsPanel (props: {
         },
         {
           key: 'INVIA_IA',
-          label: isRiaTechnicalIntegrationReturnForUi ? 'Trasmetti fascicolo' : 'Trasmetti esito integrazione',
-          desc: isRiaTechnicalIntegrationReturnForUi
-            ? 'Trasmette all’Istruttore amministrativo il fascicolo aggiornato dopo l’integrazione tecnica.'
-            : 'Trasmette all’Istruttore amministrativo l’esito dell’integrazione.',
+          label: 'Trasmetti esito integrazione',
+          desc: 'Trasmette all’Istruttore amministrativo l’esito dell’integrazione.',
           enabled: canStartInviaIa,
-          visible: role === 'RIA' && (isRientroTecnicoDaDt || riaIncomingIaIntegrationRequest),
+          visible: role === 'RIA' && riaIncomingIaIntegrationRequest,
           color: buttonColors.approva,
           textColor: buttonColors.approvaText
         },
@@ -4670,7 +4741,7 @@ function ActionsPanel (props: {
           label: approvaMenuLabel,
           desc: approvaMenuDesc,
           enabled: canStartApprova,
-          visible: !hideRiaForwardToIa && role !== 'IA' && !(role === 'RIA' && (isRientroTecnicoDaDt || riaIncomingIaIntegrationRequest)),
+          visible: !hideRiaForwardToIa && role !== 'IA' && !(role === 'RIA' && riaIncomingIaIntegrationRequest),
           color: role === 'DT' ? buttonColors.approvaRapporto : buttonColors.approva,
           textColor: role === 'DT' ? buttonColors.approvaRapportoText : buttonColors.approvaText
         }
@@ -4684,7 +4755,7 @@ function ActionsPanel (props: {
           label: rimandoIaButtonLabel,
           desc: 'Rimando all’istruttoria amministrativa.',
           enabled: canStartIntegrazioneIa,
-          visible: role === 'RIA' && hasIaAssigned && !isRientroTecnicoDaDt && !riaIncomingIaIntegrationRequest,
+          visible: false,
           color: buttonColors.integrazione,
           textColor: buttonColors.integrazioneText
         },
@@ -4693,20 +4764,22 @@ function ActionsPanel (props: {
           label: rimandoTecnicaButtonLabel,
           desc: rimandoTecnicaMenuDesc,
           enabled: canStartIntegrazioneTecnica,
-          visible: role === 'RIA',
+          visible: false,
           color: buttonColors.integrazione,
           textColor: buttonColors.integrazioneText
         },
         {
           key: 'INTEGRAZIONE',
           label: rimandoGenericButtonLabel,
-          desc: role === 'DT'
-            ? 'Rimanda l’istruttoria per integrazione; il destinatario viene determinato in base al tipo di richiesta.'
-            : (rimandoGenericDest === 'IT'
-                ? 'L’istruttoria verrà rimandata all’Istruttore tecnico assegnato.'
-                : (rimandoGenericDest ? `L’istruttoria verrà rimandata ${getRoleRecipientPhrase(rimandoGenericDest)} per integrazione.` : 'Rimando per integrazione.')),
+          desc: role === 'RIA'
+            ? 'Registra l’esito non conforme; il destinatario viene determinato automaticamente in base alla motivazione indicata.'
+            : role === 'DT'
+              ? 'Rimanda l’istruttoria per integrazione; il destinatario viene determinato in base al tipo di richiesta.'
+              : (rimandoGenericDest === 'IT'
+                  ? 'L’istruttoria verrà rimandata all’Istruttore tecnico assegnato.'
+                  : (rimandoGenericDest ? `L’istruttoria verrà rimandata ${getRoleRecipientPhrase(rimandoGenericDest)} per integrazione.` : 'Rimando per integrazione.')),
           enabled: canStartIntegrazione,
-          visible: role !== 'IT' && role !== 'RIA' && !iaRimandoRiaInibitoDopoEmailDirettore,
+          visible: role !== 'IT' && !iaRimandoRiaInibitoDopoEmailDirettore && (role !== 'RIA' || canStartIntegrazioneRiaAuto),
           color: buttonColors.integrazione,
           textColor: buttonColors.integrazioneText
         }
@@ -4749,10 +4822,9 @@ function ActionsPanel (props: {
   const hasEnabledWorkflowMenuActions = workflowMenuEnabledItems.length > 0
   const showTakeDirect = canStartTakeInCharge
 
+  const DEFAULT_INTEGRATION_REASON = 'Necessità di integrazione o rettifica'
   const integrationReasonOptions = [
-    'Fatti accertati da chiarire',
-    'Incongruenza tra violazioni rilevate e descrizione dei fatti accertati',
-    'Necessità di integrazione o rettifica'
+    DEFAULT_INTEGRATION_REASON
   ]
   // Il popup RIA -> IA mostra soltanto oggetti realmente lavorabili dall'IA
   // nel momento corrente. Gli elementi tecnici (Contestazioni, Dati del trasgressore)
@@ -4767,14 +4839,45 @@ function ActionsPanel (props: {
     ...(!riaAttoContestazioneDaVerificare && hasBozzaDeterminazioneRicevutaDaRia ? ['Bozza di determinazione'] : []),
     ...(hasAdministrativeGenericAttachments ? ['Allegati'] : [])
   ]
+
   const integrationTargetOptionsBase = [
     'Trasgressore',
     'Violazione',
+    'Descrizione dettagliata della violazione',
+    'Altre circostanze rilevanti',
     'Luoghi e dati tecnici',
     'Nota spese',
     'Allegati',
     'Altro'
   ]
+
+  // RIA - esito "Non conforme": il popup è composto direttamente dalle due
+  // sezioni "Aspetti amministrativi" e "Aspetti tecnici". Non esiste più una
+  // scelta preliminare della motivazione o del destinatario: la sezione selezionata
+  // determina automaticamente il routing verso IA oppure RIT.
+  const riaAdministrativeNonConformityTargetOptions: string[] = canStartIntegrazioneIa
+    ? administrativeReturnTargetOptions
+    : []
+  const riaTechnicalNonConformityTargetOptions: string[] = canStartIntegrazioneTecnica
+    ? integrationTargetOptionsBase
+    : []
+  const isRiaAutomaticNonConformity = role === 'RIA' && pending === 'INTEGRAZIONE'
+  const isRiaAdministrativeNonConformity =
+    isRiaAutomaticNonConformity && String(integrationReason || '').trim() === RIA_ADMIN_NON_CONFORMITY_REASON
+  const isRiaTechnicalNonConformity =
+    isRiaAutomaticNonConformity && String(integrationReason || '').trim() === RIA_TECH_NON_CONFORMITY_REASON
+  const isAdministrativeRiaReturn = role === 'RIA' && pending === 'INTEGRAZIONE_IA'
+  const activeIntegrationReasonOptions = integrationReasonOptions
+  // Se la lista delle motivazioni contiene una sola voce, non ha senso
+  // costringere l'utente a selezionarla: resta un valore tecnico interno,
+  // mentre il popup mostra direttamente i dati da integrare/rettificare.
+  const hasSingleIntegrationReason =
+    !isRiaAutomaticNonConformity &&
+    !isAdministrativeRiaReturn &&
+    activeIntegrationReasonOptions.length === 1
+  const singleIntegrationReason = hasSingleIntegrationReason
+    ? String(activeIntegrationReasonOptions[0] || '').trim()
+    : ''
   const integrationTargetOptions = role === 'DT'
     ? ['Occorrenza', 'Grado di gravità', ...integrationTargetOptionsBase]
     : integrationTargetOptionsBase
@@ -4823,6 +4926,90 @@ function ActionsPanel (props: {
     if (confirmAttempted) setConfirmAttempted(false)
   }
 
+  const toggleRiaAdministrativeNonConformityTarget = (target: string) => {
+    const current = String(integrationReason || '').trim() === RIA_ADMIN_NON_CONFORMITY_REASON
+      ? integrationTargets
+      : []
+    const next = current.includes(target) ? current.filter(x => x !== target) : [...current, target]
+    setIntegrationReason(next.length > 0 ? RIA_ADMIN_NON_CONFORMITY_REASON : '')
+    setIntegrationTargets(next)
+    setIntegrationOtherText('')
+    if (confirmAttempted) setConfirmAttempted(false)
+  }
+
+  const renderRiaAdministrativeNonConformityCheckbox = (opt: string) => {
+    const activeAdminBranch = String(integrationReason || '').trim() === RIA_ADMIN_NON_CONFORMITY_REASON
+    const checkboxDisabled = loading || !hasSel || lockedByTransmit
+    return (
+      <label
+        key={`ria-admin-${opt}`}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '3px 4px',
+          border: 'none',
+          borderRadius: 4,
+          background: 'transparent',
+          fontSize: Math.max(14, Number(ui.statusFontSize) || 14),
+          cursor: checkboxDisabled ? 'not-allowed' : 'pointer',
+          minWidth: 0
+        }}
+      >
+        <input
+          type='checkbox'
+          checked={activeAdminBranch && integrationTargets.includes(opt)}
+          onChange={() => toggleRiaAdministrativeNonConformityTarget(opt)}
+          disabled={checkboxDisabled}
+          style={{ margin: 0, flex: '0 0 auto' }}
+        />
+        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{opt}</span>
+      </label>
+    )
+  }
+
+  const toggleRiaTechnicalNonConformityTarget = (target: string) => {
+    const current = String(integrationReason || '').trim() === RIA_TECH_NON_CONFORMITY_REASON
+      ? integrationTargets
+      : []
+    const next = current.includes(target) ? current.filter(x => x !== target) : [...current, target]
+    setIntegrationReason(next.length > 0 ? RIA_TECH_NON_CONFORMITY_REASON : '')
+    setIntegrationTargets(next)
+    setIntegrationOtherText('')
+    if (confirmAttempted) setConfirmAttempted(false)
+  }
+
+  const renderRiaTechnicalNonConformityCheckbox = (opt: string) => {
+    const activeTechBranch = String(integrationReason || '').trim() === RIA_TECH_NON_CONFORMITY_REASON
+    const checkboxDisabled = loading || !hasSel || lockedByTransmit
+    return (
+      <label
+        key={`ria-tech-${opt}`}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '3px 4px',
+          border: 'none',
+          borderRadius: 4,
+          background: 'transparent',
+          fontSize: Math.max(14, Number(ui.statusFontSize) || 14),
+          cursor: checkboxDisabled ? 'not-allowed' : 'pointer',
+          minWidth: 0
+        }}
+      >
+        <input
+          type='checkbox'
+          checked={activeTechBranch && integrationTargets.includes(opt)}
+          onChange={() => toggleRiaTechnicalNonConformityTarget(opt)}
+          disabled={checkboxDisabled}
+          style={{ margin: 0, flex: '0 0 auto' }}
+        />
+        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{opt}</span>
+      </label>
+    )
+  }
+
   const renderIntegrationTargetCheckbox = (opt: string, displayLabel?: string) => {
     const disabledByViolation = isDtConditionalIntegrationTargetDisabled(opt)
     const checkboxDisabled = loading || !hasSel || lockedByTransmit || disabledByViolation
@@ -4865,24 +5052,38 @@ function ActionsPanel (props: {
   const integrationReasonTrim = String(integrationReason ?? '').trim()
   const integrationOtherTextTrim = String(integrationOtherText ?? '').trim()
   const isWorkflowRimandoPendingForValidation = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA'
-  const isAdministrativeRiaReturn = role === 'RIA' && pending === 'INTEGRAZIONE_IA'
-  const isIntegrationNeedsDetail = !isAdministrativeRiaReturn && integrationReasonTrim === 'Necessità di integrazione o rettifica'
+  const effectiveIntegrationReasonTrim = hasSingleIntegrationReason && singleIntegrationReason
+    ? singleIntegrationReason
+    : integrationReasonTrim
+  const isIntegrationNeedsDetail = !isAdministrativeRiaReturn && !isRiaAutomaticNonConformity && effectiveIntegrationReasonTrim === DEFAULT_INTEGRATION_REASON
+  const riaAutomaticNonConformityDestination = isRiaAutomaticNonConformity
+    ? getRiaAutomaticIntegrationDestination()
+    : ''
+  const riaAutomaticRouteInvalid = isRiaAutomaticNonConformity && integrationTargets.length > 0 && !riaAutomaticNonConformityDestination
   const integrationOtherSelected = integrationTargets.includes('Altro')
   const isAltro = /\baltro\b/i.test(reasonTrim)
-  const hasOtherMotivation = (pending === 'RESPINGI' && isAltro) || (!isAdministrativeRiaReturn && isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail && integrationOtherSelected)
-  const freeNotePrefix = hasOtherMotivation ? 'Altre motivazioni e ulteriori annotazioni' : 'Ulteriori annotazioni'
+  const hasOtherMotivation = (pending === 'RESPINGI' && isAltro) || (isRiaTechnicalNonConformity && integrationOtherSelected) || (!isAdministrativeRiaReturn && !isRiaAutomaticNonConformity && isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail && integrationOtherSelected)
+  const freeNotePrefix = hasOtherMotivation
+    ? (isRiaAutomaticNonConformity ? 'Specificazione della non conformità e ulteriori annotazioni' : 'Altre motivazioni e ulteriori annotazioni')
+    : 'Ulteriori annotazioni'
   const integrationReasonBlock = isAdministrativeRiaReturn
     ? (integrationTargets.length > 0 ? `Oggetto del rimando: ${integrationTargets.join(', ')}` : '')
-    : (isWorkflowRimandoPendingForValidation && integrationReasonTrim
-        ? [
-            `Motivazione del rimando: ${integrationReasonTrim}`,
-            isIntegrationNeedsDetail && integrationTargets.length > 0 ? `Dati da integrare o rettificare: ${integrationTargets.join(', ')}` : ''
-          ].filter(Boolean).join('\n')
-        : '')
+    : isRiaAdministrativeNonConformity
+      ? (integrationTargets.length > 0 ? `Aspetti amministrativi: ${integrationTargets.join(', ')}` : '')
+      : isRiaTechnicalNonConformity
+        ? (integrationTargets.length > 0 ? `Aspetti tecnici: ${integrationTargets.join(', ')}` : '')
+        : (isWorkflowRimandoPendingForValidation && effectiveIntegrationReasonTrim
+            ? [
+                // La motivazione unica resta implicita: nello storico e nelle note
+                // è sufficiente registrare direttamente gli elementi richiesti.
+                !hasSingleIntegrationReason ? `Motivazione del rimando: ${effectiveIntegrationReasonTrim}` : '',
+                isIntegrationNeedsDetail && integrationTargets.length > 0 ? `Dati da integrare o rettificare: ${integrationTargets.join(', ')}` : ''
+              ].filter(Boolean).join('\n')
+            : '')
   // NOTE WORKFLOW: il campo Note contiene solo informazioni espresse dall'utente.
   // Le frasi narrative automatiche del workflow sono già rappresentate da evento,
   // mittente, destinatario e data nel log e non devono essere salvate come note.
-  const noteTrim = isAdministrativeRiaReturn
+  const noteTrim = (isAdministrativeRiaReturn || isRiaAdministrativeNonConformity)
     ? buildAdministrativeRimandoNote(integrationTargets, noteDraftTrim)
     : [
         integrationReasonBlock,
@@ -4893,16 +5094,20 @@ function ActionsPanel (props: {
   const noteIsRequired =
     hasOtherMotivation ||
     isAdministrativeRiaReturn ||
+    isRiaAdministrativeNonConformity ||
     (pending === 'ELIMINA')  // Matrice_TI caso 1/b: note obbligatoria per eliminazione
 
   const reasonIsRequired = pending === 'RESPINGI'
-  const integrationReasonIsRequired = isWorkflowRimandoPendingForValidation && !isAdministrativeRiaReturn
-  const integrationTargetsIsRequired = (isAdministrativeRiaReturn && administrativeReturnTargetOptions.length > 0) || (isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail)
+  const integrationReasonIsRequired = isWorkflowRimandoPendingForValidation && !isAdministrativeRiaReturn && !isRiaAutomaticNonConformity
+  const integrationTargetsIsRequired =
+    (isAdministrativeRiaReturn && administrativeReturnTargetOptions.length > 0) ||
+    isRiaAdministrativeNonConformity ||
+    (isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail)
   const integrationOtherTextIsRequired = false
 
   const reasonInvalid = reasonIsRequired && !reasonTrim
-  const integrationReasonInvalid = integrationReasonIsRequired && !integrationReasonTrim
-  const integrationTargetsInvalid = integrationTargetsIsRequired && integrationTargets.length === 0
+  const integrationReasonInvalid = integrationReasonIsRequired && !effectiveIntegrationReasonTrim
+  const integrationTargetsInvalid = (integrationTargetsIsRequired && integrationTargets.length === 0) || riaAutomaticRouteInvalid
   const integrationOtherTextInvalid = integrationOtherTextIsRequired && !integrationOtherTextTrim
   const noteInvalid = noteIsRequired && !noteDraftTrim
 
@@ -4918,6 +5123,8 @@ function ActionsPanel (props: {
   const onAnnulla = () => {
     if (loading) return
     setPending(null)
+    setPendingIntegrationResponseContext(null)
+    setPendingInviaIaContext(null)
     setActionsMenuOpen(false)
     setWorkflowSubmitting(false)
     setLoading(false)
@@ -5003,10 +5210,24 @@ function ActionsPanel (props: {
     }
 
     if (!opts?.keepActionsMenuOpen) setActionsMenuOpen(false)
+    setPendingIntegrationResponseContext(
+      (p === 'APPROVA' || p === 'INVIA_IA') ? isIntegrationResponseForUi : null
+    )
+    setPendingInviaIaContext(
+      p === 'INVIA_IA' && isRiaIaIntegrationResponseForUi
+        ? 'IA_INTEGRATION_OUTCOME'
+        : null
+    )
     setPending(p)
     setMsg(null)
     setConfirmAttempted(false)
     resetStructuredReasons()
+    // Nei rimandi ordinari non-RIA la motivazione disponibile e' ormai una sola.
+    // La valorizziamo automaticamente come dato interno, evitando un dropdown
+    // ridondante nel popup. Il RIA usa invece il nuovo routing per sezioni.
+    if (p === 'INTEGRAZIONE' && role !== 'RIA') {
+      setIntegrationReason('Necessità di integrazione o rettifica')
+    }
     setTiLoadErr('')
 
     if (p === 'ASSEGNA_IT') {
@@ -5538,26 +5759,21 @@ function ActionsPanel (props: {
       if (fEsitoRia) upd[fEsitoRia] = null
       if (fDtEsitoRia) upd[fDtEsitoRia] = null
 
-      // Riapre il IA originario come destinatario operativo.
+      // Riapre il IA originario come destinatario operativo. L'ultimo esito IA
+      // resta storicizzato sul record finche' l'Istruttore non esprime il nuovo
+      // giudizio: stato_IA/dt_stato_IA e la successiva presa in carico identificano
+      // il nuovo ciclo senza cancellare prematuramente la valutazione precedente.
       const fStatoIa = getSchemaFieldNameCI(schemaFields, 'stato_IA')
       const fDtStatoIa = getSchemaFieldNameCI(schemaFields, 'dt_stato_IA')
       const fDtPresaIa = getSchemaFieldNameCI(schemaFields, 'dt_presa_in_carico_IA')
-      const fEsitoIa = getSchemaFieldNameCI(schemaFields, 'esito_IA')
-      const fDtEsitoIa = getSchemaFieldNameCI(schemaFields, 'dt_esito_IA')
       if (fStatoIa) upd[fStatoIa] = STATO_DA_PRENDERE
       if (fDtStatoIa) upd[fDtStatoIa] = now
       if (fDtPresaIa) upd[fDtPresaIa] = null
-      if (fEsitoIa) upd[fEsitoIa] = null
-      if (fDtEsitoIa) upd[fDtEsitoIa] = null
 
       addGiiRoutingFields(upd, 'IA', 'TRASMISSIONE', { destUsername: String(iaUserRaw || '') })
 
-      const restituzioneEvento = isRientroTecnicoDaDt
-        ? 'FASCICOLO_TRASMESSO_VERIFICA'
-        : 'ESITO_INTEGRAZIONE_TRASMESSO'
-      const restituzioneMessaggio = isRientroTecnicoDaDt
-        ? 'Fascicolo trasmesso all’Istruttore amministrativo.'
-        : 'Esito integrazione trasmesso all’Istruttore amministrativo.'
+      const restituzioneEvento = 'ESITO_INTEGRAZIONE_TRASMESSO'
+      const restituzioneMessaggio = 'Esito integrazione trasmesso all’Istruttore amministrativo.'
       await saveWithWorkflowLog(upd, restituzioneMessaggio, { eventoChiusura: restituzioneEvento, ruoloDestinatario: 'IA', utenteDestinatario: String(iaUserRaw || resolveDestUser('IA')), noteChiusura: noteTrim, fase: role })
       setPending(null)
       setConfirmAttempted(false)
@@ -5609,7 +5825,7 @@ function ActionsPanel (props: {
           const preserveIaEsitoAfterRiaRimando =
             role === 'RIA' &&
             ruoloDest === 'IA' &&
-            pending === 'INTEGRAZIONE_IA'
+            (pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE')
           if (fEsito && !preserveIaEsitoAfterRiaRimando) upd[fEsito] = null
           if (fDtEsito && !preserveIaEsitoAfterRiaRimando) upd[fDtEsito] = null
 
@@ -5620,7 +5836,7 @@ function ActionsPanel (props: {
           // predisporrà e caricherà una nuova bozza PDF prima della nuova trasmissione.
           // Il valore del campo resta BOZZA perché determinazione_stato ha un dominio
           // codificato e non consente stati intermedi non previsti dallo schema.
-          if (pending === 'INTEGRAZIONE_IA' && ruoloDest === 'IA') {
+          if ((pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE') && ruoloDest === 'IA') {
             const fDeterminaStato = getSchemaFieldNameCI(schemaFields, 'determinazione_stato')
             if (fDeterminaStato) {
               // Il rimando dell'Atto riapre il solo ciclo IA↔RIA dell'Atto:
@@ -5632,11 +5848,18 @@ function ActionsPanel (props: {
       }
 
       if (ruoloDest) {
-        addGiiRoutingFields(upd, ruoloDest, 'INTEGRAZIONE', { technicalIntegration: pending === 'INTEGRAZIONE_TECNICA' })
+        const isRiaAutomaticTechnicalIntegration = role === 'RIA' && pending === 'INTEGRAZIONE' && ruoloDest === 'RIT'
+        addGiiRoutingFields(upd, ruoloDest, 'INTEGRAZIONE', {
+          technicalIntegration: pending === 'INTEGRAZIONE_TECNICA' || isRiaAutomaticTechnicalIntegration
+        })
       }
 
       if (ruoloDest) {
-        const successMsg = pending === 'INTEGRAZIONE' ? 'Pratica rimandata per integrazione.' : 'Integrazione richiesta salvata.'
+        const successMsg = role === 'RIA' && pending === 'INTEGRAZIONE'
+          ? 'Istruttoria dichiarata non conforme e inoltrata per integrazione.'
+          : pending === 'INTEGRAZIONE'
+            ? 'Pratica rimandata per integrazione.'
+            : 'Integrazione richiesta salvata.'
         const eventoRimando = role === 'RIA' && ruoloDest === 'IA'
           ? (riaAttoContestazioneDaVerificare
               ? 'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE'
@@ -5646,7 +5869,11 @@ function ActionsPanel (props: {
           : 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE'
         await saveWithWorkflowLog(upd, successMsg, { eventoChiusura: eventoRimando, ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), noteChiusura: noteTrim, fase: role })
       } else {
-        const successMsg = pending === 'INTEGRAZIONE' ? 'Pratica rimandata per integrazione.' : 'Integrazione richiesta salvata.'
+        const successMsg = role === 'RIA' && pending === 'INTEGRAZIONE'
+          ? 'Istruttoria dichiarata non conforme.'
+          : pending === 'INTEGRAZIONE'
+            ? 'Pratica rimandata per integrazione.'
+            : 'Integrazione richiesta salvata.'
         await runApplyEdits(upd, successMsg)
       }
       setPending(null)
@@ -5828,22 +6055,18 @@ function ActionsPanel (props: {
           if (fEsito && !preserveDestEsito) upd[fEsito] = null
           if (fDtEsito && !preserveDestEsito) upd[fDtEsito] = null
 
-          // Se il DT rimanda la pratica a RIA dopo una nuova approvazione tecnica,
-          // chiudiamo solo il nodo operativo IA, ma NON cancelliamo
-          // ia_assegnato_*: quei campi identificano il IA originario a cui RIA
-          // dovrà restituire la pratica dopo il rientro tecnico.
+          // Se il DT restituisce a RIA l'esito dell'integrazione tecnica, chiudiamo
+          // soltanto il nodo OPERATIVO IA. L'ultimo esito espresso dall'IA e la sua
+          // data restano storico del ciclo amministrativo e non devono essere
+          // cancellati: saranno sostituiti soltanto quando IA esprimerà un nuovo esito.
           if (role === 'DT' && ruoloDest === 'RIA') {
             const schemaFieldsForIaReset: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
             const fStatoIa = getSchemaFieldNameCI(schemaFieldsForIaReset, 'stato_IA')
             const fDtStatoIa = getSchemaFieldNameCI(schemaFieldsForIaReset, 'dt_stato_IA')
             const fDtPresaIa = getSchemaFieldNameCI(schemaFieldsForIaReset, 'dt_presa_in_carico_IA')
-            const fEsitoIa = getSchemaFieldNameCI(schemaFieldsForIaReset, 'esito_IA')
-            const fDtEsitoIa = getSchemaFieldNameCI(schemaFieldsForIaReset, 'dt_esito_IA')
             if (fStatoIa) upd[fStatoIa] = 0
             if (fDtStatoIa) upd[fDtStatoIa] = null
             if (fDtPresaIa) upd[fDtPresaIa] = null
-            if (fEsitoIa) upd[fEsitoIa] = null
-            if (fDtEsitoIa) upd[fDtEsitoIa] = null
           }
         } catch {}
       }
@@ -6051,7 +6274,11 @@ function ActionsPanel (props: {
           return
         }
       }
-      setPending(null)
+      if (!actionsMenuOpen) {
+        setPending(null)
+        setPendingIntegrationResponseContext(null)
+    setPendingInviaIaContext(null)
+      }
       setConfirmAttempted(false)
     } catch (e: any) {
       setLoading(false)
@@ -6156,7 +6383,7 @@ function ActionsPanel (props: {
   const subjectVerbRespinta = praticaLabel === 'Rapporto tecnico' ? 'respinto' : 'respinta'
   const subjectVerbArchiviata = praticaLabel === 'Rapporto tecnico' ? 'archiviato' : 'archiviata'
 
-  const approvaPendingTitle = isIntegrationResponseForUi
+  const approvaPendingTitle = isIntegrationResponseForWorkflowUi
     ? 'Trasmissione esito integrazione'
     : role === 'IT'
       ? (isInitialItTransmissionForUi ? 'Trasmissione nuova rilevazione' : 'Trasmissione istruttoria per verifica')
@@ -6176,21 +6403,21 @@ function ActionsPanel (props: {
 
 
   const pendingTitle = pending === 'TAKE'
-    ? ((riaBozzaDeterminazioneDaVerificare || riaAttoContestazioneDaVerificare) ? 'Presa in carico istruttoria' : 'Presa in carico')
+    ? 'Presa in carico'
     : pending === 'ASSEGNA_IT'
       ? `Assegnazione ${getRoleRecipientPhrase('IT')}`
       : pending === 'ASSEGNA_IA'
         ? `Assegnazione ${getRoleRecipientPhrase('IA')}`
-        : pending === 'INVIA_IA' && isRiaTechnicalIntegrationReturnForUi
-          ? 'Trasmissione fascicolo'
-          : pending === 'INVIA_IA' && isRiaIaIntegrationResponseForUi
+        : pendingInviaIaOutcomeForUi
             ? 'Trasmissione esito integrazione'
           : pending === 'RESTITUISCI_IA'
             ? `Restituzione ${getRoleRecipientPhrase('IA')}`
-            : (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA')
-          ? (pendingRimandoTargetLabel
-              ? (pendingRimandoTargetLabel.startsWith('Istruttore') ? `Rimando all’${pendingRimandoTargetLabel}` : `Rimando al ${pendingRimandoTargetLabel}`)
-              : (role === 'DT' && pending === 'INTEGRAZIONE' ? 'Rimando per integrazione' : 'Rimando'))
+            : role === 'RIA' && pending === 'INTEGRAZIONE'
+              ? 'Istruttoria non conforme'
+              : (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA')
+                ? (pendingRimandoTargetLabel
+                    ? (pendingRimandoTargetLabel.startsWith('Istruttore') ? `Rimando all’${pendingRimandoTargetLabel}` : `Rimando al ${pendingRimandoTargetLabel}`)
+                    : (role === 'DT' && pending === 'INTEGRAZIONE' ? 'Rimando per integrazione' : 'Rimando'))
           : pending === 'APPROVA'
             ? approvaPendingTitle
             : pending === 'RESPINGI'
@@ -6201,7 +6428,7 @@ function ActionsPanel (props: {
                 ? `Archiviazione ${subjectNameWithArticle}`
                 : 'Conferma azione'
 
-  const approvaActionDesc = isIntegrationResponseForUi
+  const approvaActionDesc = isIntegrationResponseForWorkflowUi
     ? (role === 'RIA' && (fwdDest === 'IA' || currentIntegrationRequester === 'IA')
         ? 'L’esito dell’integrazione verrà trasmesso all’Istruttore amministrativo assegnato.'
         : fwdDest
@@ -6222,21 +6449,25 @@ function ActionsPanel (props: {
             : role === 'RIA' && riaAttoContestazioneDaVerificare
               ? 'L’Atto di accertamento verrà approvato e l’istruttoria verrà trasmessa all’Istruttore amministrativo.'
               : role === 'RIA'
-                ? 'L’istruttoria verrà validata e trasmessa all’Istruttore amministrativo.'
+                ? 'L’istruttoria verrà validata e trasmessa all’Istruttore amministrativo assegnato.'
                 : role === 'IA'
                   ? 'L’istruttoria verrà registrata come conforme. L’istruttoria resterà all’Istruttore amministrativo per predisporre gli elaborati successivi.'
                   : (praticaLabel === 'Rapporto tecnico' ? 'L’istruttoria verrà trasmessa al passaggio successivo.' : 'La rilevazione verrà trasmessa al passaggio successivo.')
 
 
-  const integrazioneActionDesc = pendingRimandoTargetLabel
-    ? (pendingRimandoTargetLabel === 'Istruttore tecnico'
-        ? 'L’istruttoria verrà rimandata all’Istruttore tecnico assegnato.'
-        : praticaLabel === 'Rapporto tecnico'
-          ? `L’istruttoria verrà rimandata ${pendingRimandoTargetLabel.startsWith('Istruttore') ? `all’${pendingRimandoTargetLabel}` : `al ${pendingRimandoTargetLabel}`}.`
-          : `L’istruttoria verrà rimandata ${pendingRimandoTargetLabel.startsWith('Istruttore') ? `all’${pendingRimandoTargetLabel}` : `al ${pendingRimandoTargetLabel}`}.`)
-    : (praticaLabel === 'Rapporto tecnico'
-        ? 'L’istruttoria verrà rimandata per integrazione.'
-        : 'La rilevazione verrà rimandata per integrazione.')
+  const integrazioneActionDesc = isRiaAutomaticNonConformity
+    ? (pendingRimandoTargetLabel
+        ? `La non conformità verrà registrata e l’istruttoria sarà inoltrata ${pendingRimandoTargetLabel.startsWith('Istruttore') ? `all’${pendingRimandoTargetLabel}` : `al ${pendingRimandoTargetLabel}`} per le integrazioni necessarie.`
+        : 'La non conformità verrà registrata; il sistema determinerà il destinatario in base alla motivazione indicata.')
+    : pendingRimandoTargetLabel
+      ? (pendingRimandoTargetLabel === 'Istruttore tecnico'
+          ? 'L’istruttoria verrà rimandata all’Istruttore tecnico assegnato.'
+          : praticaLabel === 'Rapporto tecnico'
+            ? `L’istruttoria verrà rimandata ${pendingRimandoTargetLabel.startsWith('Istruttore') ? `all’${pendingRimandoTargetLabel}` : `al ${pendingRimandoTargetLabel}`}.`
+            : `L’istruttoria verrà rimandata ${pendingRimandoTargetLabel.startsWith('Istruttore') ? `all’${pendingRimandoTargetLabel}` : `al ${pendingRimandoTargetLabel}`}.`)
+      : (praticaLabel === 'Rapporto tecnico'
+          ? 'L’istruttoria verrà rimandata per integrazione.'
+          : 'La rilevazione verrà rimandata per integrazione.')
 
   const pendingTheme: Record<string, PendingTheme> = {
     TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: takeInChargeDescForIncomingEvent() },
@@ -6244,9 +6475,7 @@ function ActionsPanel (props: {
     ASSEGNA_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaperturaWorkflowDaAvviare
       ? `Verrà aperto il nuovo ciclo di riapertura n. ${riaperturaAmmNumero} e l’istruttoria sarà assegnata ${getRoleRecipientPhrase('IA')} selezionato.`
       : `L’istruttoria verrà assegnata ${getRoleRecipientPhrase('IA')} selezionato.` },
-    INVIA_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: isRiaTechnicalIntegrationReturnForUi
-      ? 'Il fascicolo aggiornato verrà trasmesso all’Istruttore amministrativo assegnato.'
-      : 'L’esito dell’integrazione verrà trasmesso all’Istruttore amministrativo assegnato.' },
+    INVIA_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'L’esito dell’integrazione verrà trasmesso all’Istruttore amministrativo assegnato.' },
     RESTITUISCI_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `L’istruttoria verrà restituita ${getRoleRecipientPhrase('IA')} già assegnato.` },
     APPROVA:        { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: approvaActionDesc },
     INTEGRAZIONE:   { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: integrazioneActionDesc },
@@ -6272,7 +6501,7 @@ function ActionsPanel (props: {
   const workflowRespintaItem = workflowMenuEnabledItems.find(item => item.key === 'RESPINGI') || null
   const workflowDirectActionItems = workflowMenuEnabledItems.filter(item => !isWorkflowEsitoPendingKey(item.key))
   const showEsitoDrivenWorkflow = Boolean(workflowConformeItem || workflowIntegrationItems.length > 0 || workflowRespintaItem)
-  const useUnifiedWorkflowActionSelect = isIntegrationResponseForUi || role === 'IT' || role === 'CS' || role === 'RIA' || role === 'IA'
+  const useUnifiedWorkflowActionSelect = isIntegrationResponseForWorkflowUi || role === 'IT' || role === 'CS' || role === 'RIA' || role === 'IA'
   const unifiedWorkflowActionItems = useUnifiedWorkflowActionSelect ? workflowMenuEnabledItems : []
 
   // Le note automatiche di workflow non vengono più generate: il log strutturato
@@ -6339,46 +6568,85 @@ function ActionsPanel (props: {
 
   const selectedWorkflowMenuItem = pending ? (workflowMenuEnabledItems.find(item => item.key === pending) || null) : null
   const actionMenuTheme = pending ? theme : pendingTheme.TAKE
-  const hideWorkflowOperationalDesc = role === 'DT' && pending === 'INTEGRAZIONE' && (
-    !integrationReasonTrim ||
-    (isIntegrationNeedsDetail && integrationTargets.length === 0)
+  const hideWorkflowOperationalDesc = (
+    role === 'DT' && pending === 'INTEGRAZIONE' && (
+      !integrationReasonTrim ||
+      (isIntegrationNeedsDetail && integrationTargets.length === 0)
+    )
+  ) || (
+    isRiaAutomaticNonConformity && (
+      integrationTargets.length === 0 ||
+      !riaAutomaticNonConformityDestination
+    )
   )
   const workflowOperationalDesc = hideWorkflowOperationalDesc ? '' : actionMenuTheme.desc
   const selectedWorkflowMenuKey = selectedWorkflowMenuItem?.key || ''
   const isWorkflowRimandoPending = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA'
-  const isRiaTechnicalFascicoloTransmissionPending = pending === 'INVIA_IA' && isRiaTechnicalIntegrationReturnForUi
-  const isIntegrationOutcomeTransmissionPending = !isRiaTechnicalFascicoloTransmissionPending && isIntegrationResponseForUi && (pending === 'APPROVA' || pending === 'INVIA_IA')
+  const isIntegrationOutcomeTransmissionPending = isIntegrationResponseForWorkflowUi && (pending === 'APPROVA' || pending === 'INVIA_IA')
   const isOrdinaryItTransmissionPending = role === 'IT' && pending === 'APPROVA' && !isIntegrationOutcomeTransmissionPending
-  const isAttestazioneConformitaPending = (pending === 'APPROVA' || pending === 'INVIA_IA') && !isRiaTechnicalFascicoloTransmissionPending && !isIntegrationOutcomeTransmissionPending && !isOrdinaryItTransmissionPending
+  const isAttestazioneConformitaPending = (pending === 'APPROVA' || pending === 'INVIA_IA') && !isIntegrationOutcomeTransmissionPending && !isOrdinaryItTransmissionPending
   const workflowNoteLabel = isAdministrativeRiaReturn
     ? 'Esito della verifica'
-    : isRiaTechnicalFascicoloTransmissionPending
-      ? 'Note'
-    : (isIntegrationOutcomeTransmissionPending
-        ? 'Esito integrazione'
-        : isOrdinaryItTransmissionPending
-          ? 'Ulteriori annotazioni'
-          : (isAttestazioneConformitaPending ? 'Esito dell’istruttoria' : (isWorkflowRimandoPending ? 'Integrazioni/rettifiche proposte' : 'Note')))
+    : isRiaAdministrativeNonConformity
+      ? 'Motivazione del rimando'
+      : isRiaAutomaticNonConformity
+        ? 'Ulteriori annotazioni'
+      : (isIntegrationOutcomeTransmissionPending
+          ? 'Esito integrazione'
+          : isOrdinaryItTransmissionPending
+            ? 'Ulteriori annotazioni'
+            : (isAttestazioneConformitaPending ? 'Esito dell’istruttoria' : (isWorkflowRimandoPending ? 'Integrazioni/rettifiche proposte' : 'Note')))
   const workflowFreeNoteLabel = isAdministrativeRiaReturn
     ? 'Motivazione del rimando'
     : workflowNoteLabel
   const workflowNoteTextAreaRequired = noteIsRequired
-  const workflowNotePlaceholder = isAdministrativeRiaReturn
+  const workflowNotePlaceholder = (isAdministrativeRiaReturn || isRiaAdministrativeNonConformity)
     ? 'Indicare le modifiche, integrazioni o rettifiche richieste…'
-    : isRiaTechnicalFascicoloTransmissionPending
-      ? 'Inserire eventuali annotazioni sulla trasmissione del fascicolo…'
     : isIntegrationOutcomeTransmissionPending
       ? 'Inserire eventuali annotazioni sull’esito dell’integrazione…'
       : isOrdinaryItTransmissionPending
         ? 'Inserire eventuali annotazioni sulla trasmissione dell’istruttoria…'
         : isAttestazioneConformitaPending
           ? 'Inserire eventuali annotazioni sull’esito conforme…'
-          : isWorkflowRimandoPending
-          ? (hasOtherMotivation ? 'Inserire altre motivazioni ed eventuali ulteriori annotazioni…' : 'Inserire eventuali ulteriori annotazioni…')
-          : (noteIsRequired ? 'Specifica il motivo…' : 'Nota facoltativa…')
+          : isRiaAutomaticNonConformity
+            ? (hasOtherMotivation ? 'Specificare l’altro aspetto tecnico ed eventuali ulteriori annotazioni…' : 'Inserire eventuali ulteriori annotazioni…')
+            : isWorkflowRimandoPending
+              ? (hasOtherMotivation ? 'Inserire altre motivazioni ed eventuali ulteriori annotazioni…' : 'Inserire eventuali ulteriori annotazioni…')
+              : (noteIsRequired ? 'Specifica il motivo…' : 'Nota facoltativa…')
 
   const integrationMotivationControls = isWorkflowRimandoPending ? (
-    isAdministrativeRiaReturn ? (
+    isRiaAutomaticNonConformity ? (
+      <div style={{ display: 'grid', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Motivazione della non conformità</div>
+          <div style={labelReqStyle(true, integrationReasonReqErr || integrationTargetsReqErr)}>(obbligatoria)</div>
+        </div>
+
+        {riaAdministrativeNonConformityTargetOptions.length > 0 && (
+          <div style={{ border: `1px solid ${(integrationReasonReqErr || integrationTargetsReqErr) && isRiaAdministrativeNonConformity ? '#fecaca' : '#e5e7eb'}`, borderRadius: 8, padding: '7px 8px', background: '#fff' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#4b5563', marginBottom: 4 }}>Aspetti amministrativi</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', columnGap: 10, rowGap: 2 }}>
+              {riaAdministrativeNonConformityTargetOptions.map(opt => renderRiaAdministrativeNonConformityCheckbox(opt))}
+            </div>
+          </div>
+        )}
+
+        {riaTechnicalNonConformityTargetOptions.length > 0 && (
+          <div style={{ border: `1px solid ${integrationTargetsReqErr && isRiaTechnicalNonConformity ? '#fecaca' : '#e5e7eb'}`, borderRadius: 8, padding: '7px 8px', background: '#fff' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#4b5563', marginBottom: 4 }}>Aspetti tecnici</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', columnGap: 10, rowGap: 2 }}>
+              {riaTechnicalNonConformityTargetOptions.map(opt => renderRiaTechnicalNonConformityCheckbox(opt))}
+            </div>
+          </div>
+        )}
+
+        {riaAutomaticNonConformityDestination && (
+          <div style={{ fontSize: 13, lineHeight: 1.45, color: '#4b5563' }}>
+            Instradamento automatico: <strong>{formatRimandoRoleLabel(riaAutomaticNonConformityDestination)}</strong>.
+          </div>
+        )}
+      </div>
+    ) : isAdministrativeRiaReturn ? (
       administrativeReturnTargetOptions.length > 0 ? (
         <div style={{ display: 'grid', gap: 7 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -6394,27 +6662,29 @@ function ActionsPanel (props: {
       ) : null
     ) : (
       <div style={{ display: 'grid', gap: 8 }}>
-        <div style={{ display: 'grid', gap: 6 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Motivazione del rimando</div>
-            <div style={labelReqStyle(true, integrationReasonReqErr)}>(obbligatoria)</div>
+        {!hasSingleIntegrationReason && (
+          <div style={{ display: 'grid', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Motivazione del rimando</div>
+              <div style={labelReqStyle(true, integrationReasonReqErr)}>(obbligatoria)</div>
+            </div>
+            <select
+              value={integrationReason}
+              onChange={(e) => {
+                const v = String(e.target.value || '')
+                setIntegrationReason(v)
+                setIntegrationTargets([])
+                setIntegrationOtherText('')
+                if (confirmAttempted) setConfirmAttempted(false)
+              }}
+              disabled={loading || !hasSel || lockedByTransmit}
+              style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: `1px solid ${integrationReasonReqErr ? '#dc2626' : 'rgba(0,0,0,0.18)'}`, outline: 'none', fontSize: Math.max(15, Number(ui.statusFontSize) || 15), background: '#fff' }}
+            >
+              <option value=''>— Seleziona —</option>
+              {activeIntegrationReasonOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            </select>
           </div>
-          <select
-            value={integrationReason}
-            onChange={(e) => {
-              const v = String(e.target.value || '')
-              setIntegrationReason(v)
-              setIntegrationTargets([])
-              setIntegrationOtherText('')
-              if (confirmAttempted) setConfirmAttempted(false)
-            }}
-            disabled={loading || !hasSel || lockedByTransmit}
-            style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: `1px solid ${integrationReasonReqErr ? '#dc2626' : 'rgba(0,0,0,0.18)'}`, outline: 'none', fontSize: Math.max(15, Number(ui.statusFontSize) || 15), background: '#fff' }}
-          >
-            <option value=''>— Seleziona —</option>
-            {integrationReasonOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-          </select>
-        </div>
+        )}
 
         {isIntegrationNeedsDetail && (
           <div style={{ display: 'grid', gap: 7 }}>
@@ -6488,6 +6758,8 @@ function ActionsPanel (props: {
     setActionsMenuOpen(true)
     setWorkflowSubmitting(false)
     setPending(null)
+    setPendingIntegrationResponseContext(null)
+    setPendingInviaIaContext(null)
     setMsg(null)
     setConfirmAttempted(false)
     setWorkflowEsitoChoice('')
@@ -6558,7 +6830,13 @@ function ActionsPanel (props: {
       else if (pending === 'RESPINGI') await onConfirmRespinta()
       else if (pending === 'ELIMINA') await onConfirmElimina()
     } finally {
+      // Chiudiamo il popup e azzeriamo l'azione nello stesso passaggio: evita
+      // il render intermedio in cui il testo dell'esito integrazione veniva
+      // sostituito per un istante da quello dell'azione ordinaria.
       setActionsMenuOpen(false)
+      setPending(null)
+      setPendingIntegrationResponseContext(null)
+    setPendingInviaIaContext(null)
       setWorkflowSubmitting(false)
     }
   }
@@ -6623,6 +6901,8 @@ function ActionsPanel (props: {
                     setWorkflowRimandoChoice('')
                     if (!raw) {
                       setPending(null)
+                      setPendingIntegrationResponseContext(null)
+                      setPendingInviaIaContext(null)
                       setMsg(null)
                       setConfirmAttempted(false)
                       setNoteDraft(noteOrigRef.current)
@@ -6664,6 +6944,8 @@ function ActionsPanel (props: {
                     setWorkflowRimandoChoice('')
                     if (!raw) {
                       setPending(null)
+                      setPendingIntegrationResponseContext(null)
+                      setPendingInviaIaContext(null)
                       setMsg(null)
                       setConfirmAttempted(false)
                       setNoteDraft(noteOrigRef.current)
@@ -7574,11 +7856,11 @@ const queryFields = React.useMemo(() => ['*'], [])
         const r0 = recs[0]
         const fetched = r0?.getData?.() || {}
 
-        if (isIaSelection && !isPracticeAssignedToCurrentIa(fetched, detectedUser)) {
-          setForcedActive(null)
-          setDirectAccessGate({ status: 'denied' })
-          return
-        }
+        // La selezione proviene dall'Elenco pratiche, che ha già applicato la visibilità IA.
+        // L'assegnazione live decide quindi la disponibilità OPERATIVA, non il diritto di
+        // consultare una pratica già visibile. Se non coincide più, la pratica resta
+        // caricata ma viene forzata in sola consultazione.
+        const iaAssignedLive = !isIaSelection || isPracticeAssignedToCurrentIa(fetched, detectedUser)
 
         const cached = readSelectedFeatureCache(selection.layerUrl, selection.oid)
         const freshEdit = cached && cached.source === 'edit' && (Date.now() - Number(cached.ts || 0) < 15000)
@@ -7609,7 +7891,7 @@ const queryFields = React.useMemo(() => ['*'], [])
         writeSelectedFeatureCache(selection.layerUrl, selection.oid, idFieldName, d0, 'azioni')
         const st: SelState = { ds: dsTry, oid: selection.oid, idFieldName, data: d0, sig: stateKey }
         setForcedActive({ key: selection.layerUrl, state: st })
-        setDirectAccessGate({ status: isIaSelection ? 'allowed' : 'idle' })
+        setDirectAccessGate({ status: isIaSelection ? (iaAssignedLive ? 'allowed' : 'consultation') : 'idle' })
       } catch {
         if (req !== forcedReqRef.current) return
         setForcedActive(null)
