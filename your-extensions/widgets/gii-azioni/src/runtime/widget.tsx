@@ -1697,7 +1697,7 @@ function ActionsPanel (props: {
   // Evento che ha consegnato la pratica al ruolo corrente. Per il CS serve a
   // distinguere la nuova rilevazione dall'istruttoria già assegnata e dai
   // rientri successivi da integrazione, senza dedurlo dal numero del rapporto.
-  const [incomingWorkflowForUi, setIncomingWorkflowForUi] = React.useState<{ evento: string; ruolo: string } | null>(null)
+  const [incomingWorkflowForUi, setIncomingWorkflowForUi] = React.useState<{ evento: string; ruolo: string; dt: number | null } | null>(null)
   const incomingWorkflowRequestRef = React.useRef(0)
 
   // Popup di diniego (validazione pre-trasmissione)
@@ -2470,7 +2470,7 @@ function ActionsPanel (props: {
     return res?.features?.[0] || null
   }
 
-  const queryLatestIncomingClosure = async (parentGlobalId: string, ruoloDestinatario: string): Promise<{ evento: string, ruolo: string } | null> => {
+  const queryLatestIncomingClosure = async (parentGlobalId: string, ruoloDestinatario: string): Promise<{ evento: string, ruolo: string, dt: number | null } | null> => {
     if (!parentGlobalId || !ruoloDestinatario) return null
     try {
       const logLayer = await getCycleLogLayer()
@@ -2487,7 +2487,8 @@ function ActionsPanel (props: {
       if (!a) return null
       return {
         evento: String(a.evento_chiusura || '').trim().toUpperCase(),
-        ruolo: String(a.ruolo_competente || '').trim().toUpperCase()
+        ruolo: String(a.ruolo_competente || '').trim().toUpperCase(),
+        dt: Number.isFinite(Number(a.dt_chiusura)) ? Number(a.dt_chiusura) : null
       }
     } catch {
       return null
@@ -3462,11 +3463,20 @@ function ActionsPanel (props: {
       attoRouteFallback
     )
 
-  const iaRiaReturnTimes = riaWorkflowTimes
-  const iaLastRiaReturnMs = iaRiaReturnTimes.length ? Math.max(...iaRiaReturnTimes) : null
   const iaLastPresaMs = parseIaRetakeMs(pickAttrCI(data, ['dt_presa_in_carico_IA', 'DT_PRESA_IN_CARICO_IA']))
   const iaRiaReturnEsito = toNumOrNull(pickAttrCI(data, ['esito_RIA', 'ESITO_RIA']))
   const iaRiaReturnStato = toNumOrNull(pickAttrCI(data, ['stato_RIA', 'STATO_RIA']))
+  // Per stabilire se IA debba riprendere in carico, la data di riferimento deve
+  // essere quella del vero passaggio RIA -> IA, non l'ultimo aggiornamento del nodo RIA.
+  // dt_stato_RIA viene aggiornato anche in fasi documentali successive (es. predisposizione
+  // dell'Atto) e non rappresenta una nuova restituzione della pratica.
+  const iaIncomingFromRiaForRetake = role === 'IA' &&
+    String(incomingWorkflowForUi?.ruolo || '').trim().toUpperCase() === 'RIA'
+  const iaLastRiaReturnMs = iaIncomingFromRiaForRetake
+    ? parseIaRetakeMs(incomingWorkflowForUi?.dt)
+    : (iaRiaReturnEsito === ESITO_APPROVATA
+        ? parseIaRetakeMs(pickAttrCI(data, ['dt_esito_RIA', 'DT_ESITO_RIA']))
+        : null)
 
   // Un timestamp/stato recente del RIA non significa automaticamente "rientro a IA".
   // Il rientro esiste solo se il routing corrente è effettivamente RIA -> IA.
@@ -3486,6 +3496,7 @@ function ActionsPanel (props: {
     (!determinazioneAdottataCorrente || attoContestazioneWorkflowAttivo) &&
     iaLastRiaReturnMs !== null &&
     (
+      iaIncomingFromRiaForRetake ||
       iaRiaReturnEsito === ESITO_APPROVATA ||
       iaRiaReturnEsito === ESITO_INTEGRAZIONE ||
       iaRiaReturnStato === STATO_APPROVATA ||
@@ -5568,7 +5579,7 @@ function ActionsPanel (props: {
       markRestoreSelectionAfterAction('presa-in-carico')
       const cycleContextBeforeSave = await getCurrentCycleContextAsync()
       await runApplyEdits(upd, riaBozzaDeterminazioneDaVerificare ? 'Presa in carico della pratica salvata.' : 'Presa in carico salvata.', { deferRefresh: true, keepLoading: true })
-      await openCycleLog({ eventoApertura: 'PRESA_IN_CARICO', fase: role, context: cycleContextBeforeSave, forceNew: true })
+      await openCycleLog({ eventoApertura: 'PRESA_IN_CARICO', fase: role, context: cycleContextBeforeSave })
       await deleteCurrentActivityForCurrentRole()
       await refreshAfterWorkflowSave('azioni-presa-in-carico-post-log')
       clearAfterWorkflowListNavigation()

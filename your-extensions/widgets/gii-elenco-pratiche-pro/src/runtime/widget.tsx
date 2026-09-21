@@ -3770,21 +3770,29 @@ export default function Widget(props: Props) {
     const statoRia = readRoleNumber(d, "RIA", "stato");
     // L'approvazione di RIA non è ambigua: sblocca sempre la trasmissione
     // del fascicolo al protocollo da parte di IA.
-    const riaApproved =
-      esitoRia === esitoApprovata || statoRia === statoApprovata;
+    // Una vera restituzione RIA → IA non può essere dedotta dal solo stato_RIA = 4:
+    // quel valore viene usato anche internamente durante la predisposizione dell’Atto
+    // e può quindi essere aggiornato mentre la pratica è ancora regolarmente in carico a IA.
+    // L'approvazione reale è attestata dall'esito RIA; in alternativa il LOG esplicita
+    // direttamente il passaggio RIA → IA.
+    const riaApproved = esitoRia === esitoApprovata;
 
     const riaReturnedToIa = riaApproved || riaSentToIa;
     if (!riaReturnedToIa) return false;
 
-    const riaTimes = [
-      parseToMs(pickField(d, "dt_esito_RIA")),
-      parseToMs(pickField(d, "dt_stato_RIA")),
-    ].filter((v): v is number => v !== null);
-    if (!riaTimes.length) return false;
+    // Il confronto temporale deve riferirsi al vero passaggio RIA → IA, non
+    // all'ultimo aggiornamento generico del nodo RIA. Durante la successiva
+    // predisposizione dell'Atto, infatti, dt_stato_RIA può essere aggiornato
+    // senza che vi sia una nuova restituzione della pratica a IA.
+    // Se il LOG corrente attesta RIA → IA, la sua data è la fonte di verità.
+    // In assenza del LOG usiamo la data dell'esito RIA approvato, mai dt_stato_RIA.
+    const riaReturnMs = riaSentToIa
+      ? parseToMs(log?.dt)
+      : (riaApproved ? parseToMs(pickField(d, "dt_esito_RIA")) : null);
+    if (riaReturnMs === null) return false;
 
-    const lastRiaMs = Math.max(...riaTimes);
     const iaPresaMs = parseToMs(pickField(d, "dt_presa_in_carico_IA"));
-    return iaPresaMs === null || iaPresaMs < lastRiaMs;
+    return iaPresaMs === null || iaPresaMs < riaReturnMs;
   };
 
   const isCurrentIaToRiaBozzaTransmissionLog = (log: LogEntry | null): boolean => {

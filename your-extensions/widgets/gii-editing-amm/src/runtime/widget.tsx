@@ -707,6 +707,7 @@ const DETERMINAZIONE_DOMAIN_STATES = new Set(['BOZZA', 'TRASMESSA_RIA', 'VALIDAT
 // caricato nel fascicolo. Il riconoscimento di bozza/proposta è centralizzato nello
 // shared attachment viewer, così editor e viewer usano la stessa regola.
 const NOTIFICA_ATTO_FIELDS = ['notifica_tipo', 'notifica_data', 'notifica_esito', 'notifica_estremi']
+const ATTO_PREPARATION_SOURCE_FIELDS = ['pagamento_modalita', 'notifica_tipo', 'sanzione_spese_notifica'] as const
 
 const SYSTEM_CALCULATED_ADMIN_FIELDS = new Set([
   'tipo_atto_amm',
@@ -4679,6 +4680,11 @@ function isIaVistoActionPending (data: Record<string, any>): boolean {
   const esitoAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_IA']))
   const presaAt = workflowTimestamp(pickAttrCI(d, ['dt_presa_in_carico_IA']))
   const esitoRiaAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_RIA', 'dt_stato_RIA']))
+  // Dopo l'approvazione del RIA il ciclo di valutazione è chiuso: il ritorno della
+  // pratica all'IA serve agli adempimenti successivi e non richiede un nuovo esito.
+  // Questa precedenza evita che la nuova presa in carico IA sopprima erroneamente
+  // la guida alle azioni post-approvazione (protocollo, salvataggio, determinazione).
+  if (esitoRia === 2) return false
   // Un esito precedente resta visibile, ma dopo una nuova presa in carico IA
   // o dopo un successivo rimando RIA deve essere espresso un nuovo giudizio.
   // Un esito IA già registrato nel ciclo corrente (conforme o non conforme)
@@ -5841,7 +5847,6 @@ function buildAutomaticSanzioneCalculation (
   let risarcimentoDanni = 0
   let rimborsoAttrezzature = 0
   let cauzioneDecurtata = 0
-  let speseNotificaAutomatica = 0
   let riduzionePercentuale: number | null = null
   let riduzioneImporto: number | null = null
   const dettaglio: string[] = []
@@ -5897,15 +5902,18 @@ function buildAutomaticSanzioneCalculation (
       else if (categoria === 'RISARCIMENTO') risarcimentoDanni += amount
       else if (categoria === 'RIMBORSO' || categoria === 'ATTREZZATURA') rimborsoAttrezzature += amount
       else if (categoria === 'CAUZIONE') cauzioneDecurtata += amount
-      else if (categoria === 'SPESE') speseNotificaAutomatica += amount
     })
     dettaglio.push('')
   })
 
-  const speseManuali = parseNumberInput(pickAttrCI(previousDraft || {}, ['sanzione_spese_notifica']))
-  const speseNotifica = speseManuali != null && Number.isFinite(speseManuali)
+  const speseManualiRaw = pickAttrCI(previousDraft || {}, ['sanzione_spese_notifica'])
+  const speseManuali = parseNumberInput(speseManualiRaw)
+  // Le spese di notifica devono essere confermate esplicitamente dall'IA.
+  // Il calcolo automatico non deve valorizzare il campo con 0,00 (né con altri importi):
+  // finché l'utente non lo compila, il valore resta null.
+  const speseNotifica = speseManualiRaw != null && String(speseManualiRaw).trim() !== '' && speseManuali != null && Number.isFinite(speseManuali)
     ? Math.max(0, speseManuali)
-    : speseNotificaAutomatica
+    : null
 
   // Gli importi e il dettaglio dell'Art. 30 costituiscono uno snapshot tecnico
   // definito nella fase AGR/TEC. La fase amministrativa deve applicarli senza
@@ -5948,7 +5956,7 @@ function buildAutomaticSanzioneCalculation (
       ? sanzioneBase * (riduzionePercentuale / 100)
       : null
   const sanzionePerTotale = sanzioneRidotta != null ? sanzioneRidotta : sanzioneBase
-  const totale = sanzionePerTotale + risarcimentoDanni + importoNettoAttrezzature + speseNotifica
+  const totale = sanzionePerTotale + risarcimentoDanni + importoNettoAttrezzature + (speseNotifica ?? 0)
   const user = String(profile.fullName || profile.username || '').trim()
 
 
@@ -5959,7 +5967,7 @@ function buildAutomaticSanzioneCalculation (
     sanzione_importo_base: roundMoneyValue(sanzioneBase),
     sanzione_importo_ridotta: sanzioneRidotta != null ? roundMoneyValue(sanzioneRidotta) : null,
     risarcimento_danni_importo: roundMoneyValue(risarcimentoDanni),
-    sanzione_spese_notifica: roundMoneyValue(speseNotifica),
+    sanzione_spese_notifica: speseNotifica != null ? roundMoneyValue(speseNotifica) : null,
     attrezzature_risarcimento_importo: roundMoneyValue(rimborsoAttrezzature),
     attrezzature_cauzione_decurtata: roundMoneyValue(cauzioneDecurtata),
     attrezzature_importo_netto: roundMoneyValue(importoNettoAttrezzature),
@@ -7479,7 +7487,9 @@ function PostAttestazioneIaWorkSection (props: {
     hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_data']))
   const attoInLavorazioneIa = attoWorkflow && (attoState === '' || attoState === 'BOZZA')
   const paymentModeForAtto = getPaymentMode(d, props.fields)
-  const attoPreDraftReady = !!paymentModeForAtto && hasAdminValue(pickAttrCI(d, ['notifica_tipo']))
+  const speseNotificaForAttoRaw = pickAttrCI(d, ['sanzione_spese_notifica'])
+  const speseNotificaForAttoDefined = speseNotificaForAttoRaw != null && String(speseNotificaForAttoRaw).trim() !== '' && parseNumberInput(speseNotificaForAttoRaw) != null
+  const attoPreDraftReady = !!paymentModeForAtto && hasAdminValue(pickAttrCI(d, ['notifica_tipo'])) && speseNotificaForAttoDefined
   const legacyAttoPostFirmaPaymentReady = hasAdminValue(pickAttrCI(d, ['pagamento_scadenza'])) &&
     (!['PAGOPA', 'MISTO'].includes(paymentModeForAtto) || pagopaAttachments.length > 0)
   const attoPostFirmaPaymentReady = paymentTableHasRows === true
@@ -7928,6 +7938,7 @@ function PostAttestazioneIaWorkSection (props: {
     (
       propostaUfficialeDaAcquisire ||
       determinazioneUfficialeDaAcquisire ||
+      canReplaceArchivedDeterminationPdf ||
       ((bozzaInLavorazioneIa || postApprovalProtocolSaved) && canGenerateBozzaDeterminazione && wordReadyForPdf && canPreparePdfSlot)
     ) &&
     !props.saving &&
@@ -7987,6 +7998,16 @@ function PostAttestazioneIaWorkSection (props: {
 
   // Guida IA: una sola indicazione alla volta, sempre derivata dalle stesse
   // condizioni che abilitano realmente i comandi della fase corrente.
+  // Quando i dati della fase corrente sono già stati acquisiti nel draft ma non ancora
+  // salvati, la prossima azione è esclusivamente "Salva". In questa finestra la
+  // guida della barra Azioni non deve continuare a indicare Carica/Genera/Trasmetti.
+  const protocolloFascicoloDaSalvare = protocolloFascicoloOk && !protocolloFascicoloSalvatoOk
+  const determinazioneDaSalvare =
+    determinationDraftDirty &&
+    determinationDraftComplete &&
+    (currentStatoBozzaCode === TRASMESSA_FIRMA_DA_STATE || currentStatoBozzaCode === 'ADOTTATA')
+  const workflowSavePending = protocolloFascicoloDaSalvare || determinazioneDaSalvare
+
   const guideEnabled =
     String(props.role || '').toUpperCase() === 'IA' &&
     props.canEdit &&
@@ -7994,6 +8015,7 @@ function PostAttestazioneIaWorkSection (props: {
     !attachmentsBusy &&
     attachmentsResolved &&
     !props.suppressActionGuide &&
+    !workflowSavePending &&
     (showDeterminationWorkflow || (showAttoWorkflow && attoWorkflow))
   const definitiveWordGeneratedAfterApproval = postApprovalProtocolSaved && approvalAt > 0 && wordGeneratedAt > approvalAt
 
@@ -8075,7 +8097,9 @@ function PostAttestazioneIaWorkSection (props: {
         ? 'Definire prima la modalità di pagamento nella scheda Notifica'
         : (!hasAdminValue(pickAttrCI(d, ['notifica_tipo']))
             ? 'Definire prima la modalità prevista per la notifica'
-            : 'Completare i dati necessari alla predisposizione dell’Atto'))
+            : (!speseNotificaForAttoDefined
+                ? 'Indicare le spese di notifica, specificando 0,00 se non sono previste spese'
+                : 'Completare i dati necessari alla predisposizione dell’Atto')))
     : ''
   const generateActionTitle = attoWorkflow
     ? (attoWorkflowLocked
@@ -8099,7 +8123,9 @@ function PostAttestazioneIaWorkSection (props: {
         ? 'Carica fascicolo protocollato'
         : (determinazioneUfficialeDaAcquisire
             ? 'Carica determinazione firmata e acquisisci gli estremi'
-            : uploadBozzaActionTitle))
+            : (canReplaceArchivedDeterminationPdf
+                ? 'Sostituisci PDF determinazione'
+                : uploadBozzaActionTitle)))
   const transmitActionDisabled = !attachmentsResolved || (attoWorkflow ? !canTransmitAttoContestazione : !canTransmitBozza)
   const transmitActionTitle = attoWorkflow
     ? (attoTransmittedRia
@@ -8238,7 +8264,7 @@ function PostAttestazioneIaWorkSection (props: {
                   ))}
                 </div>
               )}
-              {!verifiedFinalPdfCaricato && !determinazioneAdottata && !vistoDaRinnovareDopoRimando && riaHaApprovatoProposta && bozzaRientrataDaRia ? (
+              {!verifiedFinalPdfCaricato && !definitiveWordGeneratedAfterApproval && !determinazioneAdottata && !vistoDaRinnovareDopoRimando && riaHaApprovatoProposta && bozzaRientrataDaRia ? (
                 <InfoBox kind='warn'>
                   {riaApprovedMessage}
                 </InfoBox>
@@ -8272,38 +8298,6 @@ function PostAttestazioneIaWorkSection (props: {
             {determinazioneAdottata && (
               <InfoBox kind='ok'>Determina adottata e registrata.</InfoBox>
             )}
-            {canReplaceArchivedDeterminationPdf && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <label
-                  title='Carica PDF ufficiale della determinazione'
-                  aria-label='Carica PDF ufficiale della determinazione'
-                  style={{
-                    ...bozzaIconButtonStyle({ disabled: attachmentsBusy || props.saving }),
-                    width: 'auto',
-                    minWidth: 116,
-                    padding: '0 12px',
-                    gap: 7,
-                    margin: 0,
-                    fontWeight: 800,
-                    fontSize: 13
-                  }}
-                >
-                  <BozzaActionIcon name='upload' size={21} />
-                  <span>Carica PDF</span>
-                  <input
-                    key={`det-official-${inputKey}`}
-                    type='file'
-                    disabled={attachmentsBusy || props.saving}
-                    accept='.pdf,application/pdf'
-                    style={{ display: 'none' }}
-                    onChange={e => { void uploadDeterminazioneUfficiale(e.target.files?.[0] || null) }}
-                  />
-                </label>
-                <span style={{ color: '#64748b', fontSize: 12 }}>
-                  Il nuovo PDF sostituisce quello archiviato senza riaprire l’istruttoria.
-                </span>
-              </div>
-            )}
             <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 12 }}>
               <FieldEditor
                 field={{ group: 'verbale', name: 'determinazione_numero', label: 'Numero determinazione', kind: 'text', readonly: true }}
@@ -8331,6 +8325,11 @@ function PostAttestazioneIaWorkSection (props: {
                 onChange={props.onChange}
               />
             </div>
+            {determinazioneAdottata && (
+              <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.45 }}>
+                È possibile caricare un nuovo PDF della determinazione in sostituzione di quello archiviato. La sostituzione non comporterà la riapertura dell’istruttoria.
+              </div>
+            )}
             {determinationDraftComplete && !/^\d+$/.test(determinationNumberText) && (
               <InfoBox kind='warn'>Il numero della determinazione deve contenere esclusivamente cifre.</InfoBox>
             )}
@@ -8568,7 +8567,7 @@ function PostAttestazioneIaWorkSection (props: {
                     if (attoWorkflow && hasAttoFirmato && !protocolloAttoCompleto) void uploadProtocolloAttoBatch(selectedFiles)
                     else if (attoWorkflow) void uploadAttoContestazionePdf(file)
                     else if (propostaUfficialeDaAcquisire) void uploadProtocolloFascicolo(selectedFiles)
-                    else if (determinazioneUfficialeDaAcquisire) void uploadDeterminazioneUfficiale(file)
+                    else if (determinazioneUfficialeDaAcquisire || canReplaceArchivedDeterminationPdf) void uploadDeterminazioneUfficiale(file)
                     else void uploadBozzaPdf(file)
                   }}
                 />
@@ -9522,8 +9521,12 @@ function PreparazioneNotificaAttoSection (props: { data: Record<string, any>, fi
   const snapshot = getPaymentSnapshot(d, props.fields)
   const paymentModeDefined = !!getPaymentMode(d, props.fields)
   const notificaTipoDefined = hasAdminValue(pickAttrCI(d, ['notifica_tipo']))
+  const speseNotificaRaw = pickAttrCI(d, ['sanzione_spese_notifica'])
+  // Le spese di notifica devono essere definite esplicitamente: anche 0,00 è un
+  // valore valido, mentre null/stringa vuota significa che il dato è ancora da compilare.
+  const speseNotificaDefined = speseNotificaRaw != null && String(speseNotificaRaw).trim() !== '' && parseNumberInput(speseNotificaRaw) != null
   const attentionFieldName = canEditPreparation
-    ? (!paymentModeDefined ? 'pagamento_modalita' : (!notificaTipoDefined ? 'notifica_tipo' : null))
+    ? (!paymentModeDefined ? 'pagamento_modalita' : (!notificaTipoDefined ? 'notifica_tipo' : (!speseNotificaDefined ? 'sanzione_spese_notifica' : null)))
     : null
 
   return (
@@ -9536,29 +9539,34 @@ function PreparazioneNotificaAttoSection (props: { data: Record<string, any>, fi
 
         <div>
           <div style={{ fontWeight: 900, color: '#0f4c81', marginBottom: 8 }}>Dati da definire prima della bozza</div>
-          <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 12, alignItems: 'start' }}>
+          <AdminFieldsGrid
+            group='pagamento'
+            draft={d}
+            fields={props.fields}
+            canEdit={canEditPreparation}
+            onChange={props.onChange}
+            fieldNames={['pagamento_modalita']}
+            attentionFieldName={attentionFieldName}
+          />
+          <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 12, alignItems: 'start', marginTop: 12 }}>
             <AdminFieldsGrid
-              group='pagamento'
+              group='notifica'
               draft={d}
               fields={props.fields}
-              canEdit={canEditPreparation}
+              canEdit={canEditPreparation && paymentModeDefined}
               onChange={props.onChange}
-              fieldNames={['pagamento_modalita']}
+              fieldNames={['notifica_tipo']}
               attentionFieldName={attentionFieldName}
             />
-            <SpeseNotificaEditor data={d} fields={props.fields} canEdit={canEditPreparation} onChange={props.onChange} />
+            <SpeseNotificaEditor
+              data={d}
+              fields={props.fields}
+              canEdit={canEditPreparation && paymentModeDefined && notificaTipoDefined}
+              attention={attentionFieldName === 'sanzione_spese_notifica'}
+              onChange={props.onChange}
+            />
           </div>
         </div>
-
-        <AdminFieldsGrid
-          group='notifica'
-          draft={d}
-          fields={props.fields}
-          canEdit={canEditPreparation}
-          onChange={props.onChange}
-          fieldNames={['notifica_tipo']}
-          attentionFieldName={attentionFieldName}
-        />
       </div>
     </Section>
   )
@@ -10197,64 +10205,106 @@ function useSanzioneConsultivaState (cfg: any, data: any, layerFields: LayerFiel
 }
 
 
-function SpeseNotificaEditor (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+function SpeseNotificaEditor (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, attention?: boolean, onChange: (name: string, value: any) => void }) {
   const st = useAdminStyle()
   const fieldName = realFieldName(props.fields, 'sanzione_spese_notifica') || 'sanzione_spese_notifica'
   const raw = pickAttrCI(props.data || {}, [fieldName, 'sanzione_spese_notifica'])
   const fieldExists = !!getFieldInfo(props.fields, 'sanzione_spese_notifica')
   const readonly = !props.canEdit || !fieldExists || getFieldInfo(props.fields, 'sanzione_spese_notifica')?.editable === false
   const [focused, setFocused] = React.useState(false)
-  const [textValue, setTextValue] = React.useState(raw == null || raw === '' ? '' : formatMoney(raw))
+
+  const formatMaskedMoney = React.useCallback((value: any): string => {
+    if (value == null || value === '') return ''
+    const n = parseNumberInput(value)
+    if (n == null || !Number.isFinite(n)) return ''
+    return `${formatDecimalIt(roundMoneyValue(n), 2)} €`
+  }, [])
+
+  const applyDigits = React.useCallback((digitsRaw: string) => {
+    const digits = String(digitsRaw || '').replace(/\D/g, '')
+    if (!digits) {
+      setTextValue('')
+      props.onChange(fieldName, null)
+      return
+    }
+    const cents = Number.parseInt(digits, 10)
+    const amount = roundMoneyValue((Number.isFinite(cents) ? cents : 0) / 100)
+    setTextValue(`${formatDecimalIt(amount, 2)} €`)
+    props.onChange(fieldName, amount)
+  }, [fieldName, props.onChange])
+
+  const [textValue, setTextValue] = React.useState(raw == null || raw === '' ? '' : formatMaskedMoney(raw))
 
   React.useEffect(() => {
     if (focused) return
-    setTextValue(raw == null || raw === '' ? '' : formatMoney(raw))
-  }, [raw, focused])
+    setTextValue(raw == null || raw === '' ? '' : formatMaskedMoney(raw))
+  }, [raw, focused, formatMaskedMoney])
 
   const commitValue = (value: string) => {
-    const n = parseNumberInput(value)
-    if (n == null) {
+    const digits = String(value || '').replace(/\D/g, '')
+    if (!digits) {
       props.onChange(fieldName, null)
       setTextValue('')
       return
     }
-    const rounded = roundMoneyValue(n)
-    props.onChange(fieldName, rounded)
-    setTextValue(formatMoney(rounded))
+    const cents = Number.parseInt(digits, 10)
+    const amount = roundMoneyValue((Number.isFinite(cents) ? cents : 0) / 100)
+    props.onChange(fieldName, amount)
+    setTextValue(`${formatDecimalIt(amount, 2)} €`)
   }
 
   return (
     <div style={{ minWidth: 0, width: '100%', maxWidth: ADMIN_COMPACT_FIELD_MAX_WIDTH }}>
-      <div style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3) }}>Spese di notifica</div>
+      <style>{`.gii-notifica-spese-input::placeholder, .gii-notifica-spese-input:disabled::placeholder { color: #9ca3af !important; -webkit-text-fill-color: #9ca3af !important; font-style: italic !important; opacity: 1 !important; }`}</style>
+      <div style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3), display: 'flex', alignItems: 'center', gap: 7 }}>
+        <span>Spese di notifica</span>
+        {props.attention && <NextActionPulse title='Dato da compilare: indicare esplicitamente anche 0,00 se non sono previste spese' />}
+      </div>
       <input
+        className='gii-notifica-spese-input'
         type='text'
-        inputMode='decimal'
+        inputMode='numeric'
         value={textValue}
         disabled={readonly}
-        onFocus={() => setFocused(true)}
+        onFocus={e => {
+          setFocused(true)
+          const el = e.currentTarget
+          try { el.select() } catch {}
+        }}
         onChange={e => {
-          const next = e.target.value.replace(/[^0-9.,]/g, '')
-          setTextValue(next)
-          if (!next.trim()) {
-            props.onChange(fieldName, null)
-            return
-          }
-          const n = parseNumberInput(next)
-          if (n != null) props.onChange(fieldName, roundMoneyValue(n))
+          applyDigits(e.target.value)
         }}
         onBlur={() => {
           setFocused(false)
           commitValue(textValue)
         }}
         onKeyDown={e => {
+          if (/^[0-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault()
+            const selectedAll = e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === textValue.length
+            const currentDigits = selectedAll ? '' : textValue.replace(/\D/g, '')
+            applyDigits(`${currentDigits}${e.key}`)
+            return
+          }
+          if (e.key === 'Backspace') {
+            e.preventDefault()
+            const selectedAll = e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === textValue.length
+            const currentDigits = selectedAll ? '' : textValue.replace(/\D/g, '').slice(0, -1)
+            applyDigits(currentDigits)
+            return
+          }
+          if (e.key === ',' || e.key === '.') {
+            e.preventDefault()
+            return
+          }
           if (e.key !== 'Enter') return
           e.preventDefault()
           setFocused(false)
-          commitValue(e.currentTarget.value)
+          commitValue(textValue)
           e.currentTarget.blur()
         }}
-        style={{ ...inputStyleFrom(st, readonly), background: '#ffffff' }}
-        placeholder='0,00'
+        style={{ ...inputStyleFrom(st, readonly), ...(readonly ? {} : { background: '#ffffff' }) }}
+        placeholder='es.: 7,05 €'
       />
       <div style={{ marginTop: 4, color: '#6b7280', fontSize: adminLabelFontSize(st), lineHeight: 1.35 }}>Concorre al totale da pagare.</div>
     </div>
@@ -15424,6 +15474,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const paymentModeForAtto = getPaymentMode(liveAttrs, fields)
       if (!paymentModeForAtto) throw new Error('Definire prima la modalità di pagamento nella scheda Notifica.')
       if (!hasAdminValue(pickAttrCI(liveAttrs, ['notifica_tipo']))) throw new Error('Definire prima la modalità prevista per la notifica.')
+      const speseNotificaRaw = pickAttrCI(liveAttrs, ['sanzione_spese_notifica'])
+      if (speseNotificaRaw == null || String(speseNotificaRaw).trim() === '' || parseNumberInput(speseNotificaRaw) == null) {
+        throw new Error('Indicare le spese di notifica nella scheda Notifica, specificando 0,00 se non sono previste spese.')
+      }
       const numeroAtto = String(pickAttrCI(liveAttrs, ['accertamento_numero']) || '').trim()
       if (!numeroAtto) throw new Error('Numero dell’Atto non disponibile. Registrare prima gli estremi della determinazione.')
       if (
@@ -15519,7 +15573,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         title: postRiApproved ? 'Versione Word senza filigrana generata' : 'Bozza Word dell’Atto di accertamento generata',
         text: postRiApproved
           ? 'È stata generata la versione Word dell’Atto senza filigrana, mantenendo invariato il contenuto approvato dal Responsabile. Convertirla in PDF e caricarla con la normale azione di caricamento; il gestionale la confronterà con la versione approvata prima di sostituirla.'
-          : 'È stata generata la bozza Word dell’Atto di accertamento con filigrana BOZZA. Aprirla in Word, completare o modificare il testo, quindi convertirla in PDF e caricarla per la verifica del Responsabile.'
+          : 'La bozza Word dell’Atto di accertamento è stata generata con la filigrana BOZZA. Aprirla in Word per completare o modificare il testo. Quindi convertirla in PDF e caricarla per la verifica del Responsabile.'
       })
     } catch (e: any) {
       if (operationContextIsCurrent()) setDialog({ kind: 'err', title: 'Generazione bozza Atto non riuscita', text: e?.message || String(e) })
@@ -15935,6 +15989,20 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     const attrs = changedAttrs(layerFields, initialDraft, draft)
 
+    // Modalità di pagamento, tipo di notifica e spese di notifica confluiscono
+    // direttamente nel contenuto dell'Atto. Se cambiano dopo che il ciclo di
+    // predisposizione dell'Atto è già iniziato, il documento precedente non può
+    // restare valido: al salvataggio il ciclo documentale torna alla generazione Word.
+    const attoPreparationSourceChanged =
+      isDeterminazioneAdottata(initialDraft || {}) &&
+      attoContestazioneWorkflowState(initialDraft || {}) === 'BOZZA' &&
+      ATTO_PREPARATION_SOURCE_FIELDS.some(name => {
+        const real = realFieldName(layerFields, name) || name
+        const before = pickAttrCI(initialDraft || {}, [real, name])
+        const after = pickAttrCI(draft || {}, [real, name])
+        return !sameDraftValue(before, after, name)
+      })
+
     // Se una pratica storica contiene un valore non appartenente al dominio,
     // il primo salvataggio utile lo riallinea al milestone reale già persistito.
     // Nessun nuovo valore fuori dominio viene mai scritto.
@@ -15972,6 +16040,45 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (typeof layer.load === 'function') { try { await layer.load() } catch { } }
       const fields = layer?.fields?.length ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false })) : layerFields
       const idName = realFieldName(fields, active.idFieldName) || active.idFieldName || 'OBJECTID'
+      let attoPreparationInvalidated = false
+      let invalidatedAttoPdfCount = 0
+
+      if (attoPreparationSourceChanged) {
+        const layerUrl = normalizeEditLayerUrl(
+          layer?.url || active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)
+        )
+        const allAttachments = await queryAmmAttachments(layer, Number(oid), layerUrl)
+        const attoPdfs = allAttachments.filter(isGiiAttoContestazionePdfAttachment)
+
+        // Il PDF è una rappresentazione dei dati appena modificati: non deve poter
+        // sopravvivere al salvataggio e diventare trasmissibile con contenuto obsoleto.
+        // Lo eliminiamo prima di chiudere il salvataggio; un eventuale riferimento
+        // storico RIA (JSON) resta invece nel fascicolo e sarà sostituito al prossimo invio.
+        for (const att of attoPdfs) {
+          const attachmentId = Number(att?.id)
+          if (!Number.isFinite(attachmentId) || attachmentId <= 0) continue
+          await deleteAmmAttachment(layer, Number(oid), attachmentId, layerUrl)
+          invalidatedAttoPdfCount += 1
+        }
+
+        // Anche il Word già generato è costruito sugli stessi dati. Azzeriamo
+        // esclusivamente il nodo RIA corrente dell'Atto: il rimando/approvazione
+        // precedente rimane nello storico LOG, mentre il workflow corrente torna
+        // correttamente a "genera Word". I campi di routing GII restano invariati
+        // fino alla successiva trasmissione effettiva.
+        const resetAttoRiaField = (name: string, value: any = null) => {
+          const real = realFieldName(fields, name)
+          if (real) attrs[real] = value
+        }
+        resetAttoRiaField('stato_RIA')
+        resetAttoRiaField('dt_stato_RIA')
+        resetAttoRiaField('dt_presa_in_carico_RIA')
+        resetAttoRiaField('esito_RIA')
+        resetAttoRiaField('dt_esito_RIA')
+        resetAttoRiaField('note_RIA')
+        attoPreparationInvalidated = true
+      }
+
       let determinationSaveMeta: { derivedAccertamentoNumber: string, wasAlreadyAdopted: boolean } | null = null
       if (determinationIsDirty) {
         if (!(currentRole === 'IA' || currentRole === 'ADMIN')) {
@@ -16113,6 +16220,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           kind: 'ok',
           title: determinationSaveMeta.wasAlreadyAdopted ? 'Dati determina aggiornati' : 'Determina registrata',
           text: `${determinationSaveMeta.wasAlreadyAdopted ? 'I dati della determinazione sono stati aggiornati' : 'La determinazione adottata è stata registrata'}. Numero Atto di accertamento assegnato automaticamente: ${determinationSaveMeta.derivedAccertamentoNumber}.`
+        })
+      } else if (attoPreparationInvalidated) {
+        setDialog({
+          kind: 'ok',
+          title: 'Dati dell’Atto aggiornati',
+          text: invalidatedAttoPdfCount > 0
+            ? 'I dati che confluiscono nell’Atto sono stati modificati. Il PDF precedente è stato eliminato perché non più coerente. Rigenerare la bozza Word, convertirla in PDF e caricarla nuovamente prima della trasmissione al Responsabile.'
+            : 'I dati che confluiscono nell’Atto sono stati modificati. La bozza Word precedente non è più coerente. Rigenerarla prima di predisporre il PDF da trasmettere al Responsabile.'
         })
       } else if (hasPendingAmmAttachmentRotations && !Object.keys(attrs).length) {
         setDialog({ kind: 'ok', title: 'Allegato aggiornato', text: 'Orientamento dell’allegato salvato.' })
@@ -16746,6 +16861,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     bozzaRefreshKey={[
                       oid ?? '',
                       pickAttrCI(viewData || {}, ['determinazione_stato']) ?? '',
+                      pickAttrCI(viewData || {}, ['dt_stato_RIA']) ?? '',
                       pickAttrCI(viewData || {}, ['dt_esito_RIA']) ?? '',
                       pickAttrCI(viewData || {}, ['protocollo_atto_accertamento_numero']) ?? '',
                       pickAttrCI(viewData || {}, ['protocollo_atto_accertamento_data']) ?? ''
