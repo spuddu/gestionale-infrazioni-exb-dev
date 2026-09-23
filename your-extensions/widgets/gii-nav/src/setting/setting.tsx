@@ -125,6 +125,7 @@ const ROLE_OPTIONS = [
 const ICON_OPTIONS = [
   {value:'home',        label:'🏠 Home'},
   {value:'elenco',      label:'📋 Elenco'},
+  {value:'regolamento',  label:'📖 Regolamento'},
   {value:'nuova',       label:'➕ Nuova'},
   {value:'mappa',       label:'🗺 Mappa'},
   {value:'dashboard',   label:'📊 Dashboard'},
@@ -269,7 +270,11 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
               <Inp value={item.label} onChange={v=>setItem(ri,{label:v})}/>
 
               <label style={P.lbl}>Icona</label>
-              <Sel value={item.icon||'home'} onChange={v=>setItem(ri,{icon:v})} options={ICON_OPTIONS}/>
+              <Sel
+                value={/regolamento/.test(`${item.id || ''} ${item.label || ''} ${item.hashPage || ''}`.toLowerCase()) && (!item.icon || item.icon === 'elenco') ? 'regolamento' : (item.icon || 'home')}
+                onChange={v=>setItem(ri,{icon:v})}
+                options={ICON_OPTIONS}
+              />
 
               <label style={P.lbl}>Pagina di destinazione</label>
               <PageSel value={item.hashPage} onChange={v=>setItem(ri,{hashPage:v})}/>

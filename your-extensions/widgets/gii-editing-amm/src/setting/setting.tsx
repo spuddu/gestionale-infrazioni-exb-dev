@@ -113,6 +113,24 @@ export default function Setting (props: Props) {
         </div>
       </div>}
 
+      <Acc id='strumenti-test' label='🧪 Strumenti di test' open={isOpen('strumenti-test')} onToggle={() => toggle('strumenti-test')} />
+      {isOpen('strumenti-test') && <div>
+        <div style={P.card}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer', margin: 0 }}>
+            <input
+              type='checkbox'
+              checked={!!cfgJs.enablePagoPaTestGenerator}
+              onChange={e => patch({ enablePagoPaTestGenerator: e.target.checked })}
+              style={{ marginTop: 2 }}
+            />
+            <span>
+              <span style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#e5e7eb' }}>Abilita generatore avvisi pagoPA di test</span>
+              <span style={{ ...P.hint, display: 'block', marginTop: 4 }}>Mostra nella sezione Dati di pagamento il pulsante per generare e scaricare avvisi pagoPA fittizi. Disattivare questa opzione prima della pubblicazione operativa.</span>
+            </span>
+          </label>
+        </div>
+      </div>}
+
 
       <div style={{ ...P.hint, marginTop: 14, padding: '8px 10px', border: '1px solid rgba(147,197,253,0.20)', borderRadius: 8, background: 'rgba(59,130,246,0.06)' }}>
         Il pannello espone solo impostazioni effettivamente collegate agli elementi attuali di gii-editing-amm. Le impostazioni condivise indicano esplicitamente le schede interessate.

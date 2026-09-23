@@ -1713,6 +1713,10 @@ function ActionsPanel (props: {
 
   const noteOrigRef = React.useRef<string>('')
   const noteRef = React.useRef<HTMLTextAreaElement | null>(null)
+  // Durante una conferma il record viene aggiornato prima che il popup venga chiuso.
+  // Congeliamo la descrizione dell'azione avviata, così il testo non viene
+  // ricalcolato sul nuovo stato del workflow mentre il salvataggio è in corso.
+  const workflowSubmittingDescRef = React.useRef<string>('')
 
   // textarea annotazioni: ridimensionabile verticalmente tramite trascinamento
   const NOTE_MIN_H = 74
@@ -3312,7 +3316,9 @@ function ActionsPanel (props: {
     // Il popup RIA non chiede più di scegliere il destinatario né una motivazione
     // preliminare: la sezione in cui viene selezionato l'aspetto determina il routing.
     if (reason === RIA_ADMIN_NON_CONFORMITY_REASON) return 'IA'
-    if (reason === RIA_TECH_NON_CONFORMITY_REASON) return 'RIT'
+    // Durante la verifica dell’Atto la Determinazione è già adottata: una
+    // non conformità può riaprire esclusivamente il ciclo amministrativo IA↔RIA.
+    if (reason === RIA_TECH_NON_CONFORMITY_REASON) return riaAttoContestazioneDaVerificare ? '' : 'RIT'
     return ''
   }
 
@@ -4331,6 +4337,7 @@ function ActionsPanel (props: {
   const canStartIntegrazioneTecnica =
     canStartEsito &&
     role === 'RIA' &&
+    !riaAttoContestazioneDaVerificare &&
     !determinazioneAdottataCorrente
 
   // RIA: l'utente non sceglie più il destinatario del rimando.
@@ -4507,7 +4514,7 @@ function ActionsPanel (props: {
           : role === 'DT'
             ? 'Conforme'
             : role === 'RIA' && riaAttoContestazioneDaVerificare
-              ? 'Approva Atto di accertamento'
+              ? 'Conforme'
               : role === 'RIA'
                 ? 'Conforme'
                 : role === 'IA'
@@ -4691,7 +4698,7 @@ function ActionsPanel (props: {
           : role === 'DT'
             ? 'Approva l’istruttoria e la trasmette al Responsabile dell’istruttoria amministrativa per l’avvio della fase amministrativa.'
             : role === 'RIA' && riaAttoContestazioneDaVerificare
-              ? 'Approva l’Atto di accertamento e trasmette l’istruttoria all’Istruttore amministrativo.'
+              ? 'Registra l’Atto di accertamento come conforme e restituisce la pratica all’Istruttore amministrativo.'
               : role === 'RIA'
                 ? 'Valida l’istruttoria e la trasmette all’Istruttore amministrativo assegnato.'
                 : role === 'IA'
@@ -4848,7 +4855,10 @@ function ActionsPanel (props: {
   const administrativeReturnTargetOptions: string[] = [
     ...(riaAttoContestazioneDaVerificare ? ['Modalità di pagamento'] : []),
     ...(!riaAttoContestazioneDaVerificare && hasBozzaDeterminazioneRicevutaDaRia ? ['Bozza di determinazione'] : []),
-    ...(hasAdministrativeGenericAttachments ? ['Allegati'] : [])
+    ...(hasAdministrativeGenericAttachments ? ['Allegati'] : []),
+    // Nella verifica dell'Atto il RIA può segnalare anche una causa amministrativa
+    // diversa dalle voci tipizzate. La motivazione testuale resta comunque obbligatoria.
+    ...(riaAttoContestazioneDaVerificare ? ['Altro'] : [])
   ]
 
   const integrationTargetOptionsBase = [
@@ -5102,17 +5112,24 @@ function ActionsPanel (props: {
       ].filter(Boolean).join('\n\n')
 
   // obblighi:
+  // Per ogni esito "Non conforme" espresso dal RIA (verifica fascicolo oppure
+  // verifica dell'Atto di accertamento) servono sempre entrambi gli elementi:
+  // almeno un aspetto selezionato e una motivazione testuale del rimando.
+  // Il routing resta automatico: aspetti amministrativi -> IA, aspetti tecnici -> RIT;
+  // nella verifica dell'Atto sono disponibili soltanto gli aspetti amministrativi.
+  const isRiaAttoNonConformity = isRiaAutomaticNonConformity && riaAttoContestazioneDaVerificare
+
   const noteIsRequired =
     hasOtherMotivation ||
     isAdministrativeRiaReturn ||
-    isRiaAdministrativeNonConformity ||
+    isRiaAutomaticNonConformity ||
     (pending === 'ELIMINA')  // Matrice_TI caso 1/b: note obbligatoria per eliminazione
 
   const reasonIsRequired = pending === 'RESPINGI'
   const integrationReasonIsRequired = isWorkflowRimandoPendingForValidation && !isAdministrativeRiaReturn && !isRiaAutomaticNonConformity
   const integrationTargetsIsRequired =
     (isAdministrativeRiaReturn && administrativeReturnTargetOptions.length > 0) ||
-    isRiaAdministrativeNonConformity ||
+    isRiaAutomaticNonConformity ||
     (isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail)
   const integrationOtherTextIsRequired = false
 
@@ -5867,7 +5884,9 @@ function ActionsPanel (props: {
 
       if (ruoloDest) {
         const successMsg = role === 'RIA' && pending === 'INTEGRAZIONE'
-          ? 'Istruttoria dichiarata non conforme e inoltrata per integrazione.'
+          ? (riaAttoContestazioneDaVerificare
+              ? 'Atto di accertamento non conforme. Rimandato all’Istruttore amministrativo per correzione.'
+              : 'Istruttoria dichiarata non conforme e inoltrata per integrazione.')
           : pending === 'INTEGRAZIONE'
             ? 'Pratica rimandata per integrazione.'
             : 'Integrazione richiesta salvata.'
@@ -5881,13 +5900,16 @@ function ActionsPanel (props: {
         await saveWithWorkflowLog(upd, successMsg, { eventoChiusura: eventoRimando, ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), noteChiusura: noteTrim, fase: role })
       } else {
         const successMsg = role === 'RIA' && pending === 'INTEGRAZIONE'
-          ? 'Istruttoria dichiarata non conforme.'
+          ? (riaAttoContestazioneDaVerificare ? 'Atto di accertamento dichiarato non conforme.' : 'Istruttoria dichiarata non conforme.')
           : pending === 'INTEGRAZIONE'
             ? 'Pratica rimandata per integrazione.'
             : 'Integrazione richiesta salvata.'
         await runApplyEdits(upd, successMsg)
       }
-      setPending(null)
+      // Nel popup unificato il reset di pending viene eseguito insieme alla
+      // chiusura in confirmWorkflowAction(). Evitiamo un render intermedio del
+      // popup con un testo/stato diverso subito dopo la conferma.
+      if (!actionsMenuOpen) setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
       setLoading(false)
@@ -6405,7 +6427,7 @@ function ActionsPanel (props: {
           : role === 'DT'
             ? 'Approvazione istruttoria tecnica'
             : role === 'RIA' && riaAttoContestazioneDaVerificare
-              ? 'Approvazione Atto di accertamento'
+              ? 'Esito verifica Atto di accertamento'
               : role === 'RIA'
                 ? 'Validazione istruttoria amministrativa'
                 : role === 'IA'
@@ -6424,7 +6446,7 @@ function ActionsPanel (props: {
           : pending === 'RESTITUISCI_IA'
             ? `Restituzione ${getRoleRecipientPhrase('IA')}`
             : role === 'RIA' && pending === 'INTEGRAZIONE'
-              ? 'Istruttoria non conforme'
+              ? (riaAttoContestazioneDaVerificare ? 'Atto di accertamento non conforme' : 'Istruttoria non conforme')
               : (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA')
                 ? (pendingRimandoTargetLabel
                     ? (pendingRimandoTargetLabel.startsWith('Istruttore') ? `Rimando all’${pendingRimandoTargetLabel}` : `Rimando al ${pendingRimandoTargetLabel}`)
@@ -6458,7 +6480,7 @@ function ActionsPanel (props: {
           : role === 'DT'
             ? 'L’istruttoria verrà approvata e trasmessa al Responsabile dell’istruttoria amministrativa per l’avvio della fase amministrativa.'
             : role === 'RIA' && riaAttoContestazioneDaVerificare
-              ? 'L’Atto di accertamento verrà approvato e l’istruttoria verrà trasmessa all’Istruttore amministrativo.'
+              ? 'L’Atto di accertamento verrà registrato come conforme e la pratica verrà restituita all’Istruttore amministrativo.'
               : role === 'RIA'
                 ? 'L’istruttoria verrà validata e trasmessa all’Istruttore amministrativo assegnato.'
                 : role === 'IA'
@@ -6467,9 +6489,11 @@ function ActionsPanel (props: {
 
 
   const integrazioneActionDesc = isRiaAutomaticNonConformity
-    ? (pendingRimandoTargetLabel
-        ? `La non conformità verrà registrata e l’istruttoria sarà inoltrata ${pendingRimandoTargetLabel.startsWith('Istruttore') ? `all’${pendingRimandoTargetLabel}` : `al ${pendingRimandoTargetLabel}`} per le integrazioni necessarie.`
-        : 'La non conformità verrà registrata; il sistema determinerà il destinatario in base alla motivazione indicata.')
+    ? (riaAttoContestazioneDaVerificare
+        ? 'L’Atto di accertamento verrà registrato come non conforme e la pratica sarà rimandata all’Istruttore amministrativo per le correzioni necessarie.'
+        : pendingRimandoTargetLabel
+          ? `La non conformità verrà registrata e l’istruttoria sarà inoltrata ${pendingRimandoTargetLabel.startsWith('Istruttore') ? `all’${pendingRimandoTargetLabel}` : `al ${pendingRimandoTargetLabel}`} per le integrazioni necessarie.`
+          : 'La non conformità verrà registrata; il sistema determinerà il destinatario in base alla motivazione indicata.')
     : pendingRimandoTargetLabel
       ? (pendingRimandoTargetLabel === 'Istruttore tecnico'
           ? 'L’istruttoria verrà rimandata all’Istruttore tecnico assegnato.'
@@ -6598,10 +6622,8 @@ function ActionsPanel (props: {
   const isAttestazioneConformitaPending = (pending === 'APPROVA' || pending === 'INVIA_IA') && !isIntegrationOutcomeTransmissionPending && !isOrdinaryItTransmissionPending
   const workflowNoteLabel = isAdministrativeRiaReturn
     ? 'Esito della verifica'
-    : isRiaAdministrativeNonConformity
+    : isRiaAutomaticNonConformity
       ? 'Motivazione del rimando'
-      : isRiaAutomaticNonConformity
-        ? 'Ulteriori annotazioni'
       : (isIntegrationOutcomeTransmissionPending
           ? 'Esito integrazione'
           : isOrdinaryItTransmissionPending
@@ -6611,8 +6633,8 @@ function ActionsPanel (props: {
     ? 'Motivazione del rimando'
     : workflowNoteLabel
   const workflowNoteTextAreaRequired = noteIsRequired
-  const workflowNotePlaceholder = (isAdministrativeRiaReturn || isRiaAdministrativeNonConformity)
-    ? 'Indicare le modifiche, integrazioni o rettifiche richieste…'
+  const workflowNotePlaceholder = (isAdministrativeRiaReturn || isRiaAutomaticNonConformity)
+    ? 'Indicare la motivazione del rimando…'
     : isIntegrationOutcomeTransmissionPending
       ? 'Inserire eventuali annotazioni sull’esito dell’integrazione…'
       : isOrdinaryItTransmissionPending
@@ -6749,6 +6771,7 @@ function ActionsPanel (props: {
     if (loading) return
     setActionsMenuOpen(false)
     setWorkflowSubmitting(false)
+    workflowSubmittingDescRef.current = ''
     setPending(null)
     setLoading(false)
     setMsg(null)
@@ -6768,6 +6791,7 @@ function ActionsPanel (props: {
   const openWorkflowMenu = () => {
     setActionsMenuOpen(true)
     setWorkflowSubmitting(false)
+    workflowSubmittingDescRef.current = ''
     setPending(null)
     setPendingIntegrationResponseContext(null)
     setPendingInviaIaContext(null)
@@ -6828,6 +6852,9 @@ function ActionsPanel (props: {
     setConfirmAttempted(true)
     if (!canConfirmWorkflowAction || !pending) return
 
+    // Snapshot del testo prima che applyEdits cambi lo stato della pratica.
+    // Il popup deve descrivere una sola azione per tutta la durata del submit.
+    workflowSubmittingDescRef.current = workflowOperationalDesc || actionMenuTheme.desc || ''
     setWorkflowSubmitting(true)
     setLoading(true)
     setMsg(null)
@@ -6847,8 +6874,9 @@ function ActionsPanel (props: {
       setActionsMenuOpen(false)
       setPending(null)
       setPendingIntegrationResponseContext(null)
-    setPendingInviaIaContext(null)
+      setPendingInviaIaContext(null)
       setWorkflowSubmitting(false)
+      workflowSubmittingDescRef.current = ''
     }
   }
 
@@ -6892,9 +6920,9 @@ function ActionsPanel (props: {
 
         {(loading || workflowSubmitting) ? (
           <React.Fragment>
-            {pending && actionMenuTheme.desc && (
+            {pending && (workflowSubmitting ? workflowSubmittingDescRef.current : workflowOperationalDesc) && (
               <div style={{ fontSize: 15, color: '#374151', lineHeight: 1.6 }}>
-                {actionMenuTheme.desc}
+                {workflowSubmitting ? workflowSubmittingDescRef.current : workflowOperationalDesc}
               </div>
             )}
             {operationProgressBox}
@@ -7234,7 +7262,7 @@ function ActionsPanel (props: {
             {pending === 'ASSEGNA_IT' && <button type='button' onClick={onConfirmAssegnaTi} disabled={!tiSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: !tiSelected ? 'not-allowed' : 'pointer', opacity: !tiSelected ? 0.6 : 1 }}>Conferma</button>}
             {pending === 'ASSEGNA_IA' && <button type='button' onClick={onConfirmAssegnaIa} disabled={!iaSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: !iaSelected ? 'not-allowed' : 'pointer', opacity: !iaSelected ? 0.6 : 1 }}>Conferma</button>}
             {(pending === 'INVIA_IA' || pending === 'RESTITUISCI_IA') && <button type='button' onClick={onConfirmRestituisciIa} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
-            {(pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA') && <button type='button' onClick={onConfirmIntegrazione} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
+            {(pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA') && <button type='button' onClick={onConfirmIntegrazione} disabled={isRiaAutomaticNonConformity && (integrationTargetsInvalid || noteInvalid)} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: isRiaAutomaticNonConformity && (integrationTargetsInvalid || noteInvalid) ? 'not-allowed' : 'pointer', opacity: isRiaAutomaticNonConformity && (integrationTargetsInvalid || noteInvalid) ? 0.6 : 1 }}>Conferma</button>}
             {pending === 'APPROVA' && <button type='button' onClick={() => { void confirmApprovaWithNotaSpeseWarning() }} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
             {pending === 'RESPINGI' && <button type='button' onClick={onConfirmRespinta} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
             {pending === 'ELIMINA' && <button type='button' onClick={onConfirmElimina} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}

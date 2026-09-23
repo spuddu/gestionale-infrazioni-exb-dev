@@ -547,6 +547,7 @@ const ROLE_OPTIONS = [
 const ICON_OPTIONS = [
   {value:'home',        label:'🏠 Home'},
   {value:'elenco',      label:'📋 Elenco'},
+  {value:'regolamento',  label:'📖 Regolamento'},
   {value:'nuova',       label:'➕ Nuova'},
   {value:'mappa',       label:'🗺 Mappa'},
   {value:'dashboard',   label:'📊 Dashboard'},
@@ -570,12 +571,16 @@ const VALID_ICON_VALUES = new Set(ICON_OPTIONS.map(o => o.value))
 
 function inferCardIconValue(input: any): string {
   const explicit = String(input?.icon || '').trim()
+  const id = String(input?.id || '').trim()
+  const text = `${id} ${input?.pageId || ''} ${input?.hashPage || input?.token || ''} ${input?.label || ''}`.toLowerCase()
+
+  // Mantiene il setting coerente con il runtime: la card Regolamento usa
+  // l'icona dedicata anche nelle configurazioni storiche che avevano "elenco".
+  if (/regolamento/.test(text) && (!explicit || explicit === 'elenco')) return 'regolamento'
   if (explicit && VALID_ICON_VALUES.has(explicit)) return explicit
 
-  const id = String(input?.id || '').trim()
   if (id && VALID_ICON_VALUES.has(id)) return id
 
-  const text = `${id} ${input?.pageId || ''} ${input?.hashPage || input?.token || ''} ${input?.label || ''}`.toLowerCase()
   if (/(^|[^a-z])home([^a-z]|$)|homepage|inizio/.test(text)) return 'home'
   if (/utent|utente|user|profil/.test(text)) return 'utenti'
   if (/grupp|team|squadra/.test(text)) return 'gruppo'

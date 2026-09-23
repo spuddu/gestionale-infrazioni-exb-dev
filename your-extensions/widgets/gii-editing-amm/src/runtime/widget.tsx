@@ -19,6 +19,7 @@ import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from '../../../_shared/gii-
 import { isPracticeAssignedToCurrentIa } from '../../../_shared/gii-access/ia-assignment'
 import { getGiiPracticeContextStamp, isGiiPracticeContextStampCurrent, isGiiPracticePayloadCurrent, isGiiPracticeSelectionContextCurrent, stampGiiPracticePayload } from '../../../_shared/gii-selection/practice-context'
 import { ADMINISTRATIVE_RIMANDO_TARGET_OPTIONS, buildAdministrativeRimandoNote } from '../../../_shared/gii-workflow/administrative-rimando'
+import './pagopa-test-generator'
 
 const LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 const GII_ATTIVITA_CORRENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_ATTIVITA_CORRENTI/FeatureServer/0'
@@ -2209,10 +2210,22 @@ function toAuditStoredValue (v: any): any {
   return String(v).trim()
 }
 
+const AUDIT_EXCLUDED_ADMIN_FIELDS = new Set([
+  'determinazione_registrata_da',
+  'determinazione_trasmessa_firma_da',
+  'tipo_atto_amm',
+  'oggetto_atto_amm'
+])
+
+function isExcludedAdminAuditField (fieldName: string): boolean {
+  return AUDIT_EXCLUDED_ADMIN_FIELDS.has(String(fieldName || '').trim().toLowerCase())
+}
+
 function buildAuditDeltaMaps (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>, fields: string[]): { oldMap: Record<string, any>, newMap: Record<string, any> } {
   const oldMap: Record<string, any> = {}
   const newMap: Record<string, any> = {}
   for (const field of Array.from(new Set((fields || []).filter(Boolean)))) {
+    if (isExcludedAdminAuditField(field)) continue
     const before = pickAttrCI(prevAttrs, [field])
     const after = pickAttrCI(nextAttrs, [field])
     if (normalizeAuditComparable(before) === normalizeAuditComparable(after)) continue
@@ -2223,8 +2236,12 @@ function buildAuditDeltaMaps (prevAttrs: Record<string, any>, nextAttrs: Record<
 }
 
 function mergeAuditCycleMaps (baseOld: Record<string, any>, baseNew: Record<string, any>, deltaOld: Record<string, any>, deltaNew: Record<string, any>) {
-  const oldMap: Record<string, any> = { ...(baseOld || {}) }
-  const newMap: Record<string, any> = { ...(baseNew || {}) }
+  const oldMap: Record<string, any> = Object.fromEntries(
+    Object.entries(baseOld || {}).filter(([field]) => !isExcludedAdminAuditField(field))
+  )
+  const newMap: Record<string, any> = Object.fromEntries(
+    Object.entries(baseNew || {}).filter(([field]) => !isExcludedAdminAuditField(field))
+  )
   const changedKeys = Array.from(new Set([...Object.keys(deltaOld || {}), ...Object.keys(deltaNew || {})]))
   for (const field of changedKeys) {
     if (!(field in oldMap)) oldMap[field] = deltaOld[field]
@@ -2510,26 +2527,668 @@ function extractPagoPaDeadlineMs (textRaw: string): number {
   const text = String(textRaw || '')
     .replace(/[\u00a0\u2000-\u200f\u2028-\u202f\u2060\ufeff]/g, ' ')
     .replace(/\s+/g, ' ')
-  const patterns = [
+    .trim()
+
+  const parseDate = (raw: string): number | null => {
+    const parts = String(raw || '').split(/[\/.\-]/).map(v => Number(v))
+    const [day, month, year] = parts
+    if (!day || !month || !year) return null
+    const dt = new Date(year, month - 1, day)
+    if (dt.getFullYear() !== year || dt.getMonth() !== month - 1 || dt.getDate() !== day) return null
+    return dt.getTime()
+  }
+
+  // Primo tentativo: layout nei quali etichetta e data rimangono contigue nel
+  // text layer del PDF.
+  const directPatterns = [
     /(?:data\s+di\s+scadenza|data\s+scadenza|scadenza|entro\s+il)\s*[:\-]?\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4})/i,
     /(?:scade\s+il|pagare\s+entro)\s*[:\-]?\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4})/i
   ]
-  let raw = ''
-  for (const re of patterns) {
+  for (const re of directPatterns) {
     const m = text.match(re)
-    if (m?.[1]) { raw = m[1]; break }
+    const ms = m?.[1] ? parseDate(m[1]) : null
+    if (ms != null) return ms
   }
-  if (!raw) throw new Error('Nel bollettino pagoPA non è stata individuata una data di scadenza riconoscibile.')
-  const parts = raw.split(/[\/.\-]/).map(v => Number(v))
-  const [day, month, year] = parts
-  if (!day || !month || !year) throw new Error('La data di scadenza letta dal bollettino pagoPA non è valida.')
-  const dt = new Date(year, month - 1, day)
-  if (dt.getFullYear() !== year || dt.getMonth() !== month - 1 || dt.getDate() !== day) {
-    throw new Error('La data di scadenza letta dal bollettino pagoPA non è valida.')
+
+  // Nei modelli pagoPA CBSM la data può essere graficamente accanto a
+  // "entro il" ma molto più avanti nell'ordine testuale restituito da PDF.js.
+  // Individuiamo quindi tutte le date valide e scegliamo quella successiva più
+  // vicina a una vera etichetta di scadenza.
+  const dates: Array<{ raw: string, ms: number, index: number }> = []
+  const dateRe = /\b(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4})\b/g
+  let dateMatch: RegExpExecArray | null = null
+  while ((dateMatch = dateRe.exec(text)) != null) {
+    const ms = parseDate(dateMatch[1])
+    if (ms != null) dates.push({ raw: dateMatch[1], ms, index: dateMatch.index })
+    if (dateMatch.index === dateRe.lastIndex) dateRe.lastIndex++
   }
-  return dt.getTime()
+
+  const anchors: Array<{ end: number }> = []
+  const anchorRe = /(?:data\s+di\s+scadenza|data\s+scadenza|scadenza|entro\s+il|scade\s+il|pagare\s+entro)/gi
+  let anchorMatch: RegExpExecArray | null = null
+  while ((anchorMatch = anchorRe.exec(text)) != null) {
+    anchors.push({ end: anchorMatch.index + anchorMatch[0].length })
+    if (anchorMatch.index === anchorRe.lastIndex) anchorRe.lastIndex++
+  }
+
+  let best: { ms: number, distance: number } | null = null
+  for (const anchor of anchors) {
+    for (const candidate of dates) {
+      const distance = candidate.index - anchor.end
+      if (distance < 0 || distance > 1200) continue
+      if (!best || distance < best.distance) best = { ms: candidate.ms, distance }
+    }
+  }
+  if (best) return best.ms
+
+  // Ultimo fallback prudente: se nel documento esiste una sola data distinta,
+  // non è ambiguo usarla come scadenza. Se le date sono più di una e nessuna è
+  // associabile a un'etichetta, il caricamento resta bloccato invece di
+  // scegliere arbitrariamente.
+  const uniqueDates = new Map<number, number>()
+  for (const candidate of dates) uniqueDates.set(candidate.ms, (uniqueDates.get(candidate.ms) || 0) + 1)
+  if (uniqueDates.size === 1) return Array.from(uniqueDates.keys())[0]
+
+  throw new Error('Nel bollettino pagoPA non è stata individuata una data di scadenza riconoscibile.')
 }
 
+
+type GiiQrFinder = { x: number, y: number, module: number, hits: number }
+type GiiQrGeometry = { tl: GiiQrFinder, tr: GiiQrFinder, bl: GiiQrFinder, version: number, dimension: number }
+
+function giiQrRatioOk (counts: number[]): boolean {
+  const total = counts.reduce((sum, value) => sum + value, 0)
+  if (total < 7) return false
+  const module = total / 7
+  const tol = module * 0.75
+  return Math.abs(module - counts[0]) < tol &&
+    Math.abs(module - counts[1]) < tol &&
+    Math.abs(3 * module - counts[2]) < 3 * tol &&
+    Math.abs(module - counts[3]) < tol &&
+    Math.abs(module - counts[4]) < tol
+}
+
+function giiQrCenterFromEnd (counts: number[], end: number): number {
+  return end - counts[4] - counts[3] - (counts[2] / 2)
+}
+
+function giiQrCrossCheckVertical (
+  binary: Uint8Array,
+  width: number,
+  height: number,
+  startY: number,
+  centerX: number,
+  maxCount: number,
+  originalTotal: number
+): number | null {
+  const x = Math.round(centerX)
+  if (x < 0 || x >= width) return null
+  const counts = [0, 0, 0, 0, 0]
+  let y = startY
+  while (y >= 0 && binary[y * width + x] === 1) { counts[2]++; y-- }
+  if (y < 0) return null
+  while (y >= 0 && binary[y * width + x] === 0 && counts[1] <= maxCount) { counts[1]++; y-- }
+  if (y < 0 || counts[1] > maxCount) return null
+  while (y >= 0 && binary[y * width + x] === 1 && counts[0] <= maxCount) { counts[0]++; y-- }
+  if (counts[0] > maxCount) return null
+  y = startY + 1
+  while (y < height && binary[y * width + x] === 1) { counts[2]++; y++ }
+  if (y >= height) return null
+  while (y < height && binary[y * width + x] === 0 && counts[3] <= maxCount) { counts[3]++; y++ }
+  if (y >= height || counts[3] > maxCount) return null
+  while (y < height && binary[y * width + x] === 1 && counts[4] <= maxCount) { counts[4]++; y++ }
+  if (counts[4] > maxCount) return null
+  const total = counts.reduce((sum, value) => sum + value, 0)
+  if (Math.abs(total - originalTotal) * 5 >= originalTotal * 2) return null
+  if (!giiQrRatioOk(counts)) return null
+  return giiQrCenterFromEnd(counts, y)
+}
+
+function giiQrFindFinderCandidates (binary: Uint8Array, width: number, height: number): GiiQrFinder[] {
+  const raw: GiiQrFinder[] = []
+  for (let y = 0; y < height; y++) {
+    let counts = [0, 0, 0, 0, 0]
+    let state = 0
+    for (let x = 0; x < width; x++) {
+      const black = binary[y * width + x] === 1
+      if (black) {
+        if ((state & 1) === 1) {
+          state++
+          if (state === 5) {
+            counts = [counts[2], counts[3], counts[4], 0, 0]
+            state = 3
+          }
+        }
+        counts[state]++
+      } else if ((state & 1) === 0) {
+        if (state === 4) {
+          if (giiQrRatioOk(counts)) {
+            const total = counts.reduce((sum, value) => sum + value, 0)
+            const cx = giiQrCenterFromEnd(counts, x)
+            const cy = giiQrCrossCheckVertical(binary, width, height, y, cx, counts[2], total)
+            if (cy != null) raw.push({ x: cx, y: cy, module: total / 7, hits: 1 })
+          }
+          counts = [counts[2], counts[3], counts[4], 1, 0]
+          state = 3
+        } else {
+          state++
+          counts[state]++
+        }
+      } else {
+        counts[state]++
+      }
+    }
+    if (giiQrRatioOk(counts)) {
+      const total = counts.reduce((sum, value) => sum + value, 0)
+      const cx = giiQrCenterFromEnd(counts, width)
+      const cy = giiQrCrossCheckVertical(binary, width, height, y, cx, counts[2], total)
+      if (cy != null) raw.push({ x: cx, y: cy, module: total / 7, hits: 1 })
+    }
+  }
+  const clusters: GiiQrFinder[] = []
+  for (const item of raw) {
+    let merged = false
+    for (const cluster of clusters) {
+      const radius = Math.max(3, cluster.module * 2)
+      if (Math.abs(item.x - cluster.x) <= radius && Math.abs(item.y - cluster.y) <= radius) {
+        const n = cluster.hits + 1
+        cluster.x = ((cluster.x * cluster.hits) + item.x) / n
+        cluster.y = ((cluster.y * cluster.hits) + item.y) / n
+        cluster.module = ((cluster.module * cluster.hits) + item.module) / n
+        cluster.hits = n
+        merged = true
+        break
+      }
+    }
+    if (!merged) clusters.push({ ...item })
+  }
+  return clusters.sort((a, b) => b.hits - a.hits)
+}
+
+function giiQrChooseGeometry (candidates: GiiQrFinder[]): GiiQrGeometry | null {
+  const points = candidates.filter(item => item.hits >= 3).slice(0, 20)
+  let best: { score: number, geometry: GiiQrGeometry } | null = null
+  for (let a = 0; a < points.length - 2; a++) {
+    for (let b = a + 1; b < points.length - 1; b++) {
+      for (let c = b + 1; c < points.length; c++) {
+        const trio = [points[a], points[b], points[c]]
+        for (let i = 0; i < 3; i++) {
+          const tl = trio[i]
+          const p = trio[(i + 1) % 3]
+          const q = trio[(i + 2) % 3]
+          const vpx = p.x - tl.x; const vpy = p.y - tl.y
+          const vqx = q.x - tl.x; const vqy = q.y - tl.y
+          const dp = Math.hypot(vpx, vpy)
+          const dq = Math.hypot(vqx, vqy)
+          const dpq = Math.hypot(p.x - q.x, p.y - q.y)
+          const module = (tl.module + p.module + q.module) / 3
+          if (Math.min(dp, dq) < 10 * module) continue
+          const legDiff = Math.abs(dp - dq) / Math.max(dp, dq)
+          const pyth = Math.abs((dpq * dpq) - (dp * dp) - (dq * dq)) / ((dp * dp) + (dq * dq))
+          const modVar = (Math.max(tl.module, p.module, q.module) - Math.min(tl.module, p.module, q.module)) / module
+          const estimate = ((dp + dq) / 2) / module + 7
+          const version = Math.round((estimate - 21) / 4) + 1
+          if (version < 1 || version > 6) continue
+          const dimension = 17 + (4 * version)
+          const dimError = Math.abs(estimate - dimension)
+          if (dimError > 2.5) continue
+          const score = (legDiff * 4) + (pyth * 4) + (modVar * 2) + (dimError * 0.5) - (Math.min(tl.hits, p.hits, q.hits) * 0.02)
+          const cross = (vpx * vqy) - (vpy * vqx)
+          const tr = cross > 0 ? p : q
+          const bl = cross > 0 ? q : p
+          if (!best || score < best.score) best = { score, geometry: { tl, tr, bl, version, dimension } }
+        }
+      }
+    }
+  }
+  return best?.geometry || null
+}
+
+function giiQrBuildFunctionMask (dimension: number, version: number): Uint8Array {
+  const mask = new Uint8Array(dimension * dimension)
+  const markRect = (r0: number, r1: number, c0: number, c1: number) => {
+    for (let r = Math.max(0, r0); r <= Math.min(dimension - 1, r1); r++) {
+      for (let c = Math.max(0, c0); c <= Math.min(dimension - 1, c1); c++) mask[r * dimension + c] = 1
+    }
+  }
+  markRect(0, 8, 0, 8)
+  markRect(0, 8, dimension - 8, dimension - 1)
+  markRect(dimension - 8, dimension - 1, 0, 8)
+  markRect(6, 6, 0, dimension - 1)
+  markRect(0, dimension - 1, 6, 6)
+  const alignmentByVersion: Record<number, number[]> = {
+    1: [], 2: [6, 18], 3: [6, 22], 4: [6, 26], 5: [6, 30], 6: [6, 34]
+  }
+  const centers = alignmentByVersion[version] || []
+  for (const cy of centers) {
+    for (const cx of centers) {
+      if ((cx === 6 && cy === 6) || (cx === 6 && cy === centers[centers.length - 1]) || (cx === centers[centers.length - 1] && cy === 6)) continue
+      markRect(cy - 2, cy + 2, cx - 2, cx + 2)
+    }
+  }
+  const darkRow = 4 * version + 9
+  if (darkRow >= 0 && darkRow < dimension) mask[darkRow * dimension + 8] = 1
+  markRect(8, 8, 0, 8)
+  markRect(0, 8, 8, 8)
+  markRect(8, 8, dimension - 8, dimension - 1)
+  markRect(dimension - 7, dimension - 1, 8, 8)
+  return mask
+}
+
+function giiQrMaskBit (mask: number, row: number, col: number): boolean {
+  if (mask === 0) return ((row + col) & 1) === 0
+  if (mask === 1) return (row & 1) === 0
+  if (mask === 2) return col % 3 === 0
+  if (mask === 3) return (row + col) % 3 === 0
+  if (mask === 4) return ((Math.floor(row / 2) + Math.floor(col / 3)) & 1) === 0
+  if (mask === 5) return ((row * col) % 2) + ((row * col) % 3) === 0
+  if (mask === 6) return ((((row * col) % 2) + ((row * col) % 3)) & 1) === 0
+  return ((((row + col) % 2) + ((row * col) % 3)) & 1) === 0
+}
+
+function giiQrReadDataBits (matrix: Uint8Array, dimension: number, version: number, maskNo: number): number[] {
+  const functions = giiQrBuildFunctionMask(dimension, version)
+  const bits: number[] = []
+  let upward = true
+  let col = dimension - 1
+  while (col > 0) {
+    if (col === 6) col--
+    for (let step = 0; step < dimension; step++) {
+      const row = upward ? dimension - 1 - step : step
+      for (const c of [col, col - 1]) {
+        if (functions[row * dimension + c]) continue
+        let bit = matrix[row * dimension + c]
+        if (giiQrMaskBit(maskNo, row, c)) bit ^= 1
+        bits.push(bit)
+      }
+    }
+    upward = !upward
+    col -= 2
+  }
+  return bits
+}
+
+function giiQrParseSegments (bits: number[], version: number): string | null {
+  let pos = 0
+  let out = ''
+  const alpha = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:'
+  const read = (count: number): number | null => {
+    if (count < 0 || pos + count > bits.length) return null
+    let value = 0
+    for (let i = 0; i < count; i++) value = (value << 1) | bits[pos++]
+    return value
+  }
+  for (let segment = 0; segment < 40 && pos + 4 <= bits.length; segment++) {
+    const mode = read(4)
+    if (mode == null) return null
+    if (mode === 0) return out
+    if (mode === 7) {
+      const first = read(8)
+      if (first == null) return null
+      if ((first & 0x80) === 0) continue
+      if ((first & 0xc0) === 0x80) { if (read(8) == null) return null; continue }
+      if ((first & 0xe0) === 0xc0) { if (read(16) == null) return null; continue }
+      return null
+    }
+    if (mode === 1) {
+      const countBits = version <= 9 ? 10 : (version <= 26 ? 12 : 14)
+      let count = read(countBits)
+      if (count == null || count < 0 || count > 1000) return null
+      while (count >= 3) {
+        const value = read(10)
+        if (value == null || value > 999) return null
+        out += String(value).padStart(3, '0')
+        count -= 3
+      }
+      if (count === 2) {
+        const value = read(7)
+        if (value == null || value > 99) return null
+        out += String(value).padStart(2, '0')
+      } else if (count === 1) {
+        const value = read(4)
+        if (value == null || value > 9) return null
+        out += String(value)
+      }
+      continue
+    }
+    if (mode === 2) {
+      const countBits = version <= 9 ? 9 : (version <= 26 ? 11 : 13)
+      let count = read(countBits)
+      if (count == null || count < 0 || count > 1000) return null
+      while (count >= 2) {
+        const value = read(11)
+        if (value == null || value >= 45 * 45) return null
+        out += alpha[Math.floor(value / 45)] + alpha[value % 45]
+        count -= 2
+      }
+      if (count === 1) {
+        const value = read(6)
+        if (value == null || value >= 45) return null
+        out += alpha[value]
+      }
+      continue
+    }
+    if (mode === 4) {
+      const countBits = version <= 9 ? 8 : 16
+      const count = read(countBits)
+      if (count == null || count < 0 || count > 2048) return null
+      const bytes: number[] = []
+      for (let i = 0; i < count; i++) {
+        const value = read(8)
+        if (value == null) return null
+        bytes.push(value)
+      }
+      out += String.fromCharCode(...bytes)
+      continue
+    }
+    return null
+  }
+  return out || null
+}
+
+function giiQrSampleMatrix (
+  binary: Uint8Array,
+  width: number,
+  height: number,
+  geometry: GiiQrGeometry
+): Uint8Array | null {
+  const { tl, tr, bl, dimension } = geometry
+  const span = dimension - 7
+  const vx = { x: (tr.x - tl.x) / span, y: (tr.y - tl.y) / span }
+  const vy = { x: (bl.x - tl.x) / span, y: (bl.y - tl.y) / span }
+  const matrix = new Uint8Array(dimension * dimension)
+  const radius = Math.max(0, Math.min(1, Math.floor(Math.min(Math.hypot(vx.x, vx.y), Math.hypot(vy.x, vy.y)) / 4)))
+  for (let row = 0; row < dimension; row++) {
+    for (let col = 0; col < dimension; col++) {
+      const px = tl.x + (vx.x * (col - 3)) + (vy.x * (row - 3))
+      const py = tl.y + (vx.y * (col - 3)) + (vy.y * (row - 3))
+      const cx = Math.round(px); const cy = Math.round(py)
+      if (cx < 0 || cy < 0 || cx >= width || cy >= height) return null
+      let black = 0; let total = 0
+      for (let dy = -radius; dy <= radius; dy++) {
+        const y = cy + dy
+        if (y < 0 || y >= height) continue
+        for (let dx = -radius; dx <= radius; dx++) {
+          const x = cx + dx
+          if (x < 0 || x >= width) continue
+          black += binary[y * width + x]
+          total++
+        }
+      }
+      matrix[row * dimension + col] = black * 2 >= total ? 1 : 0
+    }
+  }
+  return matrix
+}
+
+type GiiQrEcLevel = 'L' | 'M' | 'Q' | 'H'
+type GiiQrBlockSpec = { count: number, data: number, ec: number }
+
+const GII_QR_BLOCKS_V1_V6: Record<number, Record<GiiQrEcLevel, GiiQrBlockSpec[]>> = {
+  1: { L: [{ count: 1, data: 19, ec: 7 }], M: [{ count: 1, data: 16, ec: 10 }], Q: [{ count: 1, data: 13, ec: 13 }], H: [{ count: 1, data: 9, ec: 17 }] },
+  2: { L: [{ count: 1, data: 34, ec: 10 }], M: [{ count: 1, data: 28, ec: 16 }], Q: [{ count: 1, data: 22, ec: 22 }], H: [{ count: 1, data: 16, ec: 28 }] },
+  3: { L: [{ count: 1, data: 55, ec: 15 }], M: [{ count: 1, data: 44, ec: 26 }], Q: [{ count: 2, data: 17, ec: 18 }], H: [{ count: 2, data: 13, ec: 22 }] },
+  4: { L: [{ count: 1, data: 80, ec: 20 }], M: [{ count: 2, data: 32, ec: 18 }], Q: [{ count: 2, data: 24, ec: 26 }], H: [{ count: 4, data: 9, ec: 16 }] },
+  5: { L: [{ count: 1, data: 108, ec: 26 }], M: [{ count: 2, data: 43, ec: 24 }], Q: [{ count: 2, data: 15, ec: 18 }, { count: 2, data: 16, ec: 18 }], H: [{ count: 2, data: 11, ec: 22 }, { count: 2, data: 12, ec: 22 }] },
+  6: { L: [{ count: 2, data: 68, ec: 18 }], M: [{ count: 4, data: 27, ec: 16 }], Q: [{ count: 4, data: 19, ec: 24 }], H: [{ count: 4, data: 15, ec: 28 }] }
+}
+
+function giiQrBitsToCodewords (bits: number[]): number[] {
+  const out: number[] = []
+  for (let offset = 0; offset + 7 < bits.length; offset += 8) {
+    let value = 0
+    for (let i = 0; i < 8; i++) value = (value << 1) | bits[offset + i]
+    out.push(value)
+  }
+  return out
+}
+
+function giiQrCodewordsToBits (codewords: number[]): number[] {
+  const out: number[] = []
+  for (const byte of codewords) {
+    for (let bit = 7; bit >= 0; bit--) out.push((byte >> bit) & 1)
+  }
+  return out
+}
+
+function giiQrExtractDataBits (rawBits: number[], version: number, level: GiiQrEcLevel): number[] | null {
+  const specs = GII_QR_BLOCKS_V1_V6[version]?.[level]
+  if (!specs?.length) return null
+  const rawCodewords = giiQrBitsToCodewords(rawBits)
+  const blocks: Array<{ data: number[], ec: number[] }> = []
+  for (const spec of specs) {
+    for (let i = 0; i < spec.count; i++) blocks.push({ data: new Array(spec.data).fill(0), ec: new Array(spec.ec).fill(0) })
+  }
+  const expected = blocks.reduce((sum, block) => sum + block.data.length + block.ec.length, 0)
+  if (rawCodewords.length < expected) return null
+
+  let cursor = 0
+  const maxData = Math.max(...blocks.map(block => block.data.length))
+  for (let i = 0; i < maxData; i++) {
+    for (const block of blocks) {
+      if (i < block.data.length) block.data[i] = rawCodewords[cursor++]
+    }
+  }
+  const maxEc = Math.max(...blocks.map(block => block.ec.length))
+  for (let i = 0; i < maxEc; i++) {
+    for (const block of blocks) {
+      if (i < block.ec.length) block.ec[i] = rawCodewords[cursor++]
+    }
+  }
+  return giiQrCodewordsToBits(blocks.flatMap(block => block.data))
+}
+
+function giiQrDecodePagoPaFromBinary (binary: Uint8Array, width: number, height: number): string {
+  const candidates = giiQrFindFinderCandidates(binary, width, height)
+  const geometry = giiQrChooseGeometry(candidates)
+  if (!geometry) return ''
+  const matrix = giiQrSampleMatrix(binary, width, height, geometry)
+  if (!matrix) return ''
+  const levels: GiiQrEcLevel[] = ['L', 'M', 'Q', 'H']
+  for (let maskNo = 0; maskNo < 8; maskNo++) {
+    const rawBits = giiQrReadDataBits(matrix, geometry.dimension, geometry.version, maskNo)
+    for (const level of levels) {
+      const dataBits = giiQrExtractDataBits(rawBits, geometry.version, level)
+      if (!dataBits) continue
+      const decoded = giiQrParseSegments(dataBits, geometry.version)
+      if (decoded && /^PAGOPA\|/i.test(decoded.trim())) return decoded.trim()
+    }
+  }
+  return ''
+}
+
+function giiQrBinarizeImageData (image: { data: Uint8ClampedArray, width: number, height: number }): Uint8Array {
+  const { data, width, height } = image
+  const hist = new Uint32Array(256)
+  const count = width * height
+  for (let i = 0; i < count; i++) {
+    const at = i * 4
+    const lum = Math.max(0, Math.min(255, Math.round((data[at] * 299 + data[at + 1] * 587 + data[at + 2] * 114) / 1000)))
+    hist[lum]++
+  }
+  let totalWeighted = 0
+  for (let i = 0; i < 256; i++) totalWeighted += i * hist[i]
+  let weightBg = 0; let sumBg = 0; let bestVariance = -1; let threshold = 160
+  for (let t = 0; t < 256; t++) {
+    weightBg += hist[t]
+    if (!weightBg) continue
+    const weightFg = count - weightBg
+    if (!weightFg) break
+    sumBg += t * hist[t]
+    const meanBg = sumBg / weightBg
+    const meanFg = (totalWeighted - sumBg) / weightFg
+    const variance = weightBg * weightFg * (meanBg - meanFg) * (meanBg - meanFg)
+    if (variance > bestVariance) { bestVariance = variance; threshold = t }
+  }
+  threshold = Math.max(70, Math.min(210, threshold))
+  const out = new Uint8Array(count)
+  for (let i = 0; i < count; i++) {
+    const at = i * 4
+    const lum = (data[at] * 299 + data[at + 1] * 587 + data[at + 2] * 114) / 1000
+    out[i] = lum <= threshold ? 1 : 0
+  }
+  return out
+}
+
+function decodePagoPaFromImageData (image: { data: Uint8ClampedArray, width: number, height: number }): string {
+  return giiQrDecodePagoPaFromBinary(giiQrBinarizeImageData(image), image.width, image.height)
+}
+
+
+
+const GII_PAGOPA_CBSM_CF = '80000710923'
+
+async function giiDetectPagoPaQrOnCanvas (canvas: HTMLCanvasElement): Promise<string> {
+  // Sui sistemi che espongono BarcodeDetector lo usiamo come accelerazione;
+  // su Windows il fallback locale sottostante decodifica direttamente la matrice QR.
+  try {
+    const Detector = (globalThis as any)?.BarcodeDetector
+    if (Detector) {
+      let supported = true
+      if (typeof Detector.getSupportedFormats === 'function') {
+        const formats = await Detector.getSupportedFormats()
+        supported = Array.isArray(formats) && formats.includes('qr_code')
+      }
+      if (supported) {
+        const detector = new Detector({ formats: ['qr_code'] })
+        const results = await detector.detect(canvas)
+        const pagoPa = (results || []).map((row: any) => String(row?.rawValue || '').trim()).find((value: string) => /^PAGOPA\|/i.test(value))
+        if (pagoPa) return pagoPa
+      }
+    }
+  } catch {}
+
+  const ctx = canvas.getContext('2d', { willReadFrequently: true } as any) as CanvasRenderingContext2D | null
+  if (!ctx) return ''
+  const image = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  return decodePagoPaFromImageData(image)
+}
+
+async function extractPagoPaQrPayloadFromPdf (blob: Blob): Promise<string> {
+  const pdfjs = await loadAmmPdfJsForVerification()
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  const loadingTask = pdfjs.getDocument({ data: bytes })
+  const pdf = await loadingTask.promise
+  try {
+    const pagesToScan = Math.min(3, Number(pdf?.numPages || 0))
+    for (let pageNo = 1; pageNo <= pagesToScan; pageNo++) {
+      const page = await pdf.getPage(pageNo)
+      const baseViewport = page.getViewport({ scale: 1 })
+      const scale = Math.max(1.8, Math.min(3, 1400 / Math.max(1, Number(baseViewport?.width || 595))))
+      const viewport = page.getViewport({ scale })
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.ceil(Number(viewport?.width || 1)))
+      canvas.height = Math.max(1, Math.ceil(Number(viewport?.height || 1)))
+      const ctx = canvas.getContext('2d', { willReadFrequently: true } as any) as CanvasRenderingContext2D | null
+      if (!ctx) continue
+      const renderTask = page.render({ canvasContext: ctx, viewport })
+      await renderTask.promise
+      const payload = await giiDetectPagoPaQrOnCanvas(canvas)
+      canvas.width = 1
+      canvas.height = 1
+      if (payload) return payload
+    }
+  } finally {
+    try { await loadingTask.destroy?.() } catch {}
+    try { await pdf.destroy?.() } catch {}
+  }
+  throw new Error('QR code pagoPA non individuato o non leggibile nel PDF.')
+}
+
+type GiiPagoPaQrPayload = {
+  versione: string
+  codiceAvviso: string
+  iuv: string
+  cfEnteCreditore: string
+  importo: number
+  raw: string
+}
+
+function parsePagoPaQrPayload (rawValue: string): GiiPagoPaQrPayload {
+  const raw = String(rawValue || '').trim()
+  const parts = raw.split('|').map(value => String(value || '').trim())
+  if (parts.length < 5 || String(parts[0] || '').toUpperCase() !== 'PAGOPA') {
+    throw new Error('Il QR code non contiene un payload pagoPA riconoscibile.')
+  }
+  const versione = parts[1]
+  const codiceAvviso = String(parts[2] || '').replace(/\D/g, '')
+  const cfEnteCreditore = String(parts[3] || '').replace(/\D/g, '')
+  const centsText = String(parts[4] || '').replace(/\D/g, '')
+  if (!/^\d{18}$/.test(codiceAvviso)) throw new Error('Il codice avviso contenuto nel QR code pagoPA non è valido.')
+  if (!/^\d{11}$/.test(cfEnteCreditore)) throw new Error('Il codice fiscale dell’Ente Creditore contenuto nel QR code pagoPA non è valido.')
+  if (!/^\d+$/.test(centsText)) throw new Error('L’importo contenuto nel QR code pagoPA non è valido.')
+  const cents = Number(centsText)
+  if (!Number.isSafeInteger(cents) || cents <= 0) throw new Error('L’importo contenuto nel QR code pagoPA non è valido.')
+  return {
+    versione,
+    codiceAvviso,
+    // Nel codice avviso pagoPA a 18 cifre la prima cifra è ausiliaria; lo IUV
+    // utilizzato nel gestionale è quindi ricavato dallo stesso dato letto nel QR.
+    iuv: codiceAvviso.slice(1),
+    cfEnteCreditore,
+    importo: roundMoneyValue(cents / 100),
+    raw
+  }
+}
+
+function extractPagoPaDisplayedAmount (textRaw: string): number | null {
+  const text = String(textRaw || '')
+    .replace(/[\u00a0\u2000-\u200f\u2028-\u202f\u2060\ufeff]/g, ' ')
+    .replace(/\s+/g, ' ')
+  const labelled = [
+    /(?:importo\s+(?:da\s+pagare|dovuto|totale)?|totale\s+(?:da\s+pagare|dovuto)|quanto\s+(?:devi\s+)?pagare)\s*[:\-]?\s*(?:€|eur|euro)?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}|[0-9]+[.,][0-9]{2})/i,
+    /(?:€|eur|euro)\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}|[0-9]+[.,][0-9]{2})/i,
+    /([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}|[0-9]+[.,][0-9]{2})\s*(?:€|eur|euro)/i
+  ]
+  for (const re of labelled) {
+    const match = text.match(re)
+    const value = match?.[1] ? parseNumberInput(match[1]) : null
+    if (value != null && value >= 0) return roundMoneyValue(value)
+  }
+  // Alcuni generatori pagoPA separano graficamente la parola “Euro” dal valore:
+  // in tal caso PDF.js li restituisce lontani. Se nel documento compare un solo
+  // importo monetario distinto, possiamo comunque usarlo come controllo visivo.
+  const distinct = new Map<number, number>()
+  for (const match of Array.from(text.matchAll(/(?:^|[^\d])([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}|[0-9]+,[0-9]{2})(?!\d)/g))) {
+    const value = parseNumberInput(match?.[1])
+    if (value == null || value < 0) continue
+    const rounded = roundMoneyValue(value)
+    distinct.set(Math.round(rounded * 100), rounded)
+  }
+  return distinct.size === 1 ? Array.from(distinct.values())[0] : null
+}
+
+function extractPagoPaDisplayedCodeAvviso (textRaw: string, expectedCodeRaw = ''): string {
+  const text = String(textRaw || '')
+  const expectedCode = String(expectedCodeRaw || '').replace(/\D/g, '')
+
+  // Se conosciamo già il codice letto dal QR, verifichiamo prima se quello stesso
+  // codice è presente nel testo del PDF, ammettendo soltanto i separatori con cui
+  // viene normalmente impaginato (spazi, punti o trattini). Questo evita di
+  // concatenare cifre appartenenti a testi diversi, ad esempio il "29" della
+  // causale con una parte del Codice avviso.
+  if (/^\d{18}$/.test(expectedCode)) {
+    const escaped = expectedCode.split('').join('[\\s.\\-]*')
+    const expectedRe = new RegExp(`(?:^|\\D)(${escaped})(?!\\d)`, 'g')
+    if (expectedRe.test(text)) return expectedCode
+  }
+
+  // Fallback volutamente restrittivo: accettiamo soltanto il formato pagoPA
+  // normalmente stampato 4-4-4-4-2 oppure le 18 cifre contigue. Non usiamo più
+  // il precedente pattern "una cifra + separatori" che poteva attraversare
+  // blocchi testuali non correlati.
+  const values: string[] = []
+  for (const match of Array.from(text.matchAll(/(?:^|\D)(\d{4}[\s.\-]+\d{4}[\s.\-]+\d{4}[\s.\-]+\d{4}[\s.\-]+\d{2})(?!\d)/g))) {
+    const value = String(match?.[1] || '').replace(/[\s.\-]+/g, '')
+    if (/^\d{18}$/.test(value)) values.push(value)
+  }
+  for (const match of Array.from(text.matchAll(/(?:^|\D)(\d{18})(?!\d)/g))) {
+    const value = String(match?.[1] || '')
+    if (/^\d{18}$/.test(value)) values.push(value)
+  }
+  const unique = Array.from(new Set(values))
+  return unique.length === 1 ? unique[0] : ''
+}
 
 type GiiPaymentPosition = {
   objectId: number
@@ -2543,6 +3202,8 @@ type GiiPagoPaExtractedData = {
   importo: number | null
   iuv: string
   codiceAvviso: string
+  cfEnteCreditore: string
+  qrPayload: string
 }
 
 const GII_PAYMENT_DOCUMENT_KEYWORD = 'GII_PAGAMENTO_DOCUMENTO'
@@ -2871,7 +3532,7 @@ function earliestGiiPaymentDeadline (positions: GiiPaymentPosition[]): number | 
   return deadlines.length ? deadlines[0] : null
 }
 
-function extractPagoPaStructuredData (textRaw: string): GiiPagoPaExtractedData {
+function extractPagoPaStructuredData (textRaw: string, qrPayloadRaw: string): GiiPagoPaExtractedData {
   const text = String(textRaw || '')
     .replace(/[\u00a0\u2000-\u200f\u2028-\u202f\u2060\ufeff]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -2879,51 +3540,28 @@ function extractPagoPaStructuredData (textRaw: string): GiiPagoPaExtractedData {
   let scadenzaMs: number | null = null
   try { scadenzaMs = extractPagoPaDeadlineMs(text) } catch {}
 
-  const refMatch = (patterns: RegExp[]): string => {
-    for (const re of patterns) {
-      const m = text.match(re)
-      if (m?.[1]) return String(m[1]).replace(/[\s.\-]+/g, '').trim()
-    }
-    return ''
+  const qr = parsePagoPaQrPayload(qrPayloadRaw)
+  if (qr.cfEnteCreditore !== GII_PAGOPA_CBSM_CF) {
+    throw new Error(`Il QR code appartiene all’Ente Creditore con C.F. ${qr.cfEnteCreditore}, mentre è atteso il C.F. CBSM ${GII_PAGOPA_CBSM_CF}.`)
   }
 
-  let iuv = refMatch([
-    /(?:\bI\.?\s*U\.?\s*V\.?\b|identificativo\s+univoco\s+(?:di\s+)?versamento)\s*(?:n(?:umero)?\.?|codice)?\s*[:\-]?\s*([0-9][0-9\s.\-]{8,34})/i,
-    /(?:identificativo\s+pagamento|id\s+versamento)\s*[:\-]?\s*([0-9][0-9\s.\-]{8,34})/i
-  ])
-  let codiceAvviso = refMatch([
-    /(?:codice|numero)\s+(?:dell[’']?\s*)?(?:di\s+)?avviso\s*[:\-]?\s*([0-9][0-9\s.\-]{10,34})/i,
-    /avviso\s+(?:di\s+pagamento\s+)?(?:n(?:umero)?\.?|codice)\s*[:\-]?\s*([0-9][0-9\s.\-]{10,34})/i
-  ])
-
-  // Negli avvisi pagoPA il numero avviso è normalmente di 18 cifre e contiene
-  // l'IUV dopo la cifra ausiliaria. Usiamo questa derivazione solo come fallback
-  // quando il PDF non espone una label IUV separata.
-  if (!iuv && /^\d{18}$/.test(codiceAvviso)) iuv = codiceAvviso.slice(1)
-
-  if (!codiceAvviso) {
-    const longNums = Array.from(text.matchAll(/(?:^|\D)(\d(?:[\s.\-]*\d){17})(?!\d)/g))
-      .map(m => String(m[1] || '').replace(/[\s.\-]+/g, ''))
-      .filter(v => /^\d{18}$/.test(v))
-    if (longNums.length === 1) {
-      codiceAvviso = longNums[0]
-      if (!iuv) iuv = codiceAvviso.slice(1)
-    }
+  const displayedAmount = extractPagoPaDisplayedAmount(text)
+  if (displayedAmount != null && Math.abs(displayedAmount - qr.importo) > 0.009) {
+    throw new Error(`L’importo visualizzato nel PDF (${formatEuroText(displayedAmount)}) non coincide con quello codificato nel QR pagoPA (${formatEuroText(qr.importo)}).`)
+  }
+  const displayedCode = extractPagoPaDisplayedCodeAvviso(text, qr.codiceAvviso)
+  if (displayedCode && displayedCode !== qr.codiceAvviso) {
+    throw new Error(`Il codice avviso visualizzato nel PDF (${displayedCode}) non coincide con quello codificato nel QR pagoPA (${qr.codiceAvviso}).`)
   }
 
-  let importo: number | null = null
-  const amountPatterns = [
-    /(?:importo\s+(?:da\s+pagare|dovuto|totale)?|totale\s+(?:da\s+pagare|dovuto)|quanto\s+(?:devi\s+)?pagare)\s*[:\-]?\s*(?:€|eur|euro)?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}|[0-9]+[.,][0-9]{2})/i,
-    /(?:€|eur|euro)\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}|[0-9]+[.,][0-9]{2})/i,
-    /([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}|[0-9]+[.,][0-9]{2})\s*(?:€|eur|euro)/i
-  ]
-  for (const re of amountPatterns) {
-    const m = text.match(re)
-    if (!m?.[1]) continue
-    const value = parseNumberInput(m[1])
-    if (value != null && value >= 0) { importo = roundMoneyValue(value); break }
+  return {
+    scadenzaMs,
+    importo: qr.importo,
+    iuv: qr.iuv,
+    codiceAvviso: qr.codiceAvviso,
+    cfEnteCreditore: qr.cfEnteCreditore,
+    qrPayload: qr.raw
   }
-  return { scadenzaMs, importo, iuv, codiceAvviso }
 }
 
 type GiiPagoPaBatchPlanItem = {
@@ -3026,6 +3664,27 @@ function buildGiiPagoPaBatchPlan (
   })
 
   return [toItem(unica, 'UNICA_SOLUZIONE', 0, 1), ...rates.map((entry, idx) => toItem(entry, 'RATA', idx + 1, rates.length))]
+}
+
+function giiPagoPaBatchPreviewRows (plan: GiiPagoPaBatchPlanItem[]): GiiPaymentPosition[] {
+  return plan.map((item, index) => ({
+    objectId: -(index + 1),
+    globalId: `PENDING-${index + 1}`,
+    attributes: { ...(item.attributes || {}), stato_pagamento: 'DA_PAGARE' },
+    attachments: [{
+      id: -(index + 1),
+      name: String(item.file?.name || `avviso_${index + 1}.pdf`),
+      size: Number(item.file?.size || 0),
+      contentType: String(item.file?.type || 'application/pdf'),
+      keywords: `${GII_PAYMENT_DOCUMENT_KEYWORD}|pending=1`,
+      ...(item.file ? { __pendingFile: item.file } : {})
+    } as any]
+  }))
+}
+
+type GiiPaymentPendingActions = {
+  commit: () => Promise<void>
+  reset: () => void
 }
 
 function giiPaymentDocumentKeywords (row: GiiPaymentPosition, modeRaw: any): string {
@@ -3870,7 +4529,8 @@ const ADMIN_STYLE_DEFAULTS: Record<string, any> = {
   amountFontSize: 16,
   titleFontSize: 18,
   subtitleFontSize: 13,
-  msgFontSize: 14
+  msgFontSize: 14,
+  enablePagoPaTestGenerator: false
 }
 
 const AdminStyleCtx = React.createContext<Record<string, any>>(ADMIN_STYLE_DEFAULTS)
@@ -4479,7 +5139,7 @@ function PaymentPlanConfirmDialog (props: { currentCount: number, rateCount: num
       <div role='dialog' aria-modal='true' style={{ width: 'min(620px, 100%)', background: '#fff', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
         <div style={{ background: '#eff6ff', color: '#0d3b66', padding: '14px 16px', fontWeight: 900, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>Ricreare le posizioni di pagamento</div>
         <div style={{ padding: 16, color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45 }}>
-          Le {props.currentCount} posizioni attuali, ancora prive di documenti e incassi, saranno sostituite con {nextCount} {nextCount === 1 ? 'posizione' : 'posizioni'}: {props.rateCount >= 2 ? `unica soluzione + ${props.rateCount} rate` : 'unica soluzione'}.
+          {props.currentCount === 1 ? 'La posizione attuale' : `Le ${props.currentCount} posizioni attuali`}, ancora {props.currentCount === 1 ? 'priva' : 'prive'} di documenti e incassi, {props.currentCount === 1 ? 'sarà sostituita' : 'saranno sostituite'} con {nextCount === 1 ? '1 posizione' : `${nextCount} posizioni`}: {props.rateCount >= 2 ? `unica soluzione + ${props.rateCount} rate` : 'unica soluzione'}.
         </div>
         <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type='button' disabled={!!props.saving} onClick={props.onCancel} style={{ border: '1px solid #94a3b8', background: '#fff', color: '#334155', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>Annulla</button>
@@ -6276,6 +6936,7 @@ function IaVerificationSummary (props: {
   onPrepareEmailDirettore: () => void
   onPrepareEmailProtocollo: () => void
   onGenerateAttoContestazioneWord: () => void
+  attoDraftWordGenerated?: boolean
   attoCleanWordGeneratedAfterApproval?: boolean
   attoDirettoreEmailPrepared?: boolean
   onTransmitAttoContestazioneRia: () => void
@@ -6730,6 +7391,7 @@ function PostAttestazioneIaWorkSection (props: {
   onPrepareEmailDirettore: () => void
   onPrepareEmailProtocollo: () => void
   onGenerateAttoContestazioneWord: () => void
+  attoDraftWordGenerated?: boolean
   attoCleanWordGeneratedAfterApproval?: boolean
   attoDirettoreEmailPrepared?: boolean
   onTransmitAttoContestazioneRia: () => void
@@ -6742,6 +7404,8 @@ function PostAttestazioneIaWorkSection (props: {
   bozzaRefreshKey?: string
   suppressActionGuide?: boolean
   workflowScope?: 'approvazione' | 'notifica'
+  onPaymentPendingDirtyChange?: (dirty: boolean) => void
+  registerPaymentPendingActions?: (actions: GiiPaymentPendingActions | null) => void
 }) {
   const st = useAdminStyle()
   const iaRoutingDest = String(pickAttrCI(props.data || {}, ['GII_a', 'gii_a']) || '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
@@ -6812,7 +7476,13 @@ function PostAttestazioneIaWorkSection (props: {
     hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_data'])) ||
     hasAdminValue(pickAttrCI(saved, ['notifica_data']))
   const attoState = attoWorkflow ? attoContestazioneWorkflowState(d) : ''
-  const attoWordGenerated = attoWorkflow && ['BOZZA', 'TRASMESSA_RIA', 'VALIDATA_RIA'].includes(attoState)
+  // Prima della trasmissione al RIA la generazione del Word è un'operazione locale:
+  // non deve alterare i campi di workflow RIA, che appartengono alla precedente
+  // validazione dell'istruttoria amministrativa. La ricordiamo quindi soltanto
+  // nella sessione corrente; se il browser perde il marker, rigenerare il Word è
+  // sempre sicuro e impedisce di caricare una versione potenzialmente superata.
+  const attoDraftWordGenerated = !!props.attoDraftWordGenerated
+  const attoWordGenerated = attoWorkflow && (attoDraftWordGenerated || attoState === 'TRASMESSA_RIA' || attoState === 'VALIDATA_RIA')
   const attoTransmittedRia = attoWorkflow && attoState === 'TRASMESSA_RIA'
   const attoApprovedRia = attoWorkflow && attoState === 'VALIDATA_RIA'
   const attoEmailDirettorePreparata = attoWorkflow && !!props.attoDirettoreEmailPrepared
@@ -7244,7 +7914,7 @@ function PostAttestazioneIaWorkSection (props: {
         file: selectedByName.get(normalizeProtocolloReturnFileName(item.fileName))!
       }))
       const contents = await Promise.all(ordered.map(entry => extractPdfVerificationContent(entry.file)))
-      const protocol = extractConsensusOfficialProtocol(contents)
+      const protocol = extractConsensusOfficialProtocol(contents, 'left')
 
       // La Proposta resta il controllo documentale più forte: deve corrispondere
       // alla versione approvata già presente nel fascicolo, a parte il timbro di protocollo.
@@ -7518,7 +8188,7 @@ function PostAttestazioneIaWorkSection (props: {
     attoWorkflow &&
     !attoWorkflowLocked &&
     (
-      (attoState === 'BOZZA' && attoWordGenerated && !hasAttoPdfCaricato) ||
+      (attoInLavorazioneIa && attoWordGenerated && !hasAttoPdfCaricato) ||
       (attoApprovedRia && hasAttoPdfCaricato && !hasAttoDaFirmare && !hasAttoFirmato) ||
       canUploadSignedAtto
     ) &&
@@ -7535,7 +8205,7 @@ function PostAttestazioneIaWorkSection (props: {
   const canTransmitAttoContestazione =
     props.canEdit &&
     attoWorkflow &&
-    attoState === 'BOZZA' &&
+    attoInLavorazioneIa &&
     hasAttoPdfCaricato &&
     !attoWorkflowLocked &&
     !props.saving &&
@@ -7610,7 +8280,7 @@ function PostAttestazioneIaWorkSection (props: {
         const authorizedSigners = signerIdentityBypass ? [] : await loadAuthorizedAttoSignerIdentities()
 
         let protocolMeta: OfficialProtocolMetadata | null = null
-        if (currentSigned) protocolMeta = extractOfficialProtocolMetadata(candidateContent.protocolSearchText || candidateContent.text)
+        if (currentSigned) protocolMeta = extractOfficialProtocolMetadataFromContent(candidateContent, 'right')
 
         if (!currentSigned) {
           await verifySignedAttoAgainstUnsigned(currentBlob, file, authorizedSigners, signerIdentityBypass)
@@ -7763,7 +8433,7 @@ function PostAttestazioneIaWorkSection (props: {
 
       const ordered = manifest.items.map(item => ({ item, file: selectedByName.get(normalizeProtocolloReturnFileName(item.fileName))! }))
       const returnedContents = await Promise.all(ordered.map(entry => extractPdfVerificationContent(entry.file)))
-      const protocol = extractConsensusOfficialProtocol(returnedContents)
+      const protocol = extractConsensusOfficialProtocol(returnedContents, 'right')
       const allBefore = await queryAmmAttachments(layer, oid, layerUrl)
 
       type ProtocolloSourceSnapshot = {
@@ -8451,6 +9121,8 @@ function PostAttestazioneIaWorkSection (props: {
                   onChange={props.onChange}
                   onPresenceChange={setPaymentTableHasRows}
                   onReadyChange={setPaymentTableReady}
+                  onPendingDirtyChange={props.onPaymentPendingDirtyChange}
+                  registerPendingActions={props.registerPaymentPendingActions}
                 />
                 {paymentTableHasRows === false && pagopaAttachments.length > 0 && (
                   <div style={{ borderTop: '1px solid #dbe7f3', paddingTop: 10, display: 'grid', gap: 8 }}>
@@ -8999,6 +9671,213 @@ function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, f
 }
 
 
+
+type PagoPaTestGeneratorRow = {
+  key: string
+  label: string
+  amount: string
+  deadline: string
+  generatedFilename?: string
+}
+
+function PagoPaTestGeneratorDialog (props: {
+  data: Record<string, any>
+  fields: LayerFieldInfo[]
+  total: number
+  initialRateCount: number
+  onClose: () => void
+}) {
+  const st = useAdminStyle()
+  const data = props.data || {}
+  const total = Math.max(0, Number(props.total) || 0)
+  const businessName = String(pickAttrCI(data, ['ragione_sociale']) || '').trim()
+  const personName = [String(pickAttrCI(data, ['nome']) || '').trim(), String(pickAttrCI(data, ['cognome']) || '').trim()].filter(Boolean).join(' ').trim()
+  const initialName = businessName || personName
+  const initialCf = String(pickAttrCI(data, ['codice_fiscale', 'cf']) || pickAttrCI(data, ['piva']) || '').trim().toUpperCase()
+  const initialAddress = [String(pickAttrCI(data, ['via']) || '').trim(), String(pickAttrCI(data, ['civico']) || '').trim()].filter(Boolean).join(' ').trim()
+  const initialCity = String(pickAttrCI(data, ['comune', 'citta']) || '').trim()
+  const initialCap = String(pickAttrCI(data, ['cap']) || '').trim()
+  const initialProvince = String(pickAttrCI(data, ['provincia', 'prov', 'sigla_provincia']) || '').trim()
+  const initialCapComune = [initialCap, initialCity, initialProvince].filter(Boolean).join(' ').trim()
+  const violationCause = buildViolationRows(data, props.fields).map(row => String(row.label || '').trim()).filter(Boolean).join('; ')
+
+  const [name, setName] = React.useState(initialName)
+  const [cf, setCf] = React.useState(initialCf)
+  const [address, setAddress] = React.useState(initialAddress)
+  const [capComune, setCapComune] = React.useState(initialCapComune)
+  const [causale, setCausale] = React.useState(violationCause)
+  const [cbill, setCbill] = React.useState('AAU11')
+  const [planMode, setPlanMode] = React.useState<'UNICA' | 'RATE'>(props.initialRateCount >= 2 ? 'RATE' : 'UNICA')
+  const [rateCount, setRateCount] = React.useState(Math.max(2, Math.trunc(Number(props.initialRateCount) || 2)))
+  const [rows, setRows] = React.useState<PagoPaTestGeneratorRow[]>([])
+  const [message, setMessage] = React.useState<{ kind: 'ok' | 'err', text: string } | null>(null)
+
+  React.useEffect(() => {
+    const count = planMode === 'RATE' ? Math.max(2, Math.trunc(Number(rateCount) || 2)) : 0
+    const rateAmounts = count >= 2 ? giiPaymentInstallmentAmounts(total, count) : []
+    setRows(previous => {
+      const previousByKey = new Map(previous.map(row => [row.key, row]))
+      const next: PagoPaTestGeneratorRow[] = []
+      const uniquePrevious = previousByKey.get('UNICA')
+      next.push({
+        key: 'UNICA',
+        label: 'Unica soluzione',
+        amount: uniquePrevious?.amount ?? total.toFixed(2),
+        deadline: uniquePrevious?.deadline ?? '',
+        generatedFilename: uniquePrevious?.generatedFilename
+      })
+      if (count >= 2) {
+        rateAmounts.forEach((amount, index) => {
+          const key = `RATA_${index + 1}`
+          const old = previousByKey.get(key)
+          next.push({
+            key,
+            label: `Rata ${index + 1}/${count}`,
+            // Se cambia il numero di rate, gli importi vanno sempre ricostruiti
+            // da zero sul nuovo piano. Manteniamo soltanto le scadenze già digitate.
+            amount: amount.toFixed(2),
+            deadline: old?.deadline ?? '',
+            // Un PDF generato appartiene al piano precedente: non può restare valido
+            // dopo una nuova ripartizione delle rate.
+            generatedFilename: undefined
+          })
+        })
+      }
+      return next
+    })
+  }, [planMode, rateCount, total])
+
+  const updateRow = (key: string, patch: Partial<PagoPaTestGeneratorRow>) => {
+    setRows(current => current.map(row => row.key === key ? { ...row, ...patch, generatedFilename: patch.generatedFilename ?? (patch.amount != null || patch.deadline != null ? undefined : row.generatedFilename) } : row))
+  }
+
+  const downloadRow = (row: PagoPaTestGeneratorRow) => {
+    setMessage(null)
+    try {
+      const generator = (window as any).__GII_PAGOPA_TEST_GENERATOR__
+      if (!generator?.generatePdfBlob) throw new Error('Generatore pagoPA di test non disponibile.')
+      if (!String(name).trim()) throw new Error('Destinatario non disponibile: completare il nominativo.')
+      if (!String(cf).trim()) throw new Error('Codice fiscale/P. IVA del destinatario non disponibile.')
+      if (!String(address).trim()) throw new Error('Indirizzo del destinatario non disponibile.')
+      if (!String(capComune).trim()) throw new Error('CAP e Comune del destinatario non disponibili.')
+      if (!String(causale).trim()) throw new Error('Nessuna violazione disponibile per comporre la causale.')
+      const amount = parseNumberInput(row.amount) || 0
+      if (!(amount > 0)) throw new Error(`Importo non valido per ${row.label}.`)
+      if (!row.deadline) throw new Error(`Indicare la scadenza per ${row.label}.`)
+      const rowCausale = row.key === 'UNICA' ? causale : `${causale} - ${row.label}`
+      const result = generator.generatePdfBlob({
+        nome: name,
+        cf,
+        indirizzo: address,
+        capComune,
+        oggetto: rowCausale,
+        cbill,
+        importo: amount,
+        scadenza: row.deadline,
+        rateLabel: row.key === 'UNICA' ? 'RATA UNICA' : row.label
+      })
+      if (!(result?.blob instanceof Blob)) throw new Error('Il generatore non ha prodotto un PDF valido.')
+      const url = URL.createObjectURL(result.blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = String(result.filename || `bollettino_test_${Date.now()}.pdf`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1500)
+      updateRow(row.key, { generatedFilename: link.download })
+      setMessage({ kind: 'ok', text: `${row.label}: PDF di test generato e scaricato. Per provarne l’acquisizione, chiudere questa finestra e usare “Carica avvisi pagoPA”.` })
+    } catch (e: any) {
+      setMessage({ kind: 'err', text: e?.message || String(e) })
+    }
+  }
+
+  const overlayStyle: React.CSSProperties = { position: 'fixed', inset: 0, zIndex: 2147483645, background: 'rgba(0,0,0,0.50)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 }
+  const dialogStyle: React.CSSProperties = { width: 'min(96vw, 860px)', maxHeight: 'calc(100vh - 36px)', overflowY: 'auto', background: String(st.maskBg || '#eef4fb'), borderRadius: 12, boxShadow: '0 20px 60px rgba(0,0,0,0.30)', border: '1px solid #cbd5e1', padding: 18, display: 'grid', gap: 14 }
+  const labelStyle: React.CSSProperties = { display: 'grid', gap: 4, fontSize: 12, fontWeight: 700, color: '#334155' }
+  const inputStyle: React.CSSProperties = { height: 34, border: `1px solid ${String(st.formFieldBorderColor || '#bfcede')}`, borderRadius: Number(st.formFieldBorderRadius ?? 7), padding: '0 9px', fontSize: 13, color: '#0f172a', background: '#fff', boxSizing: 'border-box' }
+  const textareaStyle: React.CSSProperties = { ...inputStyle, minHeight: 64, height: 'auto', paddingTop: 7, paddingBottom: 7, resize: 'vertical' }
+  const sectionStyle: React.CSSProperties = {
+    border: `${Number(st.formCardBorderWidth ?? 1)}px solid ${String(st.formCardBorderColor || '#c6d7ea')}`,
+    borderRadius: Number(st.formCardBorderRadius ?? 8),
+    padding: Number(st.formCardBodyPadding ?? 10),
+    background: String(st.formCardBg || '#f8fbff'),
+    boxShadow: String(st.formCardShadow ?? '').trim() || ADMIN_STYLE_DEFAULTS.formCardShadow,
+    display: 'grid',
+    gap: 10
+  }
+  const paymentRowStyle: React.CSSProperties = {
+    border: `${Number(st.formCardBorderWidth ?? 1)}px solid ${String(st.formCardBorderColor || '#c6d7ea')}`,
+    borderRadius: Number(st.formCardBorderRadius ?? 8),
+    background: String(st.formCardBg || '#f8fbff'),
+    boxShadow: String(st.formCardShadow ?? '').trim() || ADMIN_STYLE_DEFAULTS.formCardShadow,
+    padding: Number(st.formCardBodyPadding ?? 10),
+    display: 'grid',
+    gridTemplateColumns: 'minmax(120px, 0.65fr) minmax(120px, 0.55fr) minmax(150px, 0.65fr) auto',
+    gap: 9,
+    alignItems: 'end'
+  }
+  const actionButtonStyle: React.CSSProperties = { border: 0, borderRadius: 7, background: '#0d3b66', color: '#fff', fontWeight: 800, fontSize: 12, minHeight: 34, padding: '0 12px', cursor: 'pointer' }
+
+  return createPortal(
+    <div style={overlayStyle} onMouseDown={e => { if (e.target === e.currentTarget) props.onClose() }}>
+      <div style={dialogStyle} role='dialog' aria-modal='true' aria-label='Generatore avvisi pagoPA'>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: 17, color: '#0d3b66' }}>Generatore avvisi pagoPA</strong>
+              <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: 0.4, color: '#991b1b', background: '#fee2e2', border: '1px solid #fecaca', borderRadius: 5, padding: '2px 6px' }}>SOLO TEST</span>
+            </div>
+            <div style={{ marginTop: 4, fontSize: 12, color: '#64748b' }}>I PDF vengono soltanto scaricati. Il caricamento nella pratica resta manuale, come nel flusso operativo reale.</div>
+          </div>
+          <button type='button' onClick={props.onClose} style={{ border: '1px solid #cbd5e1', background: '#fff', borderRadius: 7, height: 32, padding: '0 11px', fontWeight: 700, color: '#334155', cursor: 'pointer' }}>Chiudi</button>
+        </div>
+
+        <div style={sectionStyle}>
+          <div style={{ fontSize: 13, fontWeight: 900, color: '#0d3b66' }}>Dati del destinatario</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) minmax(190px, 0.7fr)', gap: 10 }}>
+            <label style={labelStyle}>Destinatario<input value={name} onChange={e => setName(e.target.value)} style={inputStyle} /></label>
+            <label style={labelStyle}>Codice fiscale / P. IVA<input value={cf} onChange={e => setCf(e.target.value.toUpperCase())} style={inputStyle} /></label>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) minmax(220px, 1fr)', gap: 10 }}>
+            <label style={labelStyle}>Indirizzo<input value={address} onChange={e => setAddress(e.target.value)} style={inputStyle} /></label>
+            <label style={labelStyle}>CAP / Comune / Prov.<input value={capComune} onChange={e => setCapComune(e.target.value)} style={inputStyle} /></label>
+          </div>
+          <label style={labelStyle}>Causale<textarea value={causale} onChange={e => setCausale(e.target.value)} style={textareaStyle} /></label>
+          <div style={{ maxWidth: 220 }}><label style={labelStyle}>Codice CBILL<input value={cbill} onChange={e => setCbill(e.target.value.toUpperCase())} style={inputStyle} /></label></div>
+        </div>
+
+        <div style={sectionStyle}>
+          <div style={{ fontSize: 13, fontWeight: 900, color: '#0d3b66' }}>Piano di test</div>
+          <div style={{ display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: '#334155', cursor: 'pointer' }}><input type='radio' checked={planMode === 'UNICA'} onChange={() => setPlanMode('UNICA')} /> Unica soluzione</label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: '#334155', cursor: 'pointer' }}><input type='radio' checked={planMode === 'RATE'} onChange={() => setPlanMode('RATE')} /> Piano rateale</label>
+            {planMode === 'RATE' && <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 7 }}>Numero rate<input type='number' min={2} step={1} value={rateCount} onChange={e => setRateCount(Math.max(2, Math.trunc(Number(e.target.value) || 2)))} style={{ ...inputStyle, width: 86 }} /></label>}
+          </div>
+          <div style={{ fontSize: 11.5, color: '#64748b' }}>Nel piano rateale viene prodotto anche l’avviso per l’unica soluzione. Le rate sono inizialmente ripartite sul totale della pratica; importi e scadenze restano modificabili per i test.</div>
+        </div>
+
+        <div style={{ display: 'grid', gap: 8 }}>
+          {rows.map(row => (
+            <div key={row.key} style={paymentRowStyle}>
+              <div style={{ alignSelf: 'center' }}>
+                <div style={{ fontSize: 13, fontWeight: 900, color: '#0f4c81' }}>{row.label}</div>
+                {row.generatedFilename && <div style={{ marginTop: 3, fontSize: 10.5, color: '#166534', overflowWrap: 'anywhere' }}>{row.generatedFilename}</div>}
+              </div>
+              <label style={labelStyle}>Importo (€)<input type='number' min={0.01} step='0.01' value={row.amount} onChange={e => updateRow(row.key, { amount: e.target.value })} style={inputStyle} /></label>
+              <label style={labelStyle}>Scadenza<input type='date' value={row.deadline} onChange={e => updateRow(row.key, { deadline: e.target.value })} style={inputStyle} /></label>
+              <button type='button' onClick={() => downloadRow(row)} style={actionButtonStyle}>Scarica PDF</button>
+            </div>
+          ))}
+        </div>
+
+        {message && <div style={{ border: `1px solid ${message.kind === 'ok' ? '#bbf7d0' : '#fecaca'}`, background: message.kind === 'ok' ? '#f0fdf4' : '#fef2f2', color: message.kind === 'ok' ? '#166534' : '#991b1b', borderRadius: 8, padding: '8px 10px', fontSize: 12, lineHeight: 1.4 }}>{message.text}</div>}
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 function GiiPaymentDocumentsPanel (props: {
   data: Record<string, any>
   fields: LayerFieldInfo[]
@@ -9008,6 +9887,8 @@ function GiiPaymentDocumentsPanel (props: {
   onChange: (name: string, value: any) => void
   onReadyChange?: (ready: boolean | null) => void
   onPresenceChange?: (hasRows: boolean | null) => void
+  onPendingDirtyChange?: (dirty: boolean) => void
+  registerPendingActions?: (actions: GiiPaymentPendingActions | null) => void
 }) {
   const st = useAdminStyle()
   const data = props.data || {}
@@ -9028,7 +9909,9 @@ function GiiPaymentDocumentsPanel (props: {
   const [inputKey, setInputKey] = React.useState(0)
   const [confirmPlanRateCount, setConfirmPlanRateCount] = React.useState<number | null>(null)
   const [pendingPagoPaBatch, setPendingPagoPaBatch] = React.useState<GiiPagoPaBatchPlanItem[] | null>(null)
+  const [stagedPagoPaBatch, setStagedPagoPaBatch] = React.useState<GiiPagoPaBatchPlanItem[] | null>(null)
   const [deleteDocumentTarget, setDeleteDocumentTarget] = React.useState<{ row: GiiPaymentPosition, att: AmmAttachmentInfo } | null>(null)
+  const [testGeneratorOpen, setTestGeneratorOpen] = React.useState(false)
   const rateTouchedRef = React.useRef(false)
 
   const buildDrafts = React.useCallback((rows: GiiPaymentPosition[]) => {
@@ -9085,7 +9968,10 @@ function GiiPaymentDocumentsPanel (props: {
     setRateInput('0')
     setConfirmPlanRateCount(null)
     setPendingPagoPaBatch(null)
+    setStagedPagoPaBatch(null)
+    props.onPendingDirtyChange?.(false)
     setDeleteDocumentTarget(null)
+    setTestGeneratorOpen(false)
   }, [practiceGlobalId])
 
   React.useEffect(() => {
@@ -9201,7 +10087,7 @@ function GiiPaymentDocumentsPanel (props: {
     }
   }, [busy, canMutate, drafts, practiceGlobalId, reload, syncPracticeSummary])
 
-  const executePagoPaBatch = React.useCallback(async (plan: GiiPagoPaBatchPlanItem[]) => {
+  const executePagoPaBatch = React.useCallback(async (plan: GiiPagoPaBatchPlanItem[], options?: { throwOnError?: boolean }) => {
     if (!plan.length || !practiceGlobalId || !canMutate || busy) return
     setBusy(true)
     setError(null)
@@ -9239,6 +10125,7 @@ function GiiPaymentDocumentsPanel (props: {
         ? `Avvisi pagoPA acquisiti: unica soluzione + ${rateCount} rate (${plan.length} avvisi).`
         : 'Avviso pagoPA acquisito: pagamento in unica soluzione.')
       dispatchGiiPaymentsChanged(practiceGlobalId)
+      return
     } catch (e: any) {
       if (newObjectIds.length) {
         try {
@@ -9247,11 +10134,73 @@ function GiiPaymentDocumentsPanel (props: {
         } catch {}
       }
       setError(e?.message || String(e))
+      if (options?.throwOnError) throw e
     } finally {
       setBusy(false)
       setPendingPagoPaBatch(null)
     }
   }, [busy, canMutate, positions, practiceGlobalId, reload, syncPracticeSummary])
+
+  const stagedPagoPaPreviewRows = React.useMemo(
+    () => stagedPagoPaBatch ? giiPagoPaBatchPreviewRows(stagedPagoPaBatch) : null,
+    [stagedPagoPaBatch]
+  )
+
+  const stagePagoPaBatch = React.useCallback((plan: GiiPagoPaBatchPlanItem[]) => {
+    if (!plan.length) return
+    const previewRows = giiPagoPaBatchPreviewRows(plan)
+    setStagedPagoPaBatch(plan)
+    setPendingPagoPaBatch(null)
+    setInputKey(k => k + 1)
+    syncPracticeSummary(previewRows)
+    publishState(previewRows)
+    props.onPendingDirtyChange?.(true)
+    const rateCount = plan.filter(item => String(item.attributes.tipo_posizione || '').toUpperCase() === 'RATA').length
+    setInfo(rateCount
+      ? `Nuovi avvisi pronti: unica soluzione + ${rateCount} rate (${plan.length} avvisi). Premere Salva per confermare la sostituzione oppure Annulla per ripristinare l’ultimo stato salvato.`
+      : 'Nuovo avviso pagoPA pronto. Premere Salva per confermare la sostituzione oppure Annulla per ripristinare l’ultimo stato salvato.')
+  }, [props.onPendingDirtyChange, publishState, syncPracticeSummary])
+
+  const resetPendingPagoPaChanges = React.useCallback(() => {
+    setPendingPagoPaBatch(null)
+    setStagedPagoPaBatch(null)
+    setInfo(null)
+    setError(null)
+    setInputKey(k => k + 1)
+    props.onPendingDirtyChange?.(false)
+    publishState(positions)
+  }, [positions, props.onPendingDirtyChange, publishState])
+
+  const commitPendingPagoPaChanges = React.useCallback(async () => {
+    const plan = stagedPagoPaBatch
+    if (!plan?.length) return
+    await executePagoPaBatch(plan, { throwOnError: true })
+    setStagedPagoPaBatch(null)
+    props.onPendingDirtyChange?.(false)
+  }, [executePagoPaBatch, props.onPendingDirtyChange, stagedPagoPaBatch])
+
+  React.useEffect(() => {
+    if (!props.registerPendingActions) return
+    props.registerPendingActions({
+      commit: commitPendingPagoPaChanges,
+      reset: resetPendingPagoPaChanges
+    })
+    return () => props.registerPendingActions?.(null)
+  }, [commitPendingPagoPaChanges, props.registerPendingActions, resetPendingPagoPaChanges])
+
+  const currentPagoPaPositionsWithContent = React.useMemo(() => positions.filter(row => {
+    const attrs = row?.attributes || {}
+    const hasAttachment = Array.isArray(row?.attachments) && row.attachments.length > 0
+    const hasExtractedData =
+      (parseNumberInput(pickAttrCI(attrs, ['importo_dovuto'])) || 0) > 0 ||
+      hasAdminValue(pickAttrCI(attrs, ['scadenza'])) ||
+      hasAdminValue(pickAttrCI(attrs, ['riferimento_pagamento'])) ||
+      hasAdminValue(pickAttrCI(attrs, ['riferimento_secondario']))
+    const hasPaymentData =
+      (parseNumberInput(pickAttrCI(attrs, ['importo_pagato'])) || 0) > 0 ||
+      hasAdminValue(pickAttrCI(attrs, ['data_pagamento']))
+    return hasAttachment || hasExtractedData || hasPaymentData
+  }), [positions])
 
   const preparePagoPaBatch = React.useCallback(async (files: File[]) => {
     if (!files.length || !practiceGlobalId || !canMutate || busy) return
@@ -9264,9 +10213,16 @@ function GiiPaymentDocumentsPanel (props: {
       if (notPdf) throw new Error(`“${notPdf.name}” non è un PDF.`)
       const parsedFiles: Array<{ file: File, parsed: GiiPagoPaExtractedData }> = []
       for (const file of files) {
-        const content = await extractPdfVerificationContent(file)
-        if (!content.text) throw new Error(`“${file.name}”: non è stato possibile leggere il contenuto del PDF.`)
-        parsedFiles.push({ file, parsed: extractPagoPaStructuredData(content.text) })
+        try {
+          const [content, qrPayload] = await Promise.all([
+            extractPdfVerificationContent(file),
+            extractPagoPaQrPayloadFromPdf(file)
+          ])
+          if (!content.text) throw new Error('non è stato possibile leggere il contenuto testuale del PDF.')
+          parsedFiles.push({ file, parsed: extractPagoPaStructuredData(content.text, qrPayload) })
+        } catch (e: any) {
+          throw new Error(`“${file.name}”: ${e?.message || String(e)}`)
+        }
       }
       const plan = buildGiiPagoPaBatchPlan(parsedFiles, practiceGlobalId, total, readUserProfile().username)
       const protectedRows = positions.filter(row =>
@@ -9275,14 +10231,14 @@ function GiiPaymentDocumentsPanel (props: {
       )
       if (protectedRows.length) throw new Error('Gli avvisi non possono essere sostituiti perché risultano già registrati dati di pagamento.')
       setBusy(false)
-      if (positions.length) setPendingPagoPaBatch(plan)
-      else await executePagoPaBatch(plan)
+      if (currentPagoPaPositionsWithContent.length) setPendingPagoPaBatch(plan)
+      else stagePagoPaBatch(plan)
     } catch (e: any) {
       setError(e?.message || String(e))
       setBusy(false)
       setInputKey(k => k + 1)
     }
-  }, [busy, canMutate, executePagoPaBatch, positions, practiceGlobalId, practiceMode, total])
+  }, [busy, canMutate, currentPagoPaPositionsWithContent, positions, practiceGlobalId, practiceMode, stagePagoPaBatch, total])
 
   const uploadPositionDocument = React.useCallback(async (row: GiiPaymentPosition, file: File | null) => {
     if (!file || !row?.objectId || !canMutate || busy) return
@@ -9326,9 +10282,35 @@ function GiiPaymentDocumentsPanel (props: {
     try {
       const layer = await getGiiPaymentLayer(true)
       await deleteAmmAttachment(layer, target.row.objectId, Number(target.att.id), GII_VIEW_EDIT_PAGAMENTI_URL)
+
+      // Le posizioni pagoPA create dal caricamento automatico derivano i dati
+      // identificativi direttamente dall'avviso. Se viene eliminato l'ultimo PDF
+      // associato alla posizione, quei valori non devono restare orfani nella
+      // maschera: verranno nuovamente popolati al successivo caricamento.
+      const targetMode = String(pickAttrCI(target.row.attributes || {}, ['modalita_pagamento']) || '').trim().toUpperCase()
+      const autoPagoPaPosition = practiceMode === 'PAGOPA' && targetMode === 'PAGOPA'
+      if (autoPagoPaPosition) {
+        const remainingAttachments = await queryAmmAttachments(layer, target.row.objectId, GII_VIEW_EDIT_PAGAMENTI_URL)
+        if (!remainingAttachments.length) {
+          await updateGiiPaymentPosition(target.row.objectId, {
+            importo_dovuto: null,
+            scadenza: null,
+            tipo_riferimento: null,
+            riferimento_pagamento: null,
+            tipo_riferimento_secondario: null,
+            riferimento_secondario: null,
+            aggiornato_il: Date.now(),
+            aggiornato_da: readUserProfile().username || null
+          })
+        }
+      }
+
       const updated = await reload()
       syncPracticeSummary(updated)
       setInputKey(k => k + 1)
+      setInfo(autoPagoPaPosition
+        ? 'Avviso pagoPA eliminato. I dati letti automaticamente dal PDF sono stati azzerati.'
+        : 'Documento eliminato.')
       dispatchGiiPaymentsChanged(practiceGlobalId)
     } catch (e: any) {
       setError(e?.message || String(e))
@@ -9336,7 +10318,7 @@ function GiiPaymentDocumentsPanel (props: {
       setBusy(false)
       setDeleteDocumentTarget(null)
     }
-  }, [busy, canMutate, deleteDocumentTarget, practiceGlobalId, reload, syncPracticeSummary])
+  }, [busy, canMutate, deleteDocumentTarget, practiceGlobalId, practiceMode, reload, syncPracticeSummary])
 
   const deletePositionDocument = React.useCallback((row: GiiPaymentPosition, att: AmmAttachmentInfo) => {
     if (!row?.objectId || !att?.id || !canMutate || busy) return
@@ -9352,9 +10334,10 @@ function GiiPaymentDocumentsPanel (props: {
     finally { setBusy(false) }
   }, [busy, editableAccess])
 
-  const issues = giiPaymentValidationIssues(positions, total, practiceMode)
-  const currentRateCount = giiPaymentRateCount(positions)
-  const hasUnsavedPositionChanges = practiceMode === 'PAGOPA' ? false : positions.some(row =>
+  const displayPositions = stagedPagoPaPreviewRows || positions
+  const issues = giiPaymentValidationIssues(displayPositions, total, practiceMode)
+  const currentRateCount = giiPaymentRateCount(displayPositions)
+  const hasUnsavedPositionChanges = practiceMode === 'PAGOPA' ? !!stagedPagoPaBatch : positions.some(row =>
     giiPaymentDraftChanged(row.attributes || {}, drafts[row.objectId] || row.attributes || {})
   )
   const ratePlanInputChanged = practiceMode === 'PAGOPA' ? false : (positions.length > 0 && String(rateInput).trim() !== String(currentRateCount))
@@ -9388,17 +10371,26 @@ function GiiPaymentDocumentsPanel (props: {
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
+      {testGeneratorOpen && practiceMode === 'PAGOPA' && !!st.enablePagoPaTestGenerator && (
+        <PagoPaTestGeneratorDialog
+          data={data}
+          fields={props.fields}
+          total={total}
+          initialRateCount={currentRateCount}
+          onClose={() => setTestGeneratorOpen(false)}
+        />
+      )}
       {confirmPlanRateCount != null && practiceMode !== 'PAGOPA' && (
         <PaymentPlanConfirmDialog currentCount={positions.length} rateCount={confirmPlanRateCount} saving={busy} onCancel={() => setConfirmPlanRateCount(null)} onConfirm={() => { void executePlan(confirmPlanRateCount) }} />
       )}
       {pendingPagoPaBatch && (
         <ConfirmActionDialog
           title='Sostituire gli avvisi pagoPA'
-          text={`Le ${positions.length} posizioni attuali e i relativi documenti saranno sostituiti con i ${pendingPagoPaBatch.length} avvisi appena selezionati. Il sistema ricostruirà automaticamente unica soluzione e rate.`}
+          text={`${currentPagoPaPositionsWithContent.length === 1 ? 'La posizione attuale e il relativo documento saranno sostituiti' : `Le ${currentPagoPaPositionsWithContent.length} posizioni attuali e i relativi documenti saranno sostituiti`} con ${pendingPagoPaBatch.length === 1 ? 'l’avviso appena selezionato' : `i ${pendingPagoPaBatch.length} avvisi appena selezionati`}. Il sistema ricostruirà automaticamente unica soluzione e rate.`}
           confirmLabel='Sostituisci avvisi'
           saving={busy}
           onCancel={() => { setPendingPagoPaBatch(null); setInputKey(k => k + 1) }}
-          onConfirm={() => { void executePagoPaBatch(pendingPagoPaBatch) }}
+          onConfirm={() => { stagePagoPaBatch(pendingPagoPaBatch) }}
         />
       )}
       {deleteDocumentTarget && (
@@ -9415,21 +10407,29 @@ function GiiPaymentDocumentsPanel (props: {
 
       {practiceMode === 'PAGOPA' ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'auto minmax(280px, 1fr)', gap: 10, alignItems: 'center' }}>
-          <label style={{ ...paymentActionButtonStyle(!canMutate || busy || loading), margin: 0, cursor: !canMutate || busy || loading ? 'not-allowed' : 'pointer', justifySelf: 'start' }}>
-            Carica avvisi pagoPA
-            <input
-              key={`payment-batch-${inputKey}`}
-              type='file'
-              accept='application/pdf,.pdf'
-              multiple
-              disabled={!canMutate || busy || loading}
-              style={{ display: 'none' }}
-              onChange={e => { const files = Array.from(e.currentTarget.files || []); void preparePagoPaBatch(files) }}
-            />
-          </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifySelf: 'start' }}>
+            <label style={{ ...paymentActionButtonStyle(!canMutate || busy || loading), margin: 0, cursor: !canMutate || busy || loading ? 'not-allowed' : 'pointer' }}>
+              Carica avvisi pagoPA
+              <input
+                key={`payment-batch-${inputKey}`}
+                type='file'
+                accept='application/pdf,.pdf'
+                multiple
+                disabled={!canMutate || busy || loading}
+                style={{ display: 'none' }}
+                onChange={e => { const files = Array.from(e.currentTarget.files || []); void preparePagoPaBatch(files) }}
+              />
+            </label>
+            {!!st.enablePagoPaTestGenerator && (
+              <button type='button' disabled={!canMutate || busy || loading} onClick={() => setTestGeneratorOpen(true)} style={{ ...paymentActionButtonStyle(!canMutate || busy || loading), display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                Genera avvisi
+                <span style={{ fontSize: 9, lineHeight: 1, fontWeight: 900, letterSpacing: 0.4, borderRadius: 4, padding: '2px 4px', background: '#0d3b66', color: '#ffffff', border: '1px solid #0d3b66' }}>TEST</span>
+              </button>
+            )}
+          </div>
           <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.35 }}>
-            Selezionare insieme tutti gli avvisi prodotti: uno per l’unica soluzione e, se previste, tutte le rate. Il sistema legge importi, scadenze, IUV e codici avviso e costruisce automaticamente il piano.
-            {positions.length > 0 && <><br/><strong>Configurazione corrente:</strong> {currentRateCount >= 2 ? `unica soluzione + ${currentRateCount} rate (${positions.length} avvisi)` : 'unica soluzione'}.</>}
+            Selezionare insieme tutti gli avvisi prodotti: uno per l’unica soluzione e, se previste, tutte le rate. Il sistema legge dal QR code importo, codice avviso/IUV ed Ente Creditore; dal PDF ricava la scadenza e costruisce automaticamente il piano.
+            {displayPositions.length > 0 && <><br/><strong>{stagedPagoPaBatch ? 'Configurazione da salvare' : 'Configurazione corrente'}:</strong> {currentRateCount >= 2 ? `unica soluzione + ${currentRateCount} rate (${displayPositions.length} avvisi)` : 'unica soluzione'}.</>}
           </div>
         </div>
       ) : (
@@ -9444,9 +10444,9 @@ function GiiPaymentDocumentsPanel (props: {
       {loading && <InfoBox>Caricamento delle posizioni di pagamento…</InfoBox>}
       {error && <InfoBox kind='warn'>{error}</InfoBox>}
       {info && <InfoBox kind='ok'>{info}</InfoBox>}
-      {!loading && positions.length === 0 && <InfoBox kind='warn'>{practiceMode === 'PAGOPA' ? 'Caricare gli avvisi pagoPA prima della trasmissione dell’Atto al protocollo.' : 'Configurare le posizioni di pagamento prima della trasmissione dell’Atto al protocollo.'}</InfoBox>}
+      {!loading && displayPositions.length === 0 && <InfoBox kind='warn'>{practiceMode === 'PAGOPA' ? 'Caricare gli avvisi pagoPA prima della trasmissione dell’Atto al protocollo.' : 'Configurare le posizioni di pagamento prima della trasmissione dell’Atto al protocollo.'}</InfoBox>}
 
-      {positions.map(row => {
+      {displayPositions.map(row => {
         const draft = drafts[row.objectId] || row.attributes || {}
         const mode = String(pickAttrCI(draft, ['modalita_pagamento']) || '')
         const pagoPaAuto = practiceMode === 'PAGOPA' && mode === 'PAGOPA'
@@ -9459,21 +10459,32 @@ function GiiPaymentDocumentsPanel (props: {
               <div style={{ fontSize: 12, color: '#64748b' }}>{giiPaymentModeLabel(mode || pickAttrCI(row.attributes, ['modalita_pagamento']))}</div>
             </div>
             <div style={{ padding: 10, display: 'grid', gap: 10 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', gap: 10, alignItems: 'end' }}>
-                <label style={paymentFieldStyle}><span style={labelStyle}>Modalità</span><select value={mode} disabled={fieldDisabled || !modeEditable} onChange={e => setDraftField(row.objectId, 'modalita_pagamento', e.target.value)} style={{ ...inputStyleFrom(st, fieldDisabled || !modeEditable), cursor: fieldDisabled || !modeEditable ? 'not-allowed' : 'pointer' }}>{modeOptions.map(opt => <option key={opt.code || 'blank'} value={opt.code}>{opt.name}</option>)}</select></label>
+              <div style={{ display: 'grid', gridTemplateColumns: pagoPaAuto ? ADMIN_COMPACT_GRID_COLUMNS : 'repeat(auto-fit, minmax(165px, 1fr))', gap: 10, alignItems: 'end', justifyContent: pagoPaAuto ? 'start' : undefined }}>
+                {pagoPaAuto ? (
+                  <label style={paymentFieldStyle}><span style={labelStyle}>Modalità</span><input type='text' value='pagoPA' disabled style={inputStyleFrom(st, true)} /></label>
+                ) : (
+                  <label style={paymentFieldStyle}><span style={labelStyle}>Modalità</span><select value={mode} disabled={fieldDisabled || !modeEditable} onChange={e => setDraftField(row.objectId, 'modalita_pagamento', e.target.value)} style={{ ...inputStyleFrom(st, fieldDisabled || !modeEditable), cursor: fieldDisabled || !modeEditable ? 'not-allowed' : 'pointer' }}>{modeOptions.map(opt => <option key={opt.code || 'blank'} value={opt.code}>{opt.name}</option>)}</select></label>
+                )}
                 <label style={paymentFieldStyle}><span style={labelStyle}>Importo dovuto</span><input type='number' min={0} step='0.01' value={pickAttrCI(draft, ['importo_dovuto']) ?? ''} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'importo_dovuto', e.target.value)} style={inputStyleFrom(st, fieldDisabled)} /></label>
                 <label style={paymentFieldStyle}><span style={labelStyle}>Scadenza</span><input type='date' value={dateInputValue(pickAttrCI(draft, ['scadenza']))} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'scadenza', fromDateInputValue(e.target.value))} style={inputStyleFrom(st, fieldDisabled)} /></label>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 10, alignItems: 'end' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(145px, 0.65fr) minmax(200px, 1.35fr)', gap: 10, alignItems: 'end' }}>
-                  <label style={paymentFieldStyle}><span style={labelStyle}>Tipo riferimento</span><select value={String(pickAttrCI(draft, ['tipo_riferimento']) || '')} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'tipo_riferimento', e.target.value)} style={inputStyleFrom(st, fieldDisabled)}>{refOptions.map(opt => <option key={opt.code || 'blank'} value={opt.code}>{opt.name}</option>)}</select></label>
-                  <label style={paymentFieldStyle}><span style={labelStyle}>Riferimento</span><input type='text' value={String(pickAttrCI(draft, ['riferimento_pagamento']) || '')} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'riferimento_pagamento', e.target.value)} style={inputStyleFrom(st, fieldDisabled)} /></label>
+              {pagoPaAuto ? (
+                <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, gap: 10, alignItems: 'end', justifyContent: 'start' }}>
+                  <label style={paymentFieldStyle}><span style={labelStyle}>IUV</span><input type='text' value={giiPaymentReferenceValue(draft, 'IUV')} disabled style={inputStyleFrom(st, true)} /></label>
+                  <label style={paymentFieldStyle}><span style={labelStyle}>Codice avviso</span><input type='text' value={giiPaymentReferenceValue(draft, 'CODICE_AVVISO')} disabled style={inputStyleFrom(st, true)} /></label>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(145px, 0.65fr) minmax(200px, 1.35fr)', gap: 10, alignItems: 'end' }}>
-                  <label style={paymentFieldStyle}><span style={labelStyle}>Tipo riferimento 2</span><select value={String(pickAttrCI(draft, ['tipo_riferimento_secondario']) || '')} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'tipo_riferimento_secondario', e.target.value)} style={inputStyleFrom(st, fieldDisabled)}>{refOptions.map(opt => <option key={opt.code || 'blank'} value={opt.code}>{opt.name}</option>)}</select></label>
-                  <label style={paymentFieldStyle}><span style={labelStyle}>Riferimento 2</span><input type='text' value={String(pickAttrCI(draft, ['riferimento_secondario']) || '')} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'riferimento_secondario', e.target.value)} style={inputStyleFrom(st, fieldDisabled)} /></label>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 10, alignItems: 'end' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(145px, 0.65fr) minmax(200px, 1.35fr)', gap: 10, alignItems: 'end' }}>
+                    <label style={paymentFieldStyle}><span style={labelStyle}>Tipo riferimento</span><select value={String(pickAttrCI(draft, ['tipo_riferimento']) || '')} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'tipo_riferimento', e.target.value)} style={inputStyleFrom(st, fieldDisabled)}>{refOptions.map(opt => <option key={opt.code || 'blank'} value={opt.code}>{opt.name}</option>)}</select></label>
+                    <label style={paymentFieldStyle}><span style={labelStyle}>Riferimento</span><input type='text' value={String(pickAttrCI(draft, ['riferimento_pagamento']) || '')} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'riferimento_pagamento', e.target.value)} style={inputStyleFrom(st, fieldDisabled)} /></label>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(145px, 0.65fr) minmax(200px, 1.35fr)', gap: 10, alignItems: 'end' }}>
+                    <label style={paymentFieldStyle}><span style={labelStyle}>Tipo riferimento 2</span><select value={String(pickAttrCI(draft, ['tipo_riferimento_secondario']) || '')} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'tipo_riferimento_secondario', e.target.value)} style={inputStyleFrom(st, fieldDisabled)}>{refOptions.map(opt => <option key={opt.code || 'blank'} value={opt.code}>{opt.name}</option>)}</select></label>
+                    <label style={paymentFieldStyle}><span style={labelStyle}>Riferimento 2</span><input type='text' value={String(pickAttrCI(draft, ['riferimento_secondario']) || '')} disabled={fieldDisabled} onChange={e => setDraftField(row.objectId, 'riferimento_secondario', e.target.value)} style={inputStyleFrom(st, fieldDisabled)} /></label>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {!pagoPaAuto && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -9491,8 +10502,26 @@ function GiiPaymentDocumentsPanel (props: {
                 <div key={`payment-att-${row.objectId}-${att.id}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, border: '1px solid #e5edf7', borderRadius: 7, padding: '7px 8px' }}>
                   <div style={{ minWidth: 0, fontSize: 12, color: '#475569', overflowWrap: 'anywhere' }}>{att.name || `Documento ${att.id}`}</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <button type='button' title='Scarica documento' aria-label='Scarica documento' disabled={busy} onClick={() => { void downloadPositionDocument(row, att) }} style={bozzaIconButtonStyle({ disabled: busy })}><BozzaActionIcon name='download' size={22} /></button>
-                    <button type='button' title='Elimina documento' aria-label='Elimina documento' disabled={!canMutate || busy} onClick={() => deletePositionDocument(row, att)} style={bozzaIconButtonStyle({ danger: true, disabled: !canMutate || busy })}><BozzaActionIcon name='trash' size={22} /></button>
+                    <button
+                      type='button'
+                      title='Scarica documento'
+                      aria-label='Scarica documento'
+                      disabled={busy}
+                      onClick={() => {
+                        const pendingFile = (att as any)?.__pendingFile as File | undefined
+                        if (pendingFile) downloadBlobFile(pendingFile, pendingFile.name)
+                        else void downloadPositionDocument(row, att)
+                      }}
+                      style={bozzaIconButtonStyle({ disabled: busy })}
+                    ><BozzaActionIcon name='download' size={22} /></button>
+                    <button
+                      type='button'
+                      title={(att as any)?.__pendingFile ? 'Usare Annulla per ripristinare gli avvisi salvati' : 'Elimina documento'}
+                      aria-label={(att as any)?.__pendingFile ? 'Usare Annulla per ripristinare gli avvisi salvati' : 'Elimina documento'}
+                      disabled={!!(att as any)?.__pendingFile || !canMutate || busy}
+                      onClick={() => { if (!(att as any)?.__pendingFile) deletePositionDocument(row, att) }}
+                      style={bozzaIconButtonStyle({ danger: true, disabled: !!(att as any)?.__pendingFile || !canMutate || busy })}
+                    ><BozzaActionIcon name='trash' size={22} /></button>
                   </div>
                 </div>
               ))}
@@ -9501,9 +10530,15 @@ function GiiPaymentDocumentsPanel (props: {
         )
       })}
 
-      {!loading && positions.length > 0 && hasUnsavedPaymentChanges && <InfoBox kind='warn'>Sono presenti modifiche alle posizioni non ancora registrate. Usare Aggiorna oppure applicare il nuovo piano prima di proseguire.</InfoBox>}
-      {!loading && positions.length > 0 && !hasUnsavedPaymentChanges && issues.length === 0 && <InfoBox kind='ok'>Posizioni di pagamento complete e coerenti con il totale da pagare.</InfoBox>}
-      {!loading && positions.length > 0 && !hasUnsavedPaymentChanges && issues.length > 0 && (
+      {!loading && displayPositions.length > 0 && hasUnsavedPaymentChanges && (
+        <InfoBox kind='warn'>
+          {stagedPagoPaBatch
+            ? 'La sostituzione degli avvisi pagoPA non è ancora salvata. Premere Salva per confermarla oppure Annulla per ripristinare l’ultimo stato salvato.'
+            : 'Sono presenti modifiche alle posizioni non ancora registrate. Usare Aggiorna oppure applicare il nuovo piano prima di proseguire.'}
+        </InfoBox>
+      )}
+      {!loading && displayPositions.length > 0 && !hasUnsavedPaymentChanges && issues.length === 0 && <InfoBox kind='ok'>Posizioni di pagamento complete e coerenti con il totale da pagare.</InfoBox>}
+      {!loading && displayPositions.length > 0 && !hasUnsavedPaymentChanges && issues.length > 0 && (
         <InfoBox kind='warn'><strong>Dati di pagamento da completare.</strong><div style={{ marginTop: 4 }}>{issues.slice(0, 4).map((issue, idx) => <div key={`payment-issue-${idx}`}>• {issue}</div>)}</div>{issues.length > 4 && <div>• …e altri {issues.length - 4} controlli.</div>}</InfoBox>
       )}
     </div>
@@ -10657,8 +11692,12 @@ function loadAmmPdfJsForVerification (): Promise<any> {
 type PdfVerificationContent = {
   text: string
   protocolSearchText: string
+  protocolLeftSearchText: string
+  protocolRightSearchText: string
   protocolReferences: Array<{ numero: string, data: string }>
 }
+
+type OfficialProtocolMarginSide = 'any' | 'left' | 'right'
 
 function normalizePdfVerificationText (value: any): string {
   let s = String(value ?? '')
@@ -10700,6 +11739,32 @@ function extractPropostaProtocolReferences (value: string): Array<{ numero: stri
   return refs
 }
 
+function buildPdfProtocolSpatialSearchText (records: Array<{ str: string, x: number, y: number }>): string {
+  if (!records.length) return ''
+  const raw = records.map(r => r.str).join(' ')
+  const byRows = [...records]
+    .sort((a, b) => Math.abs(b.y - a.y) > 2 ? b.y - a.y : a.x - b.x)
+    .map(r => r.str)
+    .join(' ')
+  const byColumns = [...records]
+    .sort((a, b) => Math.abs(a.x - b.x) > 2 ? a.x - b.x : b.y - a.y)
+    .map(r => r.str)
+    .join(' ')
+  const byColumnsReverse = [...records]
+    .sort((a, b) => Math.abs(a.x - b.x) > 2 ? b.x - a.x : b.y - a.y)
+    .map(r => r.str)
+    .join(' ')
+  const byColumnsBottomUp = [...records]
+    .sort((a, b) => Math.abs(a.x - b.x) > 2 ? a.x - b.x : a.y - b.y)
+    .map(r => r.str)
+    .join(' ')
+  const byColumnsReverseBottomUp = [...records]
+    .sort((a, b) => Math.abs(a.x - b.x) > 2 ? b.x - a.x : a.y - b.y)
+    .map(r => r.str)
+    .join(' ')
+  return [raw, byRows, byColumns, byColumnsReverse, byColumnsBottomUp, byColumnsReverseBottomUp].filter(Boolean).join(' ')
+}
+
 async function extractPdfVerificationContent (blob: Blob): Promise<PdfVerificationContent> {
   const pdfjs = await loadAmmPdfJsForVerification()
   const bytes = new Uint8Array(await blob.arrayBuffer())
@@ -10707,6 +11772,8 @@ async function extractPdfVerificationContent (blob: Blob): Promise<PdfVerificati
   const pdf = await loadingTask.promise
   const pages: string[] = []
   const protocolPages: string[] = []
+  const protocolLeftPages: string[] = []
+  const protocolRightPages: string[] = []
   try {
     for (let pageNo = 1; pageNo <= Number(pdf?.numPages || 0); pageNo++) {
       const page = await pdf.getPage(pageNo)
@@ -10729,32 +11796,20 @@ async function extractPdfVerificationContent (blob: Blob): Promise<PdfVerificati
       const raw = parts.join(' ')
       pages.push(raw)
 
-      // Il timbro di protocollo può essere scritto verticalmente sul margine.
-      // PDF.js conserva le coordinate dei frammenti ma l'ordine dell'array non è
-      // necessariamente quello di lettura. Manteniamo il testo normale per i
-      // confronti documentali e costruiamo, solo per la ricerca del protocollo,
-      // ulteriori ordinamenti spaziali della stessa pagina.
-      const byRows = [...records]
-        .sort((a, b) => Math.abs(b.y - a.y) > 2 ? b.y - a.y : a.x - b.x)
-        .map(r => r.str)
-        .join(' ')
-      const byColumns = [...records]
-        .sort((a, b) => Math.abs(a.x - b.x) > 2 ? a.x - b.x : b.y - a.y)
-        .map(r => r.str)
-        .join(' ')
-      const byColumnsReverse = [...records]
-        .sort((a, b) => Math.abs(a.x - b.x) > 2 ? b.x - a.x : b.y - a.y)
-        .map(r => r.str)
-        .join(' ')
-      const byColumnsBottomUp = [...records]
-        .sort((a, b) => Math.abs(a.x - b.x) > 2 ? a.x - b.x : a.y - b.y)
-        .map(r => r.str)
-        .join(' ')
-      const byColumnsReverseBottomUp = [...records]
-        .sort((a, b) => Math.abs(a.x - b.x) > 2 ? b.x - a.x : a.y - b.y)
-        .map(r => r.str)
-        .join(' ')
-      protocolPages.push([raw, byRows, byColumns, byColumnsReverse, byColumnsBottomUp, byColumnsReverseBottomUp].filter(Boolean).join(' '))
+      // Il protocollo CBSM viene apposto verticalmente sul margine: quello in
+      // entrata a sinistra, quello in uscita a destra. Conserviamo quindi, oltre
+      // alla ricerca spaziale generale, due indici separati per lato. Il 30% della
+      // pagina e' volutamente ampio: include la segnatura marginale anche quando
+      // il PDF applica traslazioni/rotazioni, senza confondere i due margini.
+      const viewport = page.getViewport({ scale: 1 })
+      const pageWidth = Number(viewport?.width) || 0
+      const sideWidth = pageWidth > 0 ? pageWidth * 0.30 : 0
+      const leftRecords = sideWidth > 0 ? records.filter(r => r.x <= sideWidth) : []
+      const rightRecords = sideWidth > 0 ? records.filter(r => r.x >= pageWidth - sideWidth) : []
+
+      protocolPages.push(buildPdfProtocolSpatialSearchText(records))
+      protocolLeftPages.push(buildPdfProtocolSpatialSearchText(leftRecords))
+      protocolRightPages.push(buildPdfProtocolSpatialSearchText(rightRecords))
     }
   } finally {
     try { await loadingTask.destroy?.() } catch {}
@@ -10762,7 +11817,15 @@ async function extractPdfVerificationContent (blob: Blob): Promise<PdfVerificati
   }
   const text = normalizePdfVerificationText(pages.join(' '))
   const protocolSearchText = normalizePdfVerificationText(protocolPages.join(' '))
-  return { text, protocolSearchText, protocolReferences: extractPropostaProtocolReferences(text) }
+  const protocolLeftSearchText = normalizePdfVerificationText(protocolLeftPages.join(' '))
+  const protocolRightSearchText = normalizePdfVerificationText(protocolRightPages.join(' '))
+  return {
+    text,
+    protocolSearchText,
+    protocolLeftSearchText,
+    protocolRightSearchText,
+    protocolReferences: extractPropostaProtocolReferences(text)
+  }
 }
 
 
@@ -10892,6 +11955,34 @@ function extractOfficialProtocolCandidates (textValue: string): OfficialProtocol
   return uniqueAdministrativeMatches(matches, x => `${normalizeProtocolVerificationValue(x.numero)}|${new Date(x.dataMs).toISOString().slice(0, 10)}`)
 }
 
+function protocolSearchTextForMargin (content: PdfVerificationContent, side: OfficialProtocolMarginSide): string {
+  if (side === 'left') return content.protocolLeftSearchText || ''
+  if (side === 'right') return content.protocolRightSearchText || ''
+  return content.protocolSearchText || content.text || ''
+}
+
+function extractOfficialProtocolCandidatesFromContent (content: PdfVerificationContent, side: OfficialProtocolMarginSide): OfficialProtocolMetadata[] {
+  if (side === 'any') return extractOfficialProtocolCandidates(protocolSearchTextForMargin(content, side))
+
+  const sideCandidates = extractOfficialProtocolCandidates(protocolSearchTextForMargin(content, side))
+  if (sideCandidates.length) return sideCandidates
+
+  // Compatibilita' con vecchi PDF o generatori che non espongono coordinate
+  // affidabili: il fallback generale e' ammesso solo se esiste un unico protocollo
+  // nell'intero documento. Se sono presenti due segnature, il lato deve essere
+  // riconosciuto senza ambiguita'.
+  const globalCandidates = extractOfficialProtocolCandidates(content.protocolSearchText || content.text || '')
+  return globalCandidates.length === 1 ? globalCandidates : []
+}
+
+function extractOfficialProtocolMetadataFromContent (content: PdfVerificationContent, side: OfficialProtocolMarginSide): OfficialProtocolMetadata {
+  const unique = extractOfficialProtocolCandidatesFromContent(content, side)
+  const sideLabel = side === 'left' ? ' sul margine sinistro' : side === 'right' ? ' sul margine destro' : ''
+  if (unique.length === 0) throw new Error(`Nel PDF non sono stati riconosciuti in modo affidabile il numero e la data di protocollo${sideLabel}.`)
+  if (unique.length > 1) throw new Error(`Nel PDF sono presenti più riferimenti di protocollo${sideLabel}. Non è possibile individuare automaticamente quello ufficiale senza ambiguità.`)
+  return unique[0]
+}
+
 function extractOfficialProtocolMetadata (textValue: string): OfficialProtocolMetadata {
   const unique = extractOfficialProtocolCandidates(textValue)
   if (unique.length === 0) throw new Error('Nel PDF non sono stati riconosciuti in modo affidabile il numero e la data di protocollo.')
@@ -10899,14 +11990,13 @@ function extractOfficialProtocolMetadata (textValue: string): OfficialProtocolMe
   return unique[0]
 }
 
-function extractConsensusOfficialProtocol (contents: PdfVerificationContent[]): OfficialProtocolMetadata {
+function extractConsensusOfficialProtocol (contents: PdfVerificationContent[], side: OfficialProtocolMarginSide = 'any'): OfficialProtocolMetadata {
   const validContents = (contents || []).filter(Boolean)
   if (!validContents.length) throw new Error('Nessun PDF disponibile per la lettura del protocollo.')
 
   const occurrences = new Map<string, { meta: OfficialProtocolMetadata; files: Set<number> }>()
   validContents.forEach((content, fileIndex) => {
-    const sourceText = content.protocolSearchText || content.text
-    const candidates = extractOfficialProtocolCandidates(sourceText)
+    const candidates = extractOfficialProtocolCandidatesFromContent(content, side)
     const seenInFile = new Set<string>()
     for (const candidate of candidates) {
       const key = `${normalizeProtocolVerificationValue(candidate.numero)}|${new Date(candidate.dataMs).toISOString().slice(0, 10)}`
@@ -10919,7 +12009,8 @@ function extractConsensusOfficialProtocol (contents: PdfVerificationContent[]): 
   })
 
   if (!occurrences.size) {
-    throw new Error('Nei PDF caricati non sono stati riconosciuti in modo affidabile il numero e la data di protocollo.')
+    const sideLabel = side === 'left' ? ' sul margine sinistro' : side === 'right' ? ' sul margine destro' : ''
+    throw new Error(`Nei PDF caricati non sono stati riconosciuti in modo affidabile il numero e la data di protocollo${sideLabel}.`)
   }
 
   const ranked = Array.from(occurrences.values()).sort((a, b) => b.files.size - a.files.size)
@@ -13214,6 +14305,28 @@ function changedAttrs (fields: LayerFieldInfo[], initial: Record<string, any>, d
   return attrs
 }
 
+// Dopo un salvataggio riuscito initialDraft rappresenta lo snapshot amministrativo
+// confermato dall'editor. Una query immediata sulla hosted view può restituire per
+// qualche istante i valori precedenti: in quel caso non deve far regredire né la
+// maschera né il documento che si sta generando. Sovrapponiamo quindi soltanto i
+// campi amministrativi modificabili dall'IA; gli stati di workflow e i campi
+// readonly continuano a provenire dalla rilettura live del layer.
+function mergeSavedEditableAdminFieldsOverLive (
+  liveAttrs: Record<string, any>,
+  savedAttrs: Record<string, any>,
+  fields: LayerFieldInfo[]
+): Record<string, any> {
+  const merged = { ...(liveAttrs || {}) }
+  const saved = savedAttrs || {}
+  for (const field of ADMIN_FIELDS) {
+    if (field.readonly) continue
+    const real = realFieldName(fields, field.name) || field.name
+    const savedValue = pickAttrCI(saved, [real, field.name])
+    if (savedValue !== undefined) merged[real] = savedValue
+  }
+  return merged
+}
+
 export default function Widget (props: AllWidgetProps<IMConfig>) {
   const cfg: any = { ...defaultConfig, ...asJs(props.config) }
   const useDs: any[] = asJs(props.useDataSources) || []
@@ -13237,6 +14350,20 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [layerFields, setLayerFields] = React.useState<LayerFieldInfo[]>([])
   const [draft, setDraft] = React.useState<Record<string, any>>({})
   const [liveRefreshVersion, setLiveRefreshVersion] = React.useState(0)
+  const [attoDraftWordGeneratedMarker, setAttoDraftWordGeneratedMarker] = React.useState<{ oid: number, generatedAt: number } | null>(() => {
+    try {
+      const raw = window.sessionStorage.getItem('GII_ATTO_DRAFT_WORD_GENERATED')
+      if (!raw) return null
+      const parsed = JSON.parse(raw)
+      const markerOid = Number(parsed?.oid)
+      const generatedAt = Number(parsed?.generatedAt || parsed?.ts || 0)
+      return Number.isFinite(markerOid) && markerOid > 0
+        ? { oid: markerOid, generatedAt: Number.isFinite(generatedAt) && generatedAt > 0 ? generatedAt : Date.now() }
+        : null
+    } catch {
+      return null
+    }
+  })
   const [attoCleanWordGeneratedMarker, setAttoCleanWordGeneratedMarker] = React.useState<{ oid: number, generatedAt: number } | null>(() => {
     try {
       const raw = window.sessionStorage.getItem('GII_ATTO_CLEAN_WORD_GENERATED')
@@ -13268,6 +14395,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [initialDraft, setInitialDraft] = React.useState<Record<string, any>>({})
   const [automaticValues, setAutomaticValues] = React.useState<Record<string, any>>({})
   const [saving, setSaving] = React.useState(false)
+  const [paymentPendingDirty, setPaymentPendingDirty] = React.useState(false)
+  const paymentPendingActionsRef = React.useRef<GiiPaymentPendingActions | null>(null)
   const [dialog, setDialog] = React.useState<{ kind: 'ok' | 'err' | 'warn', title: string, text: string } | null>(null)
   const [iaOutcomeDialogOpen, setIaOutcomeDialogOpen] = React.useState(false)
   const [iaOutcomeChoice, setIaOutcomeChoice] = React.useState<IaOutcomeChoice>('')
@@ -13339,6 +14468,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setAmmPreviewAttachment(null)
       setAmmPreviewRotationDeg(0)
       setPendingAmmAttachmentRotations({})
+      setPaymentPendingDirty(false)
+      paymentPendingActionsRef.current = null
     }
     window.addEventListener('gii-practice-context-reset', onPracticeContextReset)
     return () => window.removeEventListener('gii-practice-context-reset', onPracticeContextReset)
@@ -13484,11 +14615,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           })
           return
         }
-        writeSelectedFeatureCache(candidateLayerUrl, candidateOid, idFieldName, liveAttrs, 'detail')
+        // Se questa rilettura avviene subito dopo un salvataggio dell'editor,
+        // writeSelectedFeatureCache conserva per la finestra di protezione i dati
+        // appena scritti (source=edit). Usiamo il valore restituito anche per la
+        // scheda: altrimenti una risposta temporaneamente obsoleta della view può
+        // riportare visivamente i campi al valore precedente.
+        const cachedSelection = writeSelectedFeatureCache(candidateLayerUrl, candidateOid, idFieldName, liveAttrs, 'detail')
+        const effectiveAttrs = cachedSelection?.data || liveAttrs
         setIaAccess({
           status: 'allowed',
           selectionKey: candidateSelectionKey,
-          data: liveAttrs,
+          data: effectiveAttrs,
           message: '',
           checkedAt: Date.now()
         })
@@ -13521,6 +14658,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const active = activeSelection ? { ...activeSelection, ds: activeSelection.ds || configuredDs } : (requiresVerifiedSelection ? null : (configuredDsState || null))
   const data = activeSelection?.data || null
   const oid = activeSelection?.oid ?? (data ? pickOidFromData(data, activeSelection?.idFieldName || 'OBJECTID') : null)
+
+  React.useEffect(() => {
+    setPaymentPendingDirty(false)
+    paymentPendingActionsRef.current = null
+  }, [oid])
   const hasSelection = !!data || (oid != null && Number.isFinite(Number(oid)))
   React.useEffect(() => {
     if (activeAmmSection === 'anteprima' && oid != null && Number.isFinite(Number(oid))) {
@@ -13533,7 +14675,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const headerTitleParts = titleParts
   const showHeaderProcedureNote = activeAmmSection !== 'anteprima'
   const hasDsForSave = !!configuredDs
-  const openedInConsultation = activeSelection?.readOnly === true
   const roleCanEditData = ['IA', 'ADMIN'].includes(currentRole)
   const draftOid = pickOidFromData(draft || {}, active?.idFieldName || 'OBJECTID')
   const draftBelongsToSelection = oid != null && draftOid != null && Number(draftOid) === Number(oid)
@@ -13543,12 +14684,21 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const iaIsCurrentOperativeAssignee = currentRole === 'IA' && iaWorkflowState === 2 && iaAssignedToCurrentUser
   const assignedToOtherUser = currentRole === 'IA' && !iaAssignedToCurrentUser
   const dataEditBlockedByRole = roleAllowed && !roleCanEditData
-  const dataEditBlockedByOtherUser = roleCanEditData && ((openedInConsultation && !iaIsCurrentOperativeAssignee) || assignedToOtherUser)
+  // Per l'IA l'assegnazione nominale non basta: la pratica è modificabile soltanto
+  // mentre è effettivamente in carico (stato_IA = 2). Appena viene trasmessa al RIA
+  // passa a stato_IA = 4 e l'editor deve diventare immediatamente sola lettura.
+  // Dopo un eventuale rimando resta bloccata finché l'IA non esegue nuovamente
+  // "Prendi in carico", che riporta stato_IA a 2.
+  const dataEditBlockedByWorkflow = currentRole === 'IA' && !iaIsCurrentOperativeAssignee
+  const dataEditBlockedByOtherUser = roleCanEditData && assignedToOtherUser
   const readOnlyBannerBaseMessage = dataEditBlockedByRole
     ? 'Modifica dati non consentita per il tuo ruolo.'
-    : (dataEditBlockedByOtherUser ? 'Modifica dati non abilitata. La pratica risulta in carico presso un altro utente.' : '')
-  const showContextualSectionInfo = roleAllowed && roleCanEditData && !dataEditBlockedByRole && !dataEditBlockedByOtherUser
-  const canEdit = roleAllowed && roleCanEditData && hasDsForSave && !dataEditBlockedByOtherUser
+    : (dataEditBlockedByOtherUser
+        ? 'Modifica dati non abilitata. La pratica risulta in carico presso un altro utente.'
+        : (dataEditBlockedByWorkflow ? 'Modifica dati non abilitata. La pratica non è attualmente in carico all’Istruttore amministrativo.' : ''))
+  const dataEditBlocked = dataEditBlockedByOtherUser || dataEditBlockedByWorkflow
+  const showContextualSectionInfo = roleAllowed && roleCanEditData && !dataEditBlockedByRole && !dataEditBlocked
+  const canEdit = roleAllowed && roleCanEditData && hasDsForSave && !dataEditBlocked
   const canRepairAdoptedDetermination = roleAllowed && roleCanEditData && hasDsForSave
   const adoptedDeterminationRepairRef = React.useRef('')
   React.useEffect(() => {
@@ -13711,7 +14861,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     !sameDraftValue(pickAttrCI(initialDraft, ['determinazione_numero']), pickAttrCI(draft, ['determinazione_numero']), 'determinazione_numero') ||
     !sameDraftValue(pickAttrCI(initialDraft, ['determinazione_data']), pickAttrCI(draft, ['determinazione_data']), 'determinazione_data')
   const hasPendingAmmAttachmentRotations = Object.values(pendingAmmAttachmentRotations).some(value => (((Math.round(Number(value || 0) / 90) * 90) % 360 + 360) % 360) !== 0)
-  const isDirty = generalIsDirty || determinationIsDirty || hasPendingAmmAttachmentRotations
+  const isDirty = generalIsDirty || determinationIsDirty || hasPendingAmmAttachmentRotations || paymentPendingDirty
 
   const logLayerRef = React.useRef<any | null>(null)
   const attivitaLayerRef = React.useRef<any | null>(null)
@@ -14689,6 +15839,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [])
 
   const handleReset = () => {
+    try { paymentPendingActionsRef.current?.reset() } catch {}
+    setPaymentPendingDirty(false)
     setDraft({ ...(initialDraft || {}) })
     setPendingAmmAttachmentRotations({})
     setAmmPreviewRotationDeg(0)
@@ -15467,7 +16619,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       let liveAttrs = { ...(initialDraft || {}) }
       try {
         const current = await queryCurrentLayerAttrsByOid(layer, idName, Number(oid))
-        if (current && Object.keys(current).length) liveAttrs = current
+        if (current && Object.keys(current).length) {
+          // La query live resta la fonte per workflow e campi readonly, ma i campi
+          // amministrativi modificabili già confermati da Salva non possono essere
+          // sostituiti da una risposta della hosted view ancora non allineata.
+          liveAttrs = mergeSavedEditableAdminFieldsOverLive(current, initialDraft || {}, fields)
+        }
       } catch {}
 
       if (!isDeterminazioneAdottata(liveAttrs)) throw new Error('Registrare prima numero e data della determinazione adottata.')
@@ -15528,14 +16685,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         if (real) attrs[real] = value
       }
       if (!postRiApproved) {
-        // L'Atto apre un nuovo ciclo RIA senza riaprire la Determinazione:
-        // determinazione_stato resta definitivamente ADOTTATA.
-        put('stato_RIA', 4)
-        put('dt_stato_RIA', now)
-        put('dt_presa_in_carico_RIA', null)
-        put('esito_RIA', null)
-        put('dt_esito_RIA', null)
-        put('note_RIA', null)
+        // La generazione del Word non apre alcun nodo RIA: il documento è ancora
+        // nelle mani dell'IA. Conserviamo intatti stato/esito RIA della precedente
+        // validazione amministrativa e memorizziamo soltanto che, in questa sessione,
+        // è stata prodotta la bozza Word coerente con i dati correnti.
+        const marker = { oid: Number(oid), generatedAt: now }
+        setAttoDraftWordGeneratedMarker(marker)
+        try { window.sessionStorage.setItem('GII_ATTO_DRAFT_WORD_GENERATED', JSON.stringify(marker)) } catch {}
       }
 
       const cleanAttrs = filterAttrsForLayer(attrs, fields)
@@ -15631,7 +16787,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         ? structuredRiaAttoIntegrationReturn
         : legacyRiaAttoIntegrationReturn
       if (!isDeterminazioneAdottata(liveAttrs)) throw new Error('La determinazione adottata non risulta registrata.')
-      if (attoContestazioneWorkflowState(liveAttrs) !== 'BOZZA') throw new Error('L’Atto non è nella fase di predisposizione.')
+      if (!['', 'BOZZA'].includes(attoContestazioneWorkflowState(liveAttrs))) throw new Error('L’Atto non è nella fase di predisposizione.')
 
       const layerUrl = normalizeEditLayerUrl(layer?.url || active?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
       const attachments = await queryAmmAttachments(layer, Number(oid), layerUrl)
@@ -15681,8 +16837,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       await upsertAmmCycleAudit(liveAttrs, next, changed)
       await closeIaAttoContestazioneCycle(liveAttrs, next, changed, { integrationReturn: isRiaIntegrationReturn })
       await createRiaAttoContestazioneActivity(next, { integrationReturn: isRiaIntegrationReturn })
-      // Un nuovo invio al RIA apre un nuovo ciclo: l'eventuale marker della
-      // precedente versione pulita non deve sopravvivere alla nuova approvazione.
+      // Un nuovo invio al RIA apre un nuovo ciclo: i marker locali di generazione
+      // non devono sopravvivere alla trasmissione effettiva.
+      setAttoDraftWordGeneratedMarker(null)
+      try { window.sessionStorage.removeItem('GII_ATTO_DRAFT_WORD_GENERATED') } catch {}
       setAttoCleanWordGeneratedMarker(null)
       try { window.sessionStorage.removeItem('GII_ATTO_CLEAN_WORD_GENERATED') } catch {}
       setAttoDirettoreEmailPreparedMarker(null)
@@ -15970,6 +17128,60 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }, [active, canEdit, cfg, currentRole, getEmailAttachmentContext, hasSelection, initialDraft, isDirty, layerFields, oid])
 
+  const getNotificaSaveIssues = React.useCallback((source: Record<string, any>): string[] => {
+    if (activeAmmSection !== 'notifica') return []
+
+    const current = source || {}
+    const issues: string[] = []
+    const statoAtto = attoContestazioneWorkflowState(current)
+    const attoLocked = ['TRASMESSA_RIA', 'VALIDATA_RIA', TRASMESSA_FIRMA_DA_STATE].includes(statoAtto) ||
+      hasAdminValue(pickAttrCI(current, ['protocollo_atto_accertamento_numero'])) ||
+      hasAdminValue(pickAttrCI(current, ['protocollo_atto_accertamento_data'])) ||
+      hasAdminValue(pickAttrCI(current, ['notifica_data']))
+
+    const preparationFieldsChanged = ATTO_PREPARATION_SOURCE_FIELDS.some(name => {
+      const real = realFieldName(layerFields, name) || name
+      const before = pickAttrCI(initialDraft || {}, [real, name])
+      const after = pickAttrCI(current, [real, name])
+      return !sameDraftValue(before, after, name)
+    })
+
+    // I tre dati di preparazione costituiscono un unico blocco obbligatorio.
+    // Se l'IA modifica il blocco prima che l'Atto venga bloccato, non deve poter
+    // persistirne una compilazione parziale. Per le spese, 0,00 resta valido.
+    if (isDeterminazioneAdottata(current) && !attoLocked && preparationFieldsChanged) {
+      if (!getPaymentMode(current, layerFields)) issues.push('Modalità di pagamento')
+      if (!hasAdminValue(pickAttrCI(current, ['notifica_tipo']))) issues.push('Tipo notifica')
+      const speseRaw = pickAttrCI(current, ['sanzione_spese_notifica'])
+      if (speseRaw == null || String(speseRaw).trim() === '' || parseNumberInput(speseRaw) == null) {
+        issues.push('Spese di notifica (indicare 0,00 se non previste)')
+      }
+    }
+
+    const notificaFieldsChanged = ['notifica_data', 'notifica_esito', 'notifica_estremi'].some(name => {
+      const real = realFieldName(layerFields, name) || name
+      const before = pickAttrCI(initialDraft || {}, [real, name])
+      const after = pickAttrCI(current, [real, name])
+      return !sameDraftValue(before, after, name)
+    })
+
+    // La registrazione della notifica può rimanere completamente vuota finché non
+    // viene avviata. Dal primo dato inserito, invece, il salvataggio deve rispettare
+    // il blocco obbligatorio della notifica. DA_NOTIFICARE è lo stato esplicito che
+    // consente di registrare l'Atto protocollato senza data/estremi di notificazione.
+    if (notificaFieldsChanged) {
+      const esito = notificaEsitoCode(current)
+      if (!esito) issues.push('Esito notifica')
+      if (esito && esito !== 'DA_NOTIFICARE') {
+        if (!hasAdminValue(pickAttrCI(current, ['notifica_tipo']))) issues.push('Tipo notifica')
+        if (!hasAdminValue(pickAttrCI(current, ['notifica_data']))) issues.push('Data notifica')
+        if (!hasAdminValue(pickAttrCI(current, ['notifica_estremi']))) issues.push('Estremi notifica')
+      }
+    }
+
+    return Array.from(new Set(issues))
+  }, [activeAmmSection, initialDraft, layerFields])
+
   const handleSave = async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
       setDialog({ kind: 'warn', title: 'Nessuna istruttoria selezionata', text: 'Selezionare un’istruttoria prima di salvare.' })
@@ -15987,6 +17199,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setDialog({ kind: 'warn', title: 'Scheda in sola lettura', text: 'Il profilo corrente può consultare la scheda, ma non modificarla.' })
       return
     }
+    const currentForSave = { ...(data || {}), ...(draft || {}), ...automaticValues }
+    const notificaSaveIssues = getNotificaSaveIssues(currentForSave)
+    if (notificaSaveIssues.length) {
+      setDialog({
+        kind: 'warn',
+        title: 'Campi obbligatori mancanti',
+        text: `Non è possibile salvare la scheda Notifica. Completare i seguenti campi:\n- ${notificaSaveIssues.join('\n- ')}`
+      })
+      return
+    }
+
     const attrs = changedAttrs(layerFields, initialDraft, draft)
 
     // Modalità di pagamento, tipo di notifica e spese di notifica confluiscono
@@ -16025,7 +17248,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const before = pickAttrCI(initialDraft, [real, name])
       if (!sameDraftValue(before, value, name)) attrs[real] = value == null || value === '' ? null : value
     })
-    if (!Object.keys(attrs).length && !determinationIsDirty && !hasPendingAmmAttachmentRotations) {
+    if (!Object.keys(attrs).length && !determinationIsDirty && !hasPendingAmmAttachmentRotations && !paymentPendingDirty) {
       setDialog({ kind: 'warn', title: 'Nessuna modifica', text: 'Non risultano modifiche da salvare.' })
       return
     }
@@ -16035,6 +17258,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     if (!operationContextIsCurrent()) return
     setSaving(true)
     try {
+      if (paymentPendingDirty) {
+        const pendingActions = paymentPendingActionsRef.current
+        if (!pendingActions?.commit) throw new Error('Le modifiche ai documenti di pagamento non sono disponibili per il salvataggio. Riaprire la scheda e riprovare.')
+        await pendingActions.commit()
+      }
       const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
       if (!layer?.applyEdits) throw new Error('Configurazione non disponibile. Contattare l’amministratore.')
       if (typeof layer.load === 'function') { try { await layer.load() } catch { } }
@@ -16061,21 +17289,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           invalidatedAttoPdfCount += 1
         }
 
-        // Anche il Word già generato è costruito sugli stessi dati. Azzeriamo
-        // esclusivamente il nodo RIA corrente dell'Atto: il rimando/approvazione
-        // precedente rimane nello storico LOG, mentre il workflow corrente torna
-        // correttamente a "genera Word". I campi di routing GII restano invariati
-        // fino alla successiva trasmissione effettiva.
-        const resetAttoRiaField = (name: string, value: any = null) => {
-          const real = realFieldName(fields, name)
-          if (real) attrs[real] = value
-        }
-        resetAttoRiaField('stato_RIA')
-        resetAttoRiaField('dt_stato_RIA')
-        resetAttoRiaField('dt_presa_in_carico_RIA')
-        resetAttoRiaField('esito_RIA')
-        resetAttoRiaField('dt_esito_RIA')
-        resetAttoRiaField('note_RIA')
+        // Anche il Word già generato è costruito sugli stessi dati. Invalidiamo
+        // soltanto il marker locale della bozza Word: i campi stato/esito RIA
+        // appartengono alla validazione amministrativa precedente e non devono
+        // essere alterati finché l'Atto non viene realmente trasmesso al RIA.
+        setAttoDraftWordGeneratedMarker(null)
+        try { window.sessionStorage.removeItem('GII_ATTO_DRAFT_WORD_GENERATED') } catch {}
         attoPreparationInvalidated = true
       }
 
@@ -16215,6 +17434,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       invalidateRuntimeProxyCache(nextLayerUrl)
       setInitialDraft(next)
       setDraft(next)
+      // Se il salvataggio ha invalidato la bozza/PDF dell'Atto, forza anche il
+      // refresh dello stato allegati della scheda Notifica. Senza questo passaggio
+      // il componente figlio conserva temporaneamente in memoria il vecchio PDF
+      // appena eliminato e può indicare erroneamente "Trasmetti al RIA" come
+      // azione successiva invece di richiedere la rigenerazione del documento.
+      if (attoPreparationInvalidated) setLiveRefreshVersion(value => value + 1)
       if (determinationSaveMeta) {
         setDialog({
           kind: 'ok',
@@ -16231,6 +17456,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         })
       } else if (hasPendingAmmAttachmentRotations && !Object.keys(attrs).length) {
         setDialog({ kind: 'ok', title: 'Allegato aggiornato', text: 'Orientamento dell’allegato salvato.' })
+      } else if (paymentPendingDirty && !Object.keys(attrs).length) {
+        setDialog({ kind: 'ok', title: 'Avvisi pagoPA salvati', text: 'La nuova configurazione degli avvisi pagoPA è stata registrata.' })
       } else {
         setDialog({ kind: 'ok', title: 'Bozza salvata', text: 'Dati amministrativi salvati.' })
       }
@@ -16790,6 +18017,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     onPrepareEmailDirettore={handlePrepareEmailDirettore}
                     onPrepareEmailProtocollo={handlePrepareEmailProtocollo}
                     onGenerateAttoContestazioneWord={handleGenerateAttoContestazioneWord}
+                    attoDraftWordGenerated={
+                      !!attoDraftWordGeneratedMarker &&
+                      Number(oid) === attoDraftWordGeneratedMarker.oid
+                    }
                     attoCleanWordGeneratedAfterApproval={
                       !!attoCleanWordGeneratedMarker &&
                       Number(oid) === attoCleanWordGeneratedMarker.oid &&
@@ -16841,6 +18072,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     onPrepareEmailDirettore={handlePrepareEmailDirettore}
                     onPrepareEmailProtocollo={handlePrepareEmailProtocollo}
                     onGenerateAttoContestazioneWord={handleGenerateAttoContestazioneWord}
+                    attoDraftWordGenerated={
+                      !!attoDraftWordGeneratedMarker &&
+                      Number(oid) === attoDraftWordGeneratedMarker.oid
+                    }
                     attoCleanWordGeneratedAfterApproval={
                       !!attoCleanWordGeneratedMarker &&
                       Number(oid) === attoCleanWordGeneratedMarker.oid &&
@@ -16858,8 +18093,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     ds={(active as any)?.ds}
                     layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}
                     workflowScope='notifica'
+                    onPaymentPendingDirtyChange={setPaymentPendingDirty}
+                    registerPaymentPendingActions={actions => { paymentPendingActionsRef.current = actions }}
                     bozzaRefreshKey={[
                       oid ?? '',
+                      liveRefreshVersion,
                       pickAttrCI(viewData || {}, ['determinazione_stato']) ?? '',
                       pickAttrCI(viewData || {}, ['dt_stato_RIA']) ?? '',
                       pickAttrCI(viewData || {}, ['dt_esito_RIA']) ?? '',

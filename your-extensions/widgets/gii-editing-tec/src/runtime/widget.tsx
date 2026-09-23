@@ -2292,25 +2292,62 @@ function RegolamentoArticleDetailsTi (props: { articleState: RegolamentoArticoli
   const st = REGOLAMENTO_VIOLATA_STYLE
   const article = getRegolamentoArticle(props.articleState, props.articleCode)
 
+  let body: React.ReactNode
   if (!props.articleState.urlsReady) {
-    return <div style={{ color: st.articleMetaColor, fontSize: 12 }}>Tabella articoli del regolamento non configurata.</div>
-  }
-  if (props.articleState.loading) {
-    return <div style={{ color: st.articleMetaColor, fontSize: 12 }}>Caricamento testo regolamentare…</div>
-  }
-  if (props.articleState.error) {
-    return <div style={{ color: '#991b1b', fontSize: 12 }}>Errore caricamento regolamento: {props.articleState.error}</div>
-  }
-  if (!article) {
-    return <div style={{ color: st.articleMetaColor, fontSize: 12 }}>Testo regolamentare non disponibile nelle tabelle configurate.</div>
+    body = <div style={{ color: st.articleMetaColor, fontSize: 12 }}>Tabella articoli del regolamento non configurata.</div>
+  } else if (props.articleState.loading) {
+    body = <div style={{ color: st.articleMetaColor, fontSize: 12 }}>Caricamento testo regolamentare…</div>
+  } else if (props.articleState.error) {
+    body = <div style={{ color: '#991b1b', fontSize: 12 }}>Errore caricamento regolamento: {props.articleState.error}</div>
+  } else if (!article) {
+    body = <div style={{ color: st.articleMetaColor, fontSize: 12 }}>Testo regolamentare non disponibile nelle tabelle configurate.</div>
+  } else {
+    const code = formatRegolamentoArticleCode(article.codice_articolo || article.numero_articolo)
+    const titleLine = article.titolo_articolo ? `${code} - ${article.titolo_articolo}` : code
+    body = (
+      <div style={{ display: 'grid', gap: 4 }}>
+        <div style={{ color: st.articleTitleColor, fontSize: fs.norma3FontSize, fontWeight: 800, lineHeight: 1.35 }}>{titleLine}</div>
+        {article.testo_articolo && <div style={{ color: st.articleTextColor, fontSize: fs.norma3FontSize, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{article.testo_articolo}</div>}
+      </div>
+    )
   }
 
-  const code = formatRegolamentoArticleCode(article.codice_articolo || article.numero_articolo)
-  const titleLine = article.titolo_articolo ? `${code} - ${article.titolo_articolo}` : code
   return (
-    <div style={{ display: 'grid', gap: 6 }}>
-      <div style={{ color: st.articleTitleColor, fontSize: fs.norma3FontSize, fontWeight: 800, lineHeight: 1.35 }}>{titleLine}</div>
-      {article.testo_articolo && <div style={{ color: st.articleTextColor, fontSize: fs.norma3FontSize, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{article.testo_articolo}</div>}
+    <div style={{ display: 'grid', gridTemplateColumns: '54px minmax(0, 1fr)', gap: 10, alignItems: 'start', minWidth: 0 }}>
+      <div
+        aria-hidden='true'
+        style={{
+          width: 54,
+          height: 54,
+          border: `1px solid ${st.borderColor}`,
+          borderRadius: 10,
+          background: st.cardBg,
+          color: '#0b67c2',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxSizing: 'border-box'
+        }}
+      >
+        <svg
+          width='30'
+          height='34'
+          viewBox='0 0 24 24'
+          preserveAspectRatio='xMidYMid meet'
+          fill='none'
+          aria-hidden='true'
+          focusable='false'
+          style={{ display: 'block' }}
+        >
+          <path d='M12 4.4v15.8' stroke='#0b67c2' strokeWidth='1.6' strokeLinecap='round' strokeLinejoin='round' />
+          <path d='M12 4.4C9.2 2.8 5.8 2.3 2.6 3.2v15.9c3.3-.9 6.6-.4 9.4 1.2' stroke='#0b67c2' strokeWidth='1.6' strokeLinecap='round' strokeLinejoin='round' />
+          <path d='M12 4.4c2.8-1.6 6.2-2.1 9.4-1.2v15.9c-3.3-.9-6.6-.4-9.4 1.2' stroke='#0b67c2' strokeWidth='1.6' strokeLinecap='round' strokeLinejoin='round' />
+        </svg>
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ color: '#0b5ca8', fontSize: fs.norma3FontSize, fontWeight: 800, lineHeight: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>RIFERIMENTO REGOLAMENTO</div>
+        {body}
+      </div>
     </div>
   )
 }
@@ -2326,6 +2363,9 @@ function RegolamentoChoiceToggleTi (props: {
   open?: boolean
   onOpenChange?: (open: boolean) => void
   inlineDetails?: boolean
+  showToggle?: boolean
+  titleToggles?: boolean
+  plainHeader?: boolean
 }) {
   const fs = React.useContext(FormStyleCtx)
   const [internalOpen, setInternalOpen] = React.useState(false)
@@ -2337,6 +2377,9 @@ function RegolamentoChoiceToggleTi (props: {
   const targetHeight = Math.max(24, Number(fs.fieldHeight) || 32)
   const headerHeight = Math.max(22, targetHeight - (Number(st.borderWidth || 1) * 2))
   const externalOpen = open && props.inlineDetails === false
+  const showToggle = props.showToggle !== false
+  const titleToggles = props.titleToggles !== false
+  const plainHeader = props.plainHeader === true
   const toggleOpen = (evt?: any) => {
     try { evt?.preventDefault?.() } catch {}
     try { evt?.stopPropagation?.() } catch {}
@@ -2376,25 +2419,33 @@ function RegolamentoChoiceToggleTi (props: {
   }, [open, props.inlineDetails])
 
   return (
-    <div ref={articleToggleRef} style={{ border: `${Number(st.borderWidth || 1)}px solid ${st.borderColor}`, background: st.cardBg, borderRadius: externalOpen ? '7px 7px 0 0' : 7, overflow: open && expandedWidth ? 'visible' : 'hidden', minWidth: 0, width: props.fill === false ? undefined : '100%', boxSizing: 'border-box', position: 'relative', zIndex: open ? 2 : undefined }}>
-      <div style={{ minHeight: headerHeight, background: st.headerBg, color: st.headerTextColor, display: 'flex', alignItems: 'center', gap: 8, padding: '0 8px', boxSizing: 'border-box' }}>
-        <button
-          type='button'
-          onClick={toggleOpen}
-          aria-expanded={open}
-          title={open ? 'Nascondi testo regolamento' : 'Mostra testo regolamento'}
-          style={{ border: 0, background: 'transparent', color: st.arrowColor, width: 14, minWidth: 14, height: headerHeight, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, fontSize: 11, fontWeight: 900, lineHeight: 1 }}
-        >{open ? '▼' : '▶'}</button>
-        {props.checkbox && <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 14, minWidth: 14, height: headerHeight, lineHeight: 1 }}>{props.checkbox}</span>}
-        <button
-          type='button'
-          onClick={toggleOpen}
-          aria-expanded={open}
-          style={{ border: 0, background: 'transparent', color: st.headerTextColor, display: 'flex', alignItems: 'center', minHeight: headerHeight, padding: 0, textAlign: 'left', cursor: 'pointer', minWidth: 0, flex: '1 1 auto', fontSize: fs.norma3FontSize, fontWeight: 900, lineHeight: 1.25, ...props.textStyle }}
-        ><span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span></button>
+    <div ref={articleToggleRef} style={{ border: plainHeader ? 0 : `${Number(st.borderWidth || 1)}px solid ${st.borderColor}`, background: plainHeader ? 'transparent' : st.cardBg, borderRadius: plainHeader ? 0 : (externalOpen ? '7px 7px 0 0' : 7), overflow: open && expandedWidth ? 'visible' : 'hidden', minWidth: 0, width: props.fill === false ? undefined : '100%', boxSizing: 'border-box', position: 'relative', zIndex: open ? 2 : undefined }}>
+      <div style={{ minHeight: plainHeader ? targetHeight : headerHeight, background: plainHeader ? 'transparent' : st.headerBg, color: st.headerTextColor, display: 'flex', alignItems: 'center', gap: 8, padding: plainHeader ? '0 8px' : '0 8px', boxSizing: 'border-box' }}>
+        {showToggle && (
+          <button
+            type='button'
+            onClick={toggleOpen}
+            aria-expanded={open}
+            title={open ? 'Nascondi testo regolamento' : 'Mostra testo regolamento'}
+            style={{ border: 0, background: 'transparent', color: st.arrowColor, width: 14, minWidth: 14, height: headerHeight, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, fontSize: 11, fontWeight: 900, lineHeight: 1 }}
+          >{open ? '▼' : '▶'}</button>
+        )}
+        {props.checkbox && <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 14, minWidth: 14, height: plainHeader ? targetHeight : headerHeight, lineHeight: 1 }}>{props.checkbox}</span>}
+        {titleToggles ? (
+          <button
+            type='button'
+            onClick={toggleOpen}
+            aria-expanded={open}
+            style={{ border: 0, background: 'transparent', color: st.headerTextColor, display: 'flex', alignItems: 'center', minHeight: plainHeader ? targetHeight : headerHeight, padding: 0, textAlign: 'left', cursor: 'pointer', minWidth: 0, flex: '1 1 auto', fontSize: fs.norma3FontSize, fontWeight: 900, lineHeight: 1.25, ...props.textStyle }}
+          ><span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span></button>
+        ) : (
+          <div style={{ color: st.headerTextColor, display: 'flex', alignItems: 'center', minHeight: plainHeader ? targetHeight : headerHeight, padding: 0, textAlign: 'left', minWidth: 0, flex: '1 1 auto', fontSize: fs.norma3FontSize, fontWeight: 900, lineHeight: 1.25, ...props.textStyle }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
+          </div>
+        )}
       </div>
       {open && props.inlineDetails !== false && (
-        <div style={{ padding: '8px 10px', border: `1px solid ${st.borderColor}`, borderTop: `1px solid ${st.borderColor}`, borderRadius: '0 0 7px 7px', background: st.bodyBg, boxSizing: 'border-box', width: expandedWidth ? `${expandedWidth}px` : '100%', marginLeft: -Number(st.borderWidth || 1), marginBottom: -Number(st.borderWidth || 1) }}>
+        <div style={{ padding: '8px 10px', border: `1px solid ${st.borderColor}`, borderTop: `1px solid ${st.borderColor}`, borderRadius: '0 0 7px 7px', background: st.bodyBg, boxSizing: 'border-box', width: expandedWidth ? `${expandedWidth}px` : '100%', marginLeft: plainHeader ? 0 : -Number(st.borderWidth || 1), marginBottom: plainHeader ? 0 : -Number(st.borderWidth || 1) }}>
           <RegolamentoArticleDetailsTi articleState={props.articleState} articleCode={props.articleCode} />
         </div>
       )}
@@ -2452,7 +2503,7 @@ function renderSurfaceUnitLabel(label: React.ReactNode): React.ReactNode {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'baseline', whiteSpace: 'nowrap', lineHeight: 1.15 }}>
       <span>{main}</span>
-      <span style={{ fontSize: '0.72em', fontWeight: 'inherit', marginLeft: 3, lineHeight: 1 }}>{unit}</span>
+      <span style={{ fontSize: '12px', fontWeight: 'inherit', marginLeft: 3, lineHeight: 1 }}>{unit}</span>
     </span>
   )
 }
@@ -4765,6 +4816,7 @@ function NuovaPraticaForm (p: {
 
   const [npTab, setNpTab] = React.useState<'dati_generali' | 'trasgressore' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima'>(() => getRequestedEditSection({ skipUrl: true }) || 'trasgressore')
   const [openNorma3Article, setOpenNorma3Article] = React.useState('')
+  const [openFixedArticle, setOpenFixedArticle] = React.useState('')
   const [isExternalNavMode, setIsExternalNavMode] = React.useState<boolean>(true)
   const skipNpTabSyncRef = React.useRef(false)
   const tabResetFirstRef = React.useRef(true)
@@ -4793,7 +4845,7 @@ function NuovaPraticaForm (p: {
       resizeObserver?.disconnect()
       window.removeEventListener('resize', measure)
     }
-  }, [npTab])
+  }, [npTab, openNorma3Article, openFixedArticle])
 
   // Pulisci solo le richieste one-shot, conservando l'eventuale scheda richiesta in apertura.
   React.useEffect(() => {
@@ -8019,7 +8071,7 @@ ${e?.message || String(e)}`
     return raw
   }
 
-  const selectedNorma3TextStyle: React.CSSProperties = { color: '#374151', fontWeight: 400, opacity: 1 }
+  const selectedNorma3TextStyle: React.CSSProperties = { color: '#1f2937', fontWeight: 500, opacity: 1 }
 
   const mapPointEditDisabled = saving || isReadOnly || isRitAgrTecLimitedEdit
 
@@ -8080,11 +8132,11 @@ ${e?.message || String(e)}`
 
   const norma3ReadonlyTextStyle = (selected: boolean): React.CSSProperties => {
     if (isReadOnly || isRitAgrTecLimitedEdit) {
-      return { color: String(formStyle.fieldDisabledColor || '#1f2937'), fontWeight: 400, opacity: 1 }
+      return { color: String(formStyle.fieldDisabledColor || '#1f2937'), fontWeight: 500, opacity: 1 }
     }
     return {
-      color: selected ? selectedNorma3TextStyle.color : '#334155',
-      fontWeight: selected ? selectedNorma3TextStyle.fontWeight : 400,
+      color: selected ? selectedNorma3TextStyle.color : '#1f2937',
+      fontWeight: selected ? selectedNorma3TextStyle.fontWeight : 500,
       opacity: selected ? selectedNorma3TextStyle.opacity : 1
     }
   }
@@ -8409,10 +8461,14 @@ ${e?.message || String(e)}`
               checkbox={checkbox}
               disabled={disabled}
               textStyle={disabled ? { color: String(formStyle.fieldDisabledColor || '#1f2937'), fontWeight: 400, opacity: 1 } : {
-                color: active ? selectedNorma3TextStyle.color : '#334155',
-                fontWeight: active ? selectedNorma3TextStyle.fontWeight : 400,
+                color: active ? selectedNorma3TextStyle.color : '#1f2937',
+                fontWeight: active ? selectedNorma3TextStyle.fontWeight : 500,
                 opacity: active ? selectedNorma3TextStyle.opacity : 1
               }}
+              open={openFixedArticle === value}
+              showToggle={false}
+              titleToggles={false}
+              plainHeader
             />
           )
         }
@@ -8473,9 +8529,97 @@ ${e?.message || String(e)}`
             {required ? '●' : '—'}
           </span>
         )
+        const regolamentoRefColumnWidth = 110
+        const violazioneFieldColumnWidth = 155
+        const violazioneGridGap = 10
+        const violazioneHalfGridGap = violazioneGridGap / 2
+        const regolamentoRefCellStyle: React.CSSProperties = {
+          minHeight: formStyle.fieldHeight,
+          border: `${Number(REGOLAMENTO_VIOLATA_STYLE.borderWidth || 1)}px solid #bfdbfe`,
+          background: '#eff6ff',
+          borderRadius: 7,
+          padding: '0 8px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxSizing: 'border-box',
+          color: '#475569',
+          fontSize: formStyle.norma3FontSize,
+          fontWeight: 400,
+          whiteSpace: 'nowrap'
+        }
+        const regolamentoRefButton = (
+          articleCode: string,
+          open: boolean,
+          onOpenChange: (open: boolean) => void,
+          extraStyle?: React.CSSProperties,
+          extendLeftPx = 0,
+          extensionAnchor: 'centered' | 'right' = 'centered'
+        ) => {
+          const buttonShiftPx = extendLeftPx
+            ? (extensionAnchor === 'right' ? extendLeftPx : extendLeftPx / 2)
+            : 0
+          return (
+            <button
+              type='button'
+              onClick={() => onOpenChange(!open)}
+              aria-expanded={open}
+              title={open ? 'Nascondi testo regolamento' : 'Mostra testo regolamento'}
+              style={{
+                ...regolamentoRefCellStyle,
+                ...extraStyle,
+                position: 'relative',
+                width: extraStyle?.width ?? '100%',
+                margin: extraStyle?.margin,
+                transform: buttonShiftPx ? `translateX(${-buttonShiftPx}px)` : undefined,
+                fontFamily: 'inherit',
+                cursor: 'pointer'
+              }}
+            >
+              <span style={{ position: 'absolute', left: 8 + extendLeftPx, top: '50%', transform: 'translateY(-50%)', color: REGOLAMENTO_VIOLATA_STYLE.arrowColor, fontSize: 11, fontWeight: 900, lineHeight: 1 }}>{open ? '▼' : '▶'}</span>
+              <span style={{ width: '100%', textAlign: 'center', transform: extendLeftPx ? `translateX(${extendLeftPx / 2}px)` : undefined }}>Art. {normalizeArtCode(articleCode)}</span>
+            </button>
+          )
+        }
+        const regolamentoRefField = (articleCode: string, open: boolean, onOpenChange: (open: boolean) => void, labelFontSize = formStyle.labelFontSize) => {
+          const extendLeftPx = 8
+          return (
+            <div style={{ minWidth: 0 }}>
+              <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: labelFontSize, fontWeight: 700, width: `calc(100% + ${extendLeftPx}px)`, transform: `translateX(${-extendLeftPx}px)`, textAlign: 'center', whiteSpace: 'nowrap' }}>Rif. regolamento</div>
+              {regolamentoRefButton(
+                articleCode,
+                open,
+                onOpenChange,
+                { width: `calc(100% + ${extendLeftPx}px)` },
+                extendLeftPx,
+                'right'
+              )}
+            </div>
+          )
+        }
+        const regolamentoRefTableCell = (articleCode: string, open: boolean, onOpenChange: (open: boolean) => void) => {
+          const extendLeftPx = 8
+          return regolamentoRefButton(
+            articleCode,
+            open,
+            onOpenChange,
+            { width: regolamentoRefColumnWidth + extendLeftPx, margin: '0 auto' },
+            extendLeftPx
+          )
+        }
+
         const renderNorma3Rows = () => {
-          const norma3IndicatorColumnWidth = formStyle.norma3GradeColumnWidth
-          const gridColumns = `minmax(300px, 1fr) ${norma3IndicatorColumnWidth}px ${norma3IndicatorColumnWidth}px ${norma3IndicatorColumnWidth}px ${formStyle.norma3GradeColumnWidth}px`
+          // Solo le quattro colonne di requisito mantengono l'aspetto tabellare.
+          // Violazione e riferimento al regolamento restano allineati ai campi superiori,
+          // ma sono resi come contenuto della card e non come colonne della tabella.
+          const leftColumnWidth = `minmax(${170 + violazioneHalfGridGap}px, 1fr)`
+          // Mantiene fermo il bordo sinistro di Rif. regolamento e porta il bordo destro
+          // sulla stessa verticale in cui, nelle sezioni superiori, inizia Tipo di abuso.
+          // I 5 px aggiunti qui vengono recuperati dalla prima colonna della tabella requisiti,
+          // così il bordo destro complessivo del blocco resta invariato.
+          const refColumnWidth = `${regolamentoRefColumnWidth + violazioneGridGap + violazioneHalfGridGap}px`
+          const reqGridColumns = `${violazioneFieldColumnWidth + violazioneHalfGridGap}px ${violazioneFieldColumnWidth + violazioneGridGap}px ${violazioneFieldColumnWidth + violazioneGridGap}px ${violazioneFieldColumnWidth + violazioneHalfGridGap}px`
+          const gridColumns = `${leftColumnWidth} ${refColumnWidth} max-content`
           const reqHeaderStyle: React.CSSProperties = {
             ...editMutedHeaderStyle,
             marginBottom: 0,
@@ -8498,13 +8642,16 @@ ${e?.message || String(e)}`
             boxSizing: 'border-box'
           }
           return (
-            <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', background: '#f8fbff', display: 'grid', gap: formStyle.norma3RowGap }}>
-              <div style={{ display: 'grid', gridTemplateColumns: gridColumns, gap: 0, background: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
-                <div style={{ ...editMutedHeaderStyle, marginBottom: 0, padding: '6px 8px', display: 'flex', alignItems: 'center' }}>Violazione</div>
-                <div style={reqHeaderStyle}>Punto mappa</div>
-                <div style={reqHeaderStyle} title='Nota spese / rimborso / risarcimento'>Nota spese</div>
-                <div style={reqHeaderStyle}>Gravità</div>
-                <div style={reqHeaderStyle}>Grado</div>
+            <div style={{ display: 'grid', gap: formStyle.norma3RowGap, background: 'transparent' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: gridColumns, gap: 0, alignItems: 'stretch' }}>
+                <div style={{ padding: '6px 8px', background: '#e5f2ff' }} />
+                <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: violazioneLabelFontSize, fontWeight: 700, width: 'calc(100% + 8px)', transform: 'translateX(-8px)', padding: '6px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap', background: '#e5f2ff', boxSizing: 'border-box' }}>Rif. regolamento</div>
+                <div style={{ display: 'grid', gridTemplateColumns: reqGridColumns, border: '1px solid #e5e7eb', borderRadius: '8px 8px 0 0', overflow: 'hidden', background: '#f8fafc' }}>
+                  <div style={{ ...reqHeaderStyle, borderLeft: 0 }}>Punto mappa</div>
+                  <div style={reqHeaderStyle} title='Nota spese / rimborso / risarcimento'>Nota spese</div>
+                  <div style={reqHeaderStyle}>Gravità</div>
+                  <div style={reqHeaderStyle}>Grado</div>
+                </div>
               </div>
               {CHOICES.norma3.map((o, idx) => {
                 const art = normalizeArtCode(o.v)
@@ -8529,6 +8676,8 @@ ${e?.message || String(e)}`
                       ? reqCheckCell(true, 'Richiede valorizzazione del grado')
                       : emptyGradeCell)
                 const rowBg = idx % 2 === 0 ? '#ffffff' : '#f7fbff'
+                const upperSectionBg = '#e5f2ff'
+                const upperSectionBorderColor = '#c5dcf2'
                 const articleOpen = openNorma3Article === o.v
                 return (
                   <React.Fragment key={o.v}>
@@ -8536,11 +8685,10 @@ ${e?.message || String(e)}`
                       display: 'grid',
                       gridTemplateColumns: gridColumns,
                       minHeight: formStyle.fieldHeight,
-                      borderBottom: articleOpen ? 0 : '1px solid #edf2f7',
-                      background: rowBg,
+                      background: 'transparent',
                       alignItems: 'stretch'
                     }}>
-                      <div style={{ padding: 0, minWidth: 0, display: 'flex', alignItems: 'stretch' }}>
+                      <div style={{ padding: '0 5px 0 0', minWidth: 0, display: 'flex', alignItems: 'stretch', boxSizing: 'border-box', background: upperSectionBg, borderLeft: `1px solid ${upperSectionBorderColor}`, borderTop: idx === 0 ? `1px solid ${upperSectionBorderColor}` : 0, borderBottom: `1px solid ${upperSectionBorderColor}` }}>
                         <RegolamentoChoiceToggleTi
                           articleState={regolamentoArticoliState}
                           articleCode={o.v}
@@ -8551,19 +8699,27 @@ ${e?.message || String(e)}`
                           open={articleOpen}
                           onOpenChange={nextOpen => setOpenNorma3Article(nextOpen ? o.v : '')}
                           inlineDetails={false}
+                          showToggle={false}
+                          titleToggles={false}
+                          plainHeader
                         />
                       </div>
-                      <div style={reqCellStyle}>
-                        {reqCheckCell(requiresPoint, 'Richiede punto in mappa')}
+                      <div style={{ padding: 0, minHeight: formStyle.fieldHeight, display: 'flex', alignItems: 'center', boxSizing: 'border-box', background: upperSectionBg, borderTop: idx === 0 ? `1px solid ${upperSectionBorderColor}` : 0, borderBottom: `1px solid ${upperSectionBorderColor}` }}>
+                        {regolamentoRefTableCell(o.v, articleOpen, nextOpen => setOpenNorma3Article(nextOpen ? o.v : ''))}
                       </div>
-                      <div style={reqCellStyle}>
-                        {reqCheckCell(hasNotaSpese, 'Richiede nota spese / rimborso / risarcimento')}
-                      </div>
-                      <div style={reqCellStyle}>
-                        {reqCheckCell(hasGrade, 'Richiede grado di gravità')}
-                      </div>
-                      <div style={{ borderLeft: '1px solid #e5e7eb', padding: '0 6px', minHeight: formStyle.fieldHeight, display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}>
-                        {gradeNode}
+                      <div style={{ display: 'grid', gridTemplateColumns: reqGridColumns, borderLeft: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb', borderRadius: idx === CHOICES.norma3.length - 1 ? '0 0 8px 8px' : 0, overflow: 'hidden' }}>
+                        <div style={{ ...reqCellStyle, borderLeft: 0, background: rowBg }}>
+                          {reqCheckCell(requiresPoint, 'Richiede punto in mappa')}
+                        </div>
+                        <div style={{ ...reqCellStyle, background: rowBg }}>
+                          {reqCheckCell(hasNotaSpese, 'Richiede nota spese / rimborso / risarcimento')}
+                        </div>
+                        <div style={{ ...reqCellStyle, background: rowBg }}>
+                          {reqCheckCell(hasGrade, 'Richiede grado di gravità')}
+                        </div>
+                        <div style={{ borderLeft: '1px solid #e5e7eb', padding: '0 6px', minHeight: formStyle.fieldHeight, display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box', background: rowBg }}>
+                          {gradeNode}
+                        </div>
                       </div>
                     </div>
                     {articleOpen && (
@@ -8591,10 +8747,11 @@ ${e?.message || String(e)}`
         const art17SecondValue = art17VarSelected ? g('sup_irrigata_art17_1') : (art17RinSelected ? '0' : '')
         const art17SurfaceEnabled = art17Selected && !!art17tipo
 
-        const narrowSurfaceCol = 'minmax(145px, 155px)'
-        const wideSurfaceCol = 'minmax(135px, 150px)'
-        const termsGridColumns = `minmax(270px, 1fr) ${narrowSurfaceCol} ${narrowSurfaceCol} ${wideSurfaceCol}`
-        const art15GridColumns = `minmax(250px, 1fr) minmax(135px, 155px) minmax(125px, 145px) ${wideSurfaceCol} ${wideSurfaceCol}`
+        // I quattro campi Art. 15 usano tutti la larghezza del più largo della base (155 px).
+        // Le sezioni Art. 16 e Art. 17 riusano esattamente le stesse quattro fasce verticali.
+        const commonViolationFieldCol = `${violazioneFieldColumnWidth}px`
+        const termsGridColumns = `minmax(170px, 1fr) ${regolamentoRefColumnWidth}px ${commonViolationFieldCol} ${commonViolationFieldCol} ${commonViolationFieldCol} ${commonViolationFieldCol}`
+        const art15GridColumns = termsGridColumns
 
         const art15ChoiceBox = () => {
           const active = art15Selected
@@ -8629,11 +8786,15 @@ ${e?.message || String(e)}`
               title='Prelievo abusivo d’acqua'
               checkbox={checkbox}
               disabled={disabled}
-              textStyle={disabled ? { color: String(formStyle.fieldDisabledColor || '#1f2937'), fontWeight: 400, opacity: 1 } : {
+              textStyle={disabled ? { color: String(formStyle.fieldDisabledColor || '#1f2937'), fontWeight: 500, opacity: 1 } : {
                 color: active ? selectedNorma3TextStyle.color : '#334155',
-                fontWeight: active ? selectedNorma3TextStyle.fontWeight : 400,
+                fontWeight: active ? selectedNorma3TextStyle.fontWeight : 500,
                 opacity: active ? selectedNorma3TextStyle.opacity : 1
               }}
+              open={openFixedArticle === 'Art15'}
+              showToggle={false}
+              titleToggles={false}
+              plainHeader
             />
           )
         }
@@ -8643,42 +8804,56 @@ ${e?.message || String(e)}`
           Number(formStyle.fieldFontSize) || 13,
           Number(formStyle.norma3FontSize) || 12
         )
+        const violazioneLabelFontSize = 14.5
+        const upperViolationLabelFontSize = violazioneLabelFontSize
+        const upperViolationFormStyle = { ...formStyle, labelFontSize: violazioneLabelFontSize }
+        const rightViolationFormStyle = { ...formStyle, labelFontSize: violazioneLabelFontSize }
 
         const leftColumn = (
           <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0, minHeight: '100%', gridTemplateRows: 'auto auto minmax(0, 1fr)' }}>
             {renderEditCard('Prelievo abusivo d’acqua',
-              <div data-regolamento-expand-host='true' style={{ display: 'grid', gridTemplateColumns: art15GridColumns, gap: 10, alignItems: 'start', minWidth: 0 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
-                  {art15ChoiceBox()}
+              <FormStyleCtx.Provider value={upperViolationFormStyle}>
+                <div data-regolamento-expand-host='true' style={{ display: 'grid', gridTemplateColumns: art15GridColumns, gap: 10, alignItems: 'start', minWidth: 0 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: upperViolationLabelFontSize, visibility: 'hidden' }}>Violazione</div>
+                    {art15ChoiceBox()}
+                  </div>
+                  {regolamentoRefField('Art15', openFixedArticle === 'Art15', nextOpen => setOpenFixedArticle(nextOpen ? 'Art15' : ''), upperViolationLabelFontSize)}
+                  {selectField('tipo_abuso', 'Tipo di abuso', tipoAbuso, v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }, CHOICES.tipo_abuso, art15Selected, 'Tipo di abuso da selezionare')}
+                  {fieldNode('norma15_sel', 'Occorrenza')}
+                  {surfaceTextField('sup_dichiarata_art15', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art15'), v => set('sup_dichiarata_art15', v), art15SupEnabled, art15SupDichLocked ? '0' : undefined, 'Superficie dichiarata da valorizzare')}
+                  {surfaceTextField('sup_irrigata_art15', 'Sup. irrigata (ha.a.ca)', g('sup_irrigata_art15'), v => set('sup_irrigata_art15', v), art15SupEnabled, undefined, 'Superficie irrigata da valorizzare')}
                 </div>
-                {selectField('tipo_abuso', 'Tipo di abuso', tipoAbuso, v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }, CHOICES.tipo_abuso, art15Selected, 'Tipo di abuso da selezionare')}
-                {fieldNode('norma15_sel', 'Occorrenza')}
-                {surfaceTextField('sup_dichiarata_art15', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art15'), v => set('sup_dichiarata_art15', v), art15SupEnabled, art15SupDichLocked ? '0' : undefined, 'Superficie dichiarata da valorizzare')}
-                {surfaceTextField('sup_irrigata_art15', 'Sup. irrigata (ha.a.ca)', g('sup_irrigata_art15'), v => set('sup_irrigata_art15', v), art15SupEnabled, undefined, 'Superficie irrigata da valorizzare')}
-              </div>
+              </FormStyleCtx.Provider>
             )}
 
             {renderEditCard('Inosservanza termini presentazione comunicazioni',
-              <div style={{ display: 'grid', gap: 8 }}>
-                <div data-regolamento-expand-host='true' style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
-                  <div style={{ gridColumn: '1 / span 2' }}>
-                    <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
-                    {choiceBox('Art16', 'Presentazione tardiva comunicazione di irrigazione')}
+              <FormStyleCtx.Provider value={upperViolationFormStyle}>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <div data-regolamento-expand-host='true' style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
+                    <div>
+                      <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: upperViolationLabelFontSize, visibility: 'hidden' }}>Violazione</div>
+                      {choiceBox('Art16', 'Presentazione tardiva comunicazione di irrigazione')}
+                    </div>
+                    {regolamentoRefField('Art16', openFixedArticle === 'Art16', nextOpen => setOpenFixedArticle(nextOpen ? 'Art16' : ''), upperViolationLabelFontSize)}
+                    <div />
+                    <div />
+                    {surfaceTextField('sup_dichiarata_art16', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art16'), v => set('sup_dichiarata_art16', v), art16Selected, undefined, 'Superficie dichiarata da valorizzare')}
+                    {surfaceTextField('sup_irrigata_art16', 'Sup. irrigata (ha.a.ca)', '0', () => {}, art16Selected, '0')}
                   </div>
-                  {surfaceTextField('sup_dichiarata_art16', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art16'), v => set('sup_dichiarata_art16', v), art16Selected, undefined, 'Superficie dichiarata da valorizzare')}
-                  {surfaceTextField('sup_irrigata_art16', 'Sup. irrigata (ha.a.ca)', '0', () => {}, art16Selected, '0')}
-                </div>
-                <div data-regolamento-expand-host='true' style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
-                  <div>
-                    <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
-                    {choiceBox('Art17', 'Presentazione tardiva comunicazione di variazione o di rinuncia')}
+                  <div data-regolamento-expand-host='true' style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
+                    <div>
+                      <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: upperViolationLabelFontSize, visibility: 'hidden' }}>Violazione</div>
+                      {choiceBox('Art17', 'Presentazione tardiva comunicazione di variazione o di rinuncia')}
+                    </div>
+                    {regolamentoRefField('Art17', openFixedArticle === 'Art17', nextOpen => setOpenFixedArticle(nextOpen ? 'Art17' : ''), upperViolationLabelFontSize)}
+                    <div />
+                    {selectField('art17_tipo', 'Tipo comunicazione', art17tipo, v => set('art17_tipo', v), CHOICES.art17_tipo, art17Selected, 'Tipo di comunicazione da selezionare')}
+                    {surfaceTextField(art17DichField, 'Sup. dichiarata (ha.a.ca)', art17DichValue, v => set(art17DichField, v), art17SurfaceEnabled, undefined, 'Superficie dichiarata da valorizzare')}
+                    {surfaceTextField(art17SecondField, art17SecondLabel, art17SecondValue, v => set(art17SecondField, v), art17SurfaceEnabled, art17RinSelected ? '0' : undefined, 'Superficie da valorizzare')}
                   </div>
-                  {selectField('art17_tipo', 'Tipo comunicazione', art17tipo, v => set('art17_tipo', v), CHOICES.art17_tipo, art17Selected, 'Tipo di comunicazione da selezionare')}
-                  {surfaceTextField(art17DichField, 'Sup. dichiarata (ha.a.ca)', art17DichValue, v => set(art17DichField, v), art17SurfaceEnabled, undefined, 'Superficie dichiarata da valorizzare')}
-                  {surfaceTextField(art17SecondField, art17SecondLabel, art17SecondValue, v => set(art17SecondField, v), art17SurfaceEnabled, art17RinSelected ? '0' : undefined, 'Superficie da valorizzare')}
                 </div>
-              </div>
+              </FormStyleCtx.Provider>
             )}
 
             {renderEditCard('Altre violazioni', renderNorma3Rows())}
@@ -8686,15 +8861,17 @@ ${e?.message || String(e)}`
         )
 
         const rightColumn = (
-          <section style={{ ...editCardStyle, minHeight: '100%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-            <div style={editCardHeaderStyle}><span>Descrizione e circostanze</span></div>
-            <div style={{ ...editCardBodyStyle, flex: '1 1 auto', display: 'grid', gridTemplateRows: 'auto auto auto 1fr', gap: 7, alignContent: 'start' }}>
-              {textAreaField('descrizione_fatti', 'Descrizione dettagliata della violazione', formStyle.violazioneDescrizioneRows)}
-              {textAreaField('circostanze', 'Circostanze rilevanti', formStyle.violazioneDescrizioneRows)}
-              {fieldGrid(`${formStyle.norma3GradeColumnWidth}px`, ['presenza_trasgressore'], 7)}
-              <div />
-            </div>
-          </section>
+          <FormStyleCtx.Provider value={rightViolationFormStyle}>
+            <section style={{ ...editCardStyle, minHeight: '100%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+              <div style={editCardHeaderStyle}><span>Descrizione e circostanze</span></div>
+              <div style={{ ...editCardBodyStyle, flex: '1 1 auto', display: 'grid', gridTemplateRows: 'auto auto auto 1fr', gap: 7, alignContent: 'start' }}>
+                {textAreaField('descrizione_fatti', 'Descrizione dettagliata della violazione', formStyle.violazioneDescrizioneRows)}
+                {textAreaField('circostanze', 'Circostanze rilevanti', formStyle.violazioneDescrizioneRows)}
+                {fieldGrid(`${formStyle.norma3GradeColumnWidth}px`, ['presenza_trasgressore'], 7)}
+                <div />
+              </div>
+            </section>
+          </FormStyleCtx.Provider>
         )
 
         const splitterStyle: React.CSSProperties = {

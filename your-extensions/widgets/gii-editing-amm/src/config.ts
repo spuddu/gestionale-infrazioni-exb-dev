@@ -217,6 +217,9 @@ export interface Config {
   showRoleBox: boolean
   showWorkflowBox: boolean
 
+  // Strumenti disponibili esclusivamente durante test e collaudo.
+  enablePagoPaTestGenerator: boolean
+
   // Tabelle consultive per parametri sanzionatori e riferimenti regolamentari.
   parametriSanzioniUrl: string
   regolamentoArticoliUrl: string
@@ -446,6 +449,8 @@ export const defaultConfig: Config = {
 
   showRoleBox: true,
   showWorkflowBox: true,
+
+  enablePagoPaTestGenerator: false,
 
   parametriSanzioniUrl: '',
   regolamentoArticoliUrl: '',
