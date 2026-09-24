@@ -192,6 +192,7 @@ export default function AnteprimaPdfViewer (props: Props): any {
   const [internalLoading, setInternalLoading] = React.useState(false)
   const [internalError, setInternalError] = React.useState<string | null>(null)
   const [fitReady, setFitReady] = React.useState(false)
+  const [fitMeasured, setFitMeasured] = React.useState(false)
   const [twoPageView, setTwoPageView] = React.useState(false)
   const [isPanning, setIsPanning] = React.useState(false)
 
@@ -247,6 +248,7 @@ export default function AnteprimaPdfViewer (props: Props): any {
     setPageCount(0)
     setPageNumber(1)
     setInternalError(null)
+    setFitMeasured(false)
 
     if (!src) {
       setInternalLoading(false)
@@ -286,6 +288,7 @@ export default function AnteprimaPdfViewer (props: Props): any {
         setPageCount(totalPages)
         setPageNumber(1)
         setFitReady(false)
+        setFitMeasured(false)
         setPdfDoc(doc)
       } catch (ex: any) {
         if (!cancelled) setInternalError(ex?.message || String(ex))
@@ -301,10 +304,10 @@ export default function AnteprimaPdfViewer (props: Props): any {
     }
   }, [url])
 
-  const computeFitBaseZoom = React.useCallback(async (modeOverride?: 'height' | 'width'): Promise<number> => {
+  const computeFitBaseZoom = React.useCallback(async (modeOverride?: 'height' | 'width'): Promise<number | null> => {
     const doc = pdfDocRef.current || pdfDoc
     const host = pageHostRef.current
-    if (!doc || !host) return 100
+    if (!doc || !host) return null
 
     try {
       const mode = modeOverride || fitMode
@@ -319,11 +322,16 @@ export default function AnteprimaPdfViewer (props: Props): any {
       const maxHeight = viewports.reduce((max, vp) => Math.max(max, vp.height), 0)
 
       const rect = host.getBoundingClientRect()
+      // Durante il primo mount dei pannelli Experience Builder il viewer può essere
+      // misurato per un frame con dimensioni quasi nulle. Non trasformiamo quella
+      // misura transitoria in uno zoom di base definitivo: aspettiamo il layout reale.
+      if (rect.width < 120 || rect.height < 120) return null
+
       const cs = window.getComputedStyle(host)
       const padX = (parseFloat(cs.paddingLeft || '0') || 0) + (parseFloat(cs.paddingRight || '0') || 0)
       const padY = (parseFloat(cs.paddingTop || '0') || 0) + (parseFloat(cs.paddingBottom || '0') || 0)
-      const availableWidth = Math.max(80, rect.width - padX)
-      const availableHeight = Math.max(80, rect.height - padY)
+      const availableWidth = Math.max(1, rect.width - padX)
+      const availableHeight = Math.max(1, rect.height - padY)
 
       // Nel nostro viewer 100% è relativo alla modalità scelta:
       // - altezza: pagina adattata alla massima altezza visibile;
@@ -332,19 +340,24 @@ export default function AnteprimaPdfViewer (props: Props): any {
       const fitByWidth = (availableWidth / Math.max(1, totalWidth)) * 100
       return Math.max(1, Math.floor(mode === 'width' ? fitByWidth : fitByHeight))
     } catch {
-      return 100
+      return null
     }
   }, [fitMode, pageNumber, pdfDoc, visiblePages])
 
   const recomputeFitBaseZoom = React.useCallback(async () => {
     const nextBase = await computeFitBaseZoom()
+    if (nextBase == null) return
     setFitBaseZoom(nextBase)
+    setFitMeasured(true)
   }, [computeFitBaseZoom])
 
   const applyFitMode = React.useCallback(async (mode: 'height' | 'width') => {
     setFitMode(mode)
     const nextBase = await computeFitBaseZoom(mode)
-    setFitBaseZoom(nextBase)
+    if (nextBase != null) {
+      setFitBaseZoom(nextBase)
+      setFitMeasured(true)
+    }
     setZoom(100)
     pageScrollAfterRenderRef.current = 'top'
     window.setTimeout(() => {
@@ -357,21 +370,45 @@ export default function AnteprimaPdfViewer (props: Props): any {
 
   React.useEffect(() => {
     if (!pdfDoc || effectiveLoading || effectiveError) return
-    const t = window.setTimeout(() => { void recomputeFitBaseZoom() }, 0)
-    return () => { window.clearTimeout(t) }
-  }, [effectiveError, effectiveLoading, pdfDoc, recomputeFitBaseZoom, visiblePages])
 
-  React.useEffect(() => {
-    if (!pdfDoc) return
-    const onResize = () => { void recomputeFitBaseZoom() }
-    window.addEventListener('resize', onResize)
-    return () => { window.removeEventListener('resize', onResize) }
-  }, [pdfDoc, recomputeFitBaseZoom])
+    let raf1 = 0
+    let raf2 = 0
+    let timer = 0
+    let resizeObserver: ResizeObserver | null = null
+
+    const scheduleMeasure = () => {
+      if (raf1) window.cancelAnimationFrame(raf1)
+      if (raf2) window.cancelAnimationFrame(raf2)
+      raf1 = window.requestAnimationFrame(() => {
+        raf2 = window.requestAnimationFrame(() => { void recomputeFitBaseZoom() })
+      })
+    }
+
+    // Due frame + un controllo ritardato coprono il primo layout del tab/pannello,
+    // che in Experience Builder può stabilizzarsi dopo il mount del viewer.
+    scheduleMeasure()
+    timer = window.setTimeout(scheduleMeasure, 140)
+
+    const host = pageHostRef.current
+    if (host && typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => { scheduleMeasure() })
+      resizeObserver.observe(host)
+    }
+
+    window.addEventListener('resize', scheduleMeasure)
+    return () => {
+      if (timer) window.clearTimeout(timer)
+      if (raf1) window.cancelAnimationFrame(raf1)
+      if (raf2) window.cancelAnimationFrame(raf2)
+      try { resizeObserver?.disconnect() } catch {}
+      window.removeEventListener('resize', scheduleMeasure)
+    }
+  }, [effectiveError, effectiveLoading, pdfDoc, recomputeFitBaseZoom, visiblePages])
 
   React.useEffect(() => {
     const doc = pdfDocRef.current || pdfDoc
     const canvases = [canvasRef.current, canvasSecondRef.current]
-    if (!doc || !canvases[0] || effectiveLoading || effectiveError) return
+    if (!doc || !canvases[0] || effectiveLoading || effectiveError || !fitMeasured) return
 
     let cancelled = false
     ;(async () => {
@@ -426,7 +463,7 @@ export default function AnteprimaPdfViewer (props: Props): any {
       try { renderTaskRef.current.forEach(task => task?.cancel?.()) } catch {}
       renderTaskRef.current = []
     }
-  }, [clampZoom, effectiveError, effectiveLoading, fitBaseZoom, pdfDoc, visiblePages, zoom])
+  }, [clampZoom, effectiveError, effectiveLoading, fitBaseZoom, fitMeasured, pdfDoc, visiblePages, zoom])
 
   React.useEffect(() => {
     return () => {

@@ -3907,11 +3907,39 @@ function protocolloFriendlyPdfName (item: ProtocolloFascicoloManifestItem, fallb
 }
 
 function normalizeProtocolloReturnFileName (value: any): string {
-  return String(value || '')
+  let name = String(value || '')
     .replace(/^.*[\\/]/, '')
     .normalize('NFC')
     .trim()
     .toLowerCase()
+    .replace(/\.pdf$/i, '')
+
+  // Il Protocollo può restituire lo stesso documento con un nome diverso da
+  // quello allegato all'e-mail: prefisso d'ordine, suffisso _protocollato,
+  // contatore di copia di Windows oppure prefisso tecnico allegato_<id>_.
+  // Questi elementi non fanno parte dell'identità del documento.
+  name = name.replace(/\s*\(\d+\)(?=(?:[\s._-]|$))/g, '')
+  name = name.replace(/(?:[\s._-]+protocollat[oa])$/i, '')
+
+  // Alcuni nomi possono avere più prefissi ordinali annidati, ad esempio
+  // 03_01_rapporto_.... Li rimuoviamo tutti.
+  let previous = ''
+  while (previous !== name) {
+    previous = name
+    name = name.replace(/^\d{1,3}[\s._-]+/, '')
+  }
+
+  // Gli allegati tecnici possono essere rinominati dal gestionale come
+  // allegato_<attachmentId>_<nome originale>. Il relativo id è solo metadata.
+  name = name.replace(/^allegato[\s._-]*\d+[\s._-]+/, '')
+
+  // Spazi, underscore, trattini e altri separatori grafici non devono rendere
+  // diversi due nomi che identificano lo stesso elaborato.
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
 }
 
 
@@ -4060,84 +4088,128 @@ async function replaceBozzaDeterminazionePdfAttachment (layer: any, oid: number,
   if (!oid || !file) return []
   if (!layerUrl) throw new Error('Documento non disponibile.')
 
-  // Prima di aggiungere una nuova versione sanifichiamo eventuali duplicati
-  // preesistenti, conservando la copia più recente. In questo modo un vecchio
-  // errore non viene moltiplicato dalle sostituzioni successive.
-  let before = await queryAmmAttachments(layer, oid, layerUrl)
-  let beforePdfs = before.filter(isGiiBozzaDeterminazionePdfAttachment)
-  if (beforePdfs.length > 1) {
-    const keepExisting = pickLatestGiiAttachment(beforePdfs as any[]) as AmmAttachmentInfo | null
-    if (keepExisting) {
-      for (const att of beforePdfs) {
-        if (Number(att.id) === Number(keepExisting.id)) continue
-        await deleteAmmAttachment(layer, oid, Number(att.id), layerUrl)
-      }
-      before = await queryAmmAttachments(layer, oid, layerUrl)
-      beforePdfs = before.filter(isGiiBozzaDeterminazionePdfAttachment)
-      if (beforePdfs.length > 1) throw new Error('Impossibile ripulire le copie duplicate del PDF della Determinazione.')
-    }
-  }
-
+  // La sostituzione deve essere conservativa: finché la nuova copia non è stata
+  // identificata con certezza non tocchiamo mai quella già presente. Inoltre,
+  // dopo avere eliminato la vecchia copia non cancelliamo più la nuova in caso
+  // di una rilettura temporaneamente incoerente del layer: gli allegati ArcGIS
+  // possono richiedere qualche istante prima di riflettere add/delete appena
+  // eseguiti.
+  const before = await queryAmmAttachments(layer, oid, layerUrl)
+  const beforePdfIds = new Set(
+    before
+      .filter(isGiiBozzaDeterminazionePdfAttachment)
+      .map(att => Number(att.id))
+      .filter(id => Number.isFinite(id) && id > 0)
+  )
   const beforeIds = new Set(before.map(att => Number(att.id)).filter(id => Number.isFinite(id) && id > 0))
+
   const fileCreatedAt = Number((file as any)?.lastModified) || Date.now()
   const addedIds = await addAmmAttachments(layer, oid, [file], layerUrl, bozzaPdfAttachmentKeywords(fileCreatedAt, extraKeywords))
-  const afterAdd = await queryAmmAttachments(layer, oid, layerUrl)
-  const pdfAfterAdd = afterAdd.filter(isGiiBozzaDeterminazionePdfAttachment)
   const addedIdSet = new Set(addedIds.filter(id => Number.isFinite(Number(id)) && Number(id) > 0).map(id => Number(id)))
-  let keepIds = new Set<number>(Array.from(addedIdSet))
 
-  if (keepIds.size === 0) {
-    const newIds = pdfAfterAdd
+  let afterAdd: AmmAttachmentInfo[] = []
+  let newPdfIds = new Set<number>()
+  const refreshDelays = [0, 250, 500, 900]
+  for (const delayMs of refreshDelays) {
+    if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
+    afterAdd = await queryAmmAttachments(layer, oid, layerUrl)
+    const pdfs = afterAdd.filter(isGiiBozzaDeterminazionePdfAttachment)
+
+    const idsFromAddResponse = pdfs
+      .map(att => Number(att.id))
+      .filter(id => Number.isFinite(id) && id > 0 && addedIdSet.has(id))
+    if (idsFromAddResponse.length > 0) {
+      newPdfIds = new Set(idsFromAddResponse)
+      break
+    }
+
+    const idsNotPresentBefore = pdfs
       .map(att => Number(att.id))
       .filter(id => Number.isFinite(id) && id > 0 && !beforeIds.has(id))
-    keepIds = new Set(newIds)
-  }
-  if (keepIds.size === 0 && pdfAfterAdd.length > 0) {
-    const maxId = Math.max(...pdfAfterAdd.map(att => Number(att.id)).filter(id => Number.isFinite(id) && id > 0))
-    if (Number.isFinite(maxId) && maxId > 0) keepIds.add(maxId)
-  }
-
-  if (keepIds.size === 0) throw new Error('PDF caricato, ma il nuovo allegato non è stato identificato.')
-
-  try {
-    // La nuova copia sostituisce la precedente. Se una cancellazione fallisce,
-    // rimuoviamo la copia appena aggiunta: meglio conservare il documento vecchio
-    // che lasciare più PDF concorrenti nello stesso slot.
-    for (const att of afterAdd) {
-      const id = Number(att.id)
-      if (!Number.isFinite(id) || id <= 0) continue
-      if (isGiiBozzaDeterminazionePdfAttachment(att) && !keepIds.has(id)) {
-        await deleteAmmAttachment(layer, oid, id, layerUrl)
-      } else if (isGiiLegacyBozzaDeterminazioneWordAttachment(att)) {
-        await deleteAmmAttachment(layer, oid, id, layerUrl)
-      }
+    if (idsNotPresentBefore.length > 0) {
+      newPdfIds = new Set(idsNotPresentBefore)
+      break
     }
-  } catch (e) {
-    for (const id of keepIds) {
+  }
+
+  if (newPdfIds.size === 0) {
+    // La vecchia copia non è mai stata toccata. Se l'API ci ha restituito un id
+    // della nuova copia, possiamo rimuovere solo quello; altrimenti lasciamo gli
+    // allegati invariati e segnaliamo l'impossibilità di identificare l'upload.
+    for (const id of addedIdSet) {
+      if (beforeIds.has(id)) continue
       try { await deleteAmmAttachment(layer, oid, id, layerUrl) } catch {}
     }
-    throw e
+    throw new Error('PDF caricato, ma il nuovo allegato non è stato identificato. La Determinazione precedente è stata conservata.')
   }
 
-  const finalList = await queryAmmAttachments(layer, oid, layerUrl)
-  const finalBozzaPdfs = finalList.filter(isGiiBozzaDeterminazionePdfAttachment)
-  if (finalBozzaPdfs.length !== 1) {
-    if (finalBozzaPdfs.length > 1) {
-      for (const id of keepIds) {
-        try { await deleteAmmAttachment(layer, oid, id, layerUrl) } catch {}
-      }
+  // Un singolo upload deve produrre una sola nuova Determinazione. Se il backend
+  // restituisce più candidati, conserviamo la copia più recente tra quelle nuove.
+  if (newPdfIds.size > 1) {
+    const candidates = afterAdd.filter(att => newPdfIds.has(Number(att.id)))
+    const keepNew = pickLatestGiiAttachment(candidates as any[]) as AmmAttachmentInfo | null
+    const keepNewId = Number(keepNew?.id)
+    if (!Number.isFinite(keepNewId) || keepNewId <= 0) {
+      throw new Error('Il nuovo PDF della Determinazione non è stato identificato in modo univoco. La copia precedente non è stata rimossa.')
     }
-    throw new Error(
-      finalBozzaPdfs.length > 1
-        ? 'Sostituzione del PDF non completata: risultano ancora più copie della Determinazione. La nuova copia è stata annullata.'
-        : 'Sostituzione del PDF non completata: nella sezione Determinazione non risulta alcun PDF.'
-    )
+    for (const id of newPdfIds) {
+      if (id === keepNewId) continue
+      try { await deleteAmmAttachment(layer, oid, id, layerUrl) } catch {}
+    }
+    newPdfIds = new Set([keepNewId])
   }
-  const finalPdfId = Number(finalBozzaPdfs[0]?.id)
-  if (!Number.isFinite(finalPdfId) || !keepIds.has(finalPdfId)) {
-    throw new Error('Sostituzione del PDF non completata: il documento rimasto nello slot non corrisponde al nuovo PDF caricato.')
+
+  const keepNewId = Array.from(newPdfIds)[0]
+
+  // Solo ora, dopo avere verificato la presenza della nuova copia, rimuoviamo le
+  // vecchie Determinazioni e l'eventuale DOCX legacy. Da questo punto in avanti
+  // la nuova copia non viene mai eliminata come rollback.
+  for (const att of afterAdd) {
+    const id = Number(att.id)
+    if (!Number.isFinite(id) || id <= 0 || id === keepNewId) continue
+    if ((isGiiBozzaDeterminazionePdfAttachment(att) && beforePdfIds.has(id)) || isGiiLegacyBozzaDeterminazioneWordAttachment(att)) {
+      await deleteAmmAttachment(layer, oid, id, layerUrl)
+    }
   }
-  return finalBozzaPdfs
+
+  // La lista allegati può essere eventual-consistent. Rileggiamo più volte prima
+  // di concludere che esistano ancora duplicati. In nessun caso cancelliamo la
+  // nuova copia già verificata solo perché una query vede ancora la vecchia.
+  let finalList: AmmAttachmentInfo[] = []
+  let finalBozzaPdfs: AmmAttachmentInfo[] = []
+  for (const delayMs of [0, 250, 500, 900, 1500]) {
+    if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
+    finalList = await queryAmmAttachments(layer, oid, layerUrl)
+    finalBozzaPdfs = finalList.filter(isGiiBozzaDeterminazionePdfAttachment)
+    const hasNew = finalBozzaPdfs.some(att => Number(att.id) === keepNewId)
+    const staleOldCopies = finalBozzaPdfs.filter(att => beforePdfIds.has(Number(att.id)))
+    if (hasNew && staleOldCopies.length === 0) break
+
+    // Se il backend continua a mostrare una vecchia copia, ritentiamo la sola
+    // cancellazione della vecchia; la nuova resta sempre protetta.
+    for (const old of staleOldCopies) {
+      const oldId = Number(old.id)
+      if (!Number.isFinite(oldId) || oldId <= 0) continue
+      try { await deleteAmmAttachment(layer, oid, oldId, layerUrl) } catch {}
+    }
+  }
+
+  const finalHasNew = finalBozzaPdfs.some(att => Number(att.id) === keepNewId)
+  if (!finalHasNew) {
+    throw new Error('La nuova Determinazione non risulta disponibile dopo il caricamento. Nessun rollback distruttivo è stato eseguito: verificare gli allegati prima di riprovare.')
+  }
+
+  const remainingOldCopies = finalBozzaPdfs.filter(att => beforePdfIds.has(Number(att.id)))
+  if (remainingOldCopies.length > 0) {
+    throw new Error('La nuova Determinazione è stata acquisita, ma il sistema non ha ancora confermato la rimozione della copia precedente. Aggiornare la pratica prima di riprovare: la nuova copia è stata conservata.')
+  }
+
+  const otherNewCopies = finalBozzaPdfs.filter(att => Number(att.id) !== keepNewId)
+  if (otherNewCopies.length > 0) {
+    throw new Error('La nuova Determinazione è stata acquisita, ma risultano ancora copie duplicate. La nuova copia è stata conservata per evitare la perdita del documento.')
+  }
+
+  return finalBozzaPdfs.filter(att => Number(att.id) === keepNewId)
 }
 
 function canvasToBlobForAmmEdit (canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
@@ -7551,6 +7623,7 @@ function PostAttestazioneIaWorkSection (props: {
   const [attachmentsError, setAttachmentsError] = React.useState<string | null>(null)
   const [attachmentsErrorSection, setAttachmentsErrorSection] = React.useState<'bozza' | 'atto' | 'protocollo'>('bozza')
   const [attachmentsInfo, setAttachmentsInfo] = React.useState<string | null>(null)
+  const [determinationUploadInfo, setDeterminationUploadInfo] = React.useState<string | null>(null)
   const [protocolloImportResult, setProtocolloImportResult] = React.useState<{
     numero: string
     dataMs: number
@@ -7652,6 +7725,7 @@ function PostAttestazioneIaWorkSection (props: {
 
   React.useEffect(() => {
     setProtocolloImportResult(null)
+    setDeterminationUploadInfo(null)
   }, [oid])
 
   React.useEffect(() => {
@@ -7729,7 +7803,19 @@ function PostAttestazioneIaWorkSection (props: {
     !hasAdminValue(pickAttrCI(saved, ['notifica_data'])) &&
     !props.saving &&
     !attachmentsBusy
-  const canUploadOfficialDeterminationPdf = determinazioneUfficialeDaAcquisire || canReplaceArchivedDeterminationPdf
+  // Ripristino archivistico: se la Determinazione risulta già adottata ma il PDF GII
+  // non è più presente, IA/ADMIN devono poter ripristinare esclusivamente la copia
+  // mancante anche quando il normale editing della pratica è ormai chiuso. Il file
+  // viene accettato solo se numero e data coincidono con gli estremi già registrati;
+  // il ripristino non modifica campi, stati o workflow.
+  const canRestoreMissingDeterminationPdf =
+    (roleCode === 'IA' || roleCode === 'ADMIN') &&
+    determinazioneAdottata &&
+    attachmentsResolved &&
+    !archivedDeterminationPdf &&
+    !props.saving &&
+    !attachmentsBusy
+  const canUploadOfficialDeterminationPdf = determinazioneUfficialeDaAcquisire || canReplaceArchivedDeterminationPdf || canRestoreMissingDeterminationPdf
 
   // Un PDF già caricato chiude la fase di preparazione manuale.
   // Prima dell'approvazione restano solo Trasmetti/Elimina. Dopo l'approvazione
@@ -7915,6 +8001,20 @@ function PostAttestazioneIaWorkSection (props: {
       }))
       const contents = await Promise.all(ordered.map(entry => extractPdfVerificationContent(entry.file)))
       const protocol = extractConsensusOfficialProtocol(contents, 'left')
+      const protocolKey = `${normalizeProtocolVerificationValue(protocol.numero)}|${new Date(protocol.dataMs).toISOString().slice(0, 10)}`
+      for (let i = 0; i < ordered.length; i++) {
+        let itemProtocol: OfficialProtocolMetadata
+        try {
+          itemProtocol = extractOfficialProtocolMetadataFromContent(contents[i], 'left')
+        } catch (e: any) {
+          throw new Error(`L’elaborato “${ordered[i].file.name}” non presenta una segnatura di protocollo valida sul margine sinistro. ${String(e?.message || '')}`.trim())
+        }
+        const itemKey = `${normalizeProtocolVerificationValue(itemProtocol.numero)}|${new Date(itemProtocol.dataMs).toISOString().slice(0, 10)}`
+        if (itemKey !== protocolKey) {
+          throw new Error(`L’elaborato “${ordered[i].file.name}” riporta estremi di protocollo diversi dagli altri documenti. Nessun elaborato è stato acquisito.`)
+        }
+        assertProtocolOnEveryPdfPage(contents[i], 'left', protocol, ordered[i].file.name)
+      }
 
       // La Proposta resta il controllo documentale più forte: deve corrispondere
       // alla versione approvata già presente nel fascicolo, a parte il timbro di protocollo.
@@ -7946,10 +8046,15 @@ function PostAttestazioneIaWorkSection (props: {
         if (!Number.isFinite(sourceId) || sourceId <= 0 || !source) {
           throw new Error(`L’allegato "${entry.item.sourceAttachmentName || entry.item.fileName}" non è più disponibile nella pratica. Nessun elaborato è stato acquisito.`)
         }
-        genericSources.set(sourceId, {
-          att: source,
-          originalBlob: await fetchAmmAttachmentBlobForPdf(source, oid, layerUrl)
-        })
+        const originalBlob = await fetchAmmAttachmentBlobForPdf(source, oid, layerUrl)
+        genericSources.set(sourceId, { att: source, originalBlob })
+
+        const orderedIndex = ordered.indexOf(entry)
+        const sourceContent = await extractPdfVerificationContent(originalBlob)
+        const returnedContent = contents[orderedIndex]
+        if (sourceContent.text && returnedContent?.text && !candidateContainsSourcePdfTokens(sourceContent.text, returnedContent.text)) {
+          throw new Error(`L’allegato protocollato “${entry.item.fileName}” non corrisponde all’allegato tecnico trasmesso. Nessun elaborato è stato acquisito.`)
+        }
       }
 
       const snapshotEntries = ordered.filter(entry =>
@@ -8082,7 +8187,7 @@ function PostAttestazioneIaWorkSection (props: {
   }, [attachmentsBusy, oid, propostaUfficialeDaAcquisire, props, resolveAttachmentLayer])
 
   const uploadDeterminazioneUfficiale = React.useCallback(async (file: File | null) => {
-    if (!file || !oid || !canUploadOfficialDeterminationPdf || !props.canEdit || props.saving || attachmentsBusy) return
+    if (!file || !oid || !canUploadOfficialDeterminationPdf || (!props.canEdit && !canRestoreMissingDeterminationPdf) || props.saving || attachmentsBusy) return
     if (!/\.pdf$/i.test(String(file.name || ''))) {
       setAttachmentsError('Caricare la determinazione ufficiale in formato PDF.')
       return
@@ -8090,6 +8195,7 @@ function PostAttestazioneIaWorkSection (props: {
     setAttachmentsBusy(true)
     setAttachmentsError(null)
     setAttachmentsInfo(null)
+    setDeterminationUploadInfo(null)
     try {
       const { layer, layerUrl } = await resolveAttachmentLayer()
       const candidateContent = await extractPdfVerificationContent(file)
@@ -8100,6 +8206,19 @@ function PostAttestazioneIaWorkSection (props: {
       verifyOfficialDeterminationAgainstPractice(candidateContent.text, d, props.fields, oid)
       const meta = extractOfficialDeterminationMetadata(candidateContent.text)
       const extractedDateKey = dateInputValue(meta.dataMs)
+      const savedDeterminationNumber = String(pickAttrCI(saved, ['determinazione_numero']) || '').trim()
+      const savedDeterminationDate = dateInputValue(pickAttrCI(saved, ['determinazione_data']))
+      if (canRestoreMissingDeterminationPdf) {
+        if (!savedDeterminationNumber || !savedDeterminationDate) {
+          throw new Error('Non è possibile ripristinare il PDF: gli estremi della Determinazione adottata non risultano completi nella pratica.')
+        }
+        if (savedDeterminationNumber !== String(meta.numero).trim() || savedDeterminationDate !== extractedDateKey) {
+          throw new Error(
+            `Il PDF selezionato non corrisponde alla Determinazione adottata. Attesi n. ${savedDeterminationNumber} del ${new Date(Number(pickAttrCI(saved, ['determinazione_data']))).toLocaleDateString('it-IT')}; ` +
+            `nel documento risultano n. ${meta.numero} del ${new Date(meta.dataMs).toLocaleDateString('it-IT')}. Il ripristino non è stato eseguito.`
+          )
+        }
+      }
       // Normalizziamo anche il nome fisico dell'allegato: il file acquisito non è
       // più una bozza, anche se l'utente lo ha esportato da Word con un vecchio nome.
       const officialFile = new File(
@@ -8115,23 +8234,37 @@ function PostAttestazioneIaWorkSection (props: {
         oid,
         officialFile,
         layerUrl,
-        `official=1|officialCopy=1|officialAt=${Date.now()}|detNumber=${meta.numero}|detDate=${extractedDateKey}`
+        `official=1|officialCopy=1|officialAt=${Date.now()}|detNumber=${meta.numero}|detDate=${extractedDateKey}${canRestoreMissingDeterminationPdf ? '|restoredArchiveCopy=1' : ''}`
       )
-      // Gli estremi ufficiali sono acquisiti dalla copia PDF conforme, non digitati a mano.
-      // Il controllo al salvataggio verifica poi che questi valori non siano stati alterati
-      // rispetto ai metadati estratti e registrati nelle keywords dell'allegato.
-      props.onChange('determinazione_numero', String(meta.numero))
-      props.onChange('determinazione_data', meta.dataMs)
-      setAttachmentsInfo(`${canReplaceArchivedDeterminationPdf ? 'PDF ufficiale sostituito' : 'Determinazione ufficiale acquisita'}: n. ${meta.numero} del ${new Date(meta.dataMs).toLocaleDateString('it-IT')}. Numero e data sono stati letti automaticamente dalla copia PDF conforme${canReplaceArchivedDeterminationPdf ? '; se sono cambiati, usare Salva per aggiornare gli estremi registrati.' : '; usare Salva per registrarli e completare i controlli di unicità.'}`)
+      // Nel normale flusso gli estremi ufficiali vengono acquisiti dal PDF. Nel
+      // ripristino archivistico, invece, gli estremi già registrati sono immutabili:
+      // il PDF deve coincidere con essi e non genera alcuna modifica da salvare.
+      if (!canRestoreMissingDeterminationPdf) {
+        props.onChange('determinazione_numero', String(meta.numero))
+        props.onChange('determinazione_data', meta.dataMs)
+      }
+      const determinationMetadataChanged =
+        savedDeterminationNumber !== String(meta.numero).trim() ||
+        savedDeterminationDate !== extractedDateKey
+      const determinationFeedback = canRestoreMissingDeterminationPdf
+        ? `PDF della Determinazione ripristinato correttamente: n. ${meta.numero} del ${new Date(meta.dataMs).toLocaleDateString('it-IT')}. Il ripristino non ha modificato lo stato della pratica né gli estremi già registrati.`
+        : (canReplaceArchivedDeterminationPdf
+            ? (determinationMetadataChanged
+                ? `PDF ufficiale della Determinazione sostituito correttamente: n. ${meta.numero} del ${new Date(meta.dataMs).toLocaleDateString('it-IT')}. Gli estremi letti dal documento sono cambiati; premere Salva per registrarli nella pratica.`
+                : `PDF ufficiale della Determinazione sostituito correttamente: n. ${meta.numero} del ${new Date(meta.dataMs).toLocaleDateString('it-IT')}. Gli estremi coincidono con quelli già registrati.`)
+            : `Determinazione ufficiale acquisita correttamente: n. ${meta.numero} del ${new Date(meta.dataMs).toLocaleDateString('it-IT')}. Numero e data sono stati letti automaticamente dal documento; premere Salva per registrarli nella pratica.`)
+      setAttachmentsInfo(determinationFeedback)
+      setDeterminationUploadInfo(determinationFeedback)
       setBozzaAttachments(await queryAmmAttachments(layer, oid, layerUrl).then(allAfter => allAfter.filter(isGiiBozzaDeterminazionePdfAttachment)))
       setAttachmentsLoadedOid(oid)
       setInputKey(k => k + 1)
     } catch (e: any) {
+      setDeterminationUploadInfo(null)
       setAttachmentsError(e?.message || String(e))
     } finally {
       setAttachmentsBusy(false)
     }
-  }, [attachmentsBusy, canReplaceArchivedDeterminationPdf, canUploadOfficialDeterminationPdf, d, determinationPdfFileName, oid, props, resolveAttachmentLayer])
+  }, [attachmentsBusy, canReplaceArchivedDeterminationPdf, canRestoreMissingDeterminationPdf, canUploadOfficialDeterminationPdf, d, determinationPdfFileName, oid, props, resolveAttachmentLayer, saved])
 
   const downloadBozzaPdf = React.useCallback(async (att: AmmAttachmentInfo) => {
     if (!att || !oid || attachmentsBusy) return
@@ -8434,6 +8567,49 @@ function PostAttestazioneIaWorkSection (props: {
       const ordered = manifest.items.map(item => ({ item, file: selectedByName.get(normalizeProtocolloReturnFileName(item.fileName))! }))
       const returnedContents = await Promise.all(ordered.map(entry => extractPdfVerificationContent(entry.file)))
       const protocol = extractConsensusOfficialProtocol(returnedContents, 'right')
+      const outgoingProtocolKey = `${normalizeProtocolVerificationValue(protocol.numero)}|${new Date(protocol.dataMs).toISOString().slice(0, 10)}`
+
+      // Ogni singolo documento deve riportare la stessa segnatura in uscita sul
+      // margine destro. Il consenso di maggioranza non è sufficiente per acquisire
+      // un pacchetto nel quale anche un solo PDF sia privo della segnatura corretta.
+      for (let i = 0; i < ordered.length; i++) {
+        let itemOutgoing: OfficialProtocolMetadata
+        try {
+          itemOutgoing = extractOfficialProtocolMetadataFromContent(returnedContents[i], 'right')
+        } catch (e: any) {
+          throw new Error(`Il documento “${ordered[i].file.name}” non presenta una segnatura di protocollo in uscita valida sul margine destro. ${String(e?.message || '')}`.trim())
+        }
+        const itemOutgoingKey = `${normalizeProtocolVerificationValue(itemOutgoing.numero)}|${new Date(itemOutgoing.dataMs).toISOString().slice(0, 10)}`
+        if (itemOutgoingKey !== outgoingProtocolKey) {
+          throw new Error(`Il documento “${ordered[i].file.name}” riporta un protocollo in uscita diverso dagli altri documenti. Nessun documento è stato acquisito.`)
+        }
+        assertProtocolOnEveryPdfPage(returnedContents[i], 'right', protocol, ordered[i].file.name)
+      }
+
+      // Gli elaborati provenienti dal fascicolo tecnico-amministrativo devono
+      // conservare anche la precedente segnatura in entrata, sul margine sinistro.
+      const incomingNumber = String(pickAttrCI(saved, ['protocollo_fascicolo_numero']) || '').trim()
+      const incomingDateMs = dateMsOrNull(pickAttrCI(saved, ['protocollo_fascicolo_data']))
+      if (!incomingNumber || incomingDateMs == null) {
+        throw new Error('Gli estremi del protocollo in entrata del fascicolo non sono disponibili. Nessun documento è stato acquisito.')
+      }
+      const incomingProtocolKey = `${normalizeProtocolVerificationValue(incomingNumber)}|${new Date(incomingDateMs).toISOString().slice(0, 10)}`
+      for (let i = 0; i < ordered.length; i++) {
+        if (!String(ordered[i].item.docKey || '').startsWith('fascicolo:')) continue
+        let itemIncoming: OfficialProtocolMetadata
+        try {
+          itemIncoming = extractOfficialProtocolMetadataFromContent(returnedContents[i], 'left')
+        } catch (e: any) {
+          throw new Error(`L’elaborato del fascicolo “${ordered[i].file.name}” non conserva la segnatura di protocollo in entrata sul margine sinistro. ${String(e?.message || '')}`.trim())
+        }
+        const itemIncomingKey = `${normalizeProtocolVerificationValue(itemIncoming.numero)}|${new Date(itemIncoming.dataMs).toISOString().slice(0, 10)}`
+        if (itemIncomingKey !== incomingProtocolKey) {
+          throw new Error(`L’elaborato del fascicolo “${ordered[i].file.name}” non conserva gli estremi del protocollo in entrata registrato nella pratica. Nessun documento è stato acquisito.`)
+        }
+        assertProtocolOnEveryPdfPage(returnedContents[i], 'left', itemIncoming, ordered[i].file.name)
+      }
+
+
       const allBefore = await queryAmmAttachments(layer, oid, layerUrl)
 
       type ProtocolloSourceSnapshot = {
@@ -8566,7 +8742,7 @@ function PostAttestazioneIaWorkSection (props: {
     } finally {
       setAttachmentsBusy(false)
     }
-  }, [attachmentsBusy, hasAttoFirmato, oid, props, protocolloAttoCompleto, resolveAttachmentLayer, roleCode])
+  }, [attachmentsBusy, hasAttoFirmato, oid, props, protocolloAttoCompleto, resolveAttachmentLayer, roleCode, saved])
 
   const downloadAttoContestazionePdf = React.useCallback(async (att: AmmAttachmentInfo) => {
     if (!att || !oid || attachmentsBusy) return
@@ -8604,11 +8780,12 @@ function PostAttestazioneIaWorkSection (props: {
 
   const canUploadBozza =
     attachmentsResolved &&
-    props.canEdit &&
+    (props.canEdit || canRestoreMissingDeterminationPdf) &&
     (
       propostaUfficialeDaAcquisire ||
       determinazioneUfficialeDaAcquisire ||
       canReplaceArchivedDeterminationPdf ||
+      canRestoreMissingDeterminationPdf ||
       ((bozzaInLavorazioneIa || postApprovalProtocolSaved) && canGenerateBozzaDeterminazione && wordReadyForPdf && canPreparePdfSlot)
     ) &&
     !props.saving &&
@@ -8780,22 +8957,26 @@ function PostAttestazioneIaWorkSection (props: {
                 ? (attoCleanWordGeneratedAfterApproval ? 'Rigenera Atto senza filigrana' : 'Genera Atto senza filigrana')
                 : (hasAttoPdfCaricato ? 'Bozza PDF dell’Atto già caricata' : (attoWordGenerated ? 'Rigenera bozza Word dell’Atto' : 'Genera bozza Word dell’Atto')))))
     : generateBozzaActionTitle
-  const uploadActionDisabled = !attachmentsResolved || (attoWorkflow ? !canUploadAttoContestazione : !canUploadBozza)
-  const uploadActionTitle = attoWorkflow
-    ? ((attoEmailDirettorePreparata || hasAttoDaFirmare || hasAttoFirmato)
-        ? (hasAttoFirmato ? 'Carica insieme i PDF restituiti dal protocollo' : 'Carica il PDF firmato digitalmente dal Direttore')
-        : (attoApprovedRia
-            ? (hasAttoDaFirmare
-                ? 'PDF pronto per la firma'
-                : 'Carica PDF senza filigrana')
-            : (hasAttoPdfCaricato ? 'Bozza PDF dell’Atto di accertamento già caricata' : (attoWordGenerated ? 'Carica la bozza PDF dell’Atto di accertamento' : 'Generare prima il Word in bozza dell’Atto di accertamento'))))
-    : (propostaUfficialeDaAcquisire
-        ? 'Carica fascicolo protocollato'
-        : (determinazioneUfficialeDaAcquisire
-            ? 'Carica determinazione firmata e acquisisci gli estremi'
-            : (canReplaceArchivedDeterminationPdf
-                ? 'Sostituisci PDF determinazione'
-                : uploadBozzaActionTitle)))
+  const uploadActionDisabled = !attachmentsResolved || (canRestoreMissingDeterminationPdf
+    ? false
+    : (attoWorkflow ? !canUploadAttoContestazione : !canUploadBozza))
+  const uploadActionTitle = canRestoreMissingDeterminationPdf
+    ? 'Ripristina PDF determinazione'
+    : (attoWorkflow
+        ? ((attoEmailDirettorePreparata || hasAttoDaFirmare || hasAttoFirmato)
+            ? (hasAttoFirmato ? 'Carica insieme i PDF restituiti dal protocollo' : 'Carica il PDF firmato digitalmente dal Direttore')
+            : (attoApprovedRia
+                ? (hasAttoDaFirmare
+                    ? 'PDF pronto per la firma'
+                    : 'Carica PDF senza filigrana')
+                : (hasAttoPdfCaricato ? 'Bozza PDF dell’Atto di accertamento già caricata' : (attoWordGenerated ? 'Carica la bozza PDF dell’Atto di accertamento' : 'Generare prima il Word in bozza dell’Atto di accertamento'))))
+        : (propostaUfficialeDaAcquisire
+            ? 'Carica fascicolo protocollato'
+            : (determinazioneUfficialeDaAcquisire
+                ? 'Carica determinazione firmata e acquisisci gli estremi'
+                : (canReplaceArchivedDeterminationPdf
+                    ? 'Sostituisci PDF determinazione'
+                    : uploadBozzaActionTitle))))
   const transmitActionDisabled = !attachmentsResolved || (attoWorkflow ? !canTransmitAttoContestazione : !canTransmitBozza)
   const transmitActionTitle = attoWorkflow
     ? (attoTransmittedRia
@@ -8855,6 +9036,9 @@ function PostAttestazioneIaWorkSection (props: {
       >
         {attachmentsError && attachmentsErrorSection === 'protocollo' && (
           <div style={{ marginTop: 10 }}><InfoBox kind='warn'>{attachmentsError}</InfoBox></div>
+        )}
+        {attachmentsInfo && !protocolloImportResult && attachmentsErrorSection === 'protocollo' && (
+          <div style={{ marginTop: 10 }}><InfoBox kind='ok'>{attachmentsInfo}</InfoBox></div>
         )}
         {protocolloImportResult && (
           <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
@@ -8962,8 +9146,11 @@ function PostAttestazioneIaWorkSection (props: {
             {emailDirettorePreparata && determinazioneUfficialeDaAcquisire && (
               <InfoBox>Acquisire la copia PDF conforme della determinazione ufficiale. Numero e data saranno letti automaticamente dal documento.</InfoBox>
             )}
-            {emailDirettorePreparata && officialDeterminationMatchesDraft && (
+            {emailDirettorePreparata && officialDeterminationMatchesDraft && !determinationUploadInfo && (
               <InfoBox kind='ok'>Copia PDF conforme acquisita. Numero e data sono stati letti automaticamente dal documento; salvare per registrare la determinazione adottata.</InfoBox>
+            )}
+            {determinationUploadInfo && (
+              <InfoBox kind='ok'>{determinationUploadInfo}</InfoBox>
             )}
             {determinazioneAdottata && (
               <InfoBox kind='ok'>Determina adottata e registrata.</InfoBox>
@@ -8995,9 +9182,19 @@ function PostAttestazioneIaWorkSection (props: {
                 onChange={props.onChange}
               />
             </div>
-            {determinazioneAdottata && (
+            {determinazioneAdottata && canRestoreMissingDeterminationPdf && (
+              <InfoBox kind='warn'>
+                La Determinazione risulta adottata, ma il relativo PDF GII non è presente. Utilizzare il comando di caricamento nella barra Azioni per ripristinare la copia corrispondente agli estremi già registrati; il ripristino non riaprirà l’istruttoria.
+              </InfoBox>
+            )}
+            {determinazioneAdottata && !canRestoreMissingDeterminationPdf && canReplaceArchivedDeterminationPdf && (
               <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.45 }}>
                 È possibile caricare un nuovo PDF della determinazione in sostituzione di quello archiviato. La sostituzione non comporterà la riapertura dell’istruttoria.
+              </div>
+            )}
+            {determinazioneAdottata && !!archivedDeterminationPdf && !canReplaceArchivedDeterminationPdf && (
+              <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.45 }}>
+                Il PDF della Determinazione è archiviato e non è sostituibile in questa fase del procedimento.
               </div>
             )}
             {determinationDraftComplete && !/^\d+$/.test(determinationNumberText) && (
@@ -9067,6 +9264,7 @@ function PostAttestazioneIaWorkSection (props: {
               />
             </div>
             {attachmentsError && attachmentsErrorSection === 'atto' && <InfoBox kind='warn'>{attachmentsError}</InfoBox>}
+            {attachmentsInfo && <InfoBox kind='ok'>{attachmentsInfo}</InfoBox>}
             {hasAttoPdfCaricato && (
               <div style={{ border: '1px solid #d8e6f7', borderRadius: 8, padding: 8, background: '#f8fbff', display: 'grid', gap: 6 }}>
                 <div style={{ fontWeight: 800, color: '#0d3b66', fontSize: 13 }}>Documenti dell’Atto di accertamento</div>
@@ -9229,14 +9427,15 @@ function PostAttestazioneIaWorkSection (props: {
                 <input
                   key={inputKey}
                   type='file'
-                  multiple={(!!propostaUfficialeDaAcquisire && !attoWorkflow) || (attoWorkflow && hasAttoFirmato && !protocolloAttoCompleto)}
+                  multiple={!canRestoreMissingDeterminationPdf && ((!!propostaUfficialeDaAcquisire && !attoWorkflow) || (attoWorkflow && hasAttoFirmato && !protocolloAttoCompleto))}
                   disabled={uploadActionDisabled}
                   accept='.pdf,application/pdf'
                   style={{ display: 'none' }}
                   onChange={e => {
                     const selectedFiles = Array.from(e.target.files || [])
                     const file = selectedFiles[0] || null
-                    if (attoWorkflow && hasAttoFirmato && !protocolloAttoCompleto) void uploadProtocolloAttoBatch(selectedFiles)
+                    if (canRestoreMissingDeterminationPdf) void uploadDeterminazioneUfficiale(file)
+                    else if (attoWorkflow && hasAttoFirmato && !protocolloAttoCompleto) void uploadProtocolloAttoBatch(selectedFiles)
                     else if (attoWorkflow) void uploadAttoContestazionePdf(file)
                     else if (propostaUfficialeDaAcquisire) void uploadProtocolloFascicolo(selectedFiles)
                     else if (determinazioneUfficialeDaAcquisire || canReplaceArchivedDeterminationPdf) void uploadDeterminazioneUfficiale(file)
@@ -11663,8 +11862,20 @@ function AmmWorkflowText (props: { text: string }) {
 
 
 
+function determinationAmountBeforeNotificationCosts (data: any): number {
+  const total = Math.max(0, parseNumberInput(pickAttrCI(data || {}, ['pagamento_importo_totale'])) || 0)
+  const notificationCosts = Math.max(0, parseNumberInput(pickAttrCI(data || {}, ['sanzione_spese_notifica'])) || 0)
+  return roundMoneyValue(Math.max(0, total - notificationCosts))
+}
+
 async function buildBozzaDeterminazioneDocxBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
-  const map = buildBozzaDeterminazioneMap(data, profile)
+  // La Determinazione precede la fase Notifica: il suo importo complessivo
+  // non comprende le spese di notifica, che vengono definite soltanto dopo.
+  const determinationData = {
+    ...(data || {}),
+    pagamento_importo_totale: determinationAmountBeforeNotificationCosts(data)
+  }
+  const map = buildBozzaDeterminazioneMap(determinationData, profile)
   // La filigrana BOZZA segue il ciclo amministrativo reale: resta presente
   // fino all'approvazione RIA e ricompare automaticamente dopo un rimando.
   const watermarkBozza = !isPropostaContestazioneApprovedByRia(data)
@@ -11694,6 +11905,10 @@ type PdfVerificationContent = {
   protocolSearchText: string
   protocolLeftSearchText: string
   protocolRightSearchText: string
+  protocolLeftPageSearchTexts: string[]
+  protocolRightPageSearchTexts: string[]
+  protocolPagePositionReliable: boolean[]
+  protocolPositionReliable: boolean
   protocolReferences: Array<{ numero: string, data: string }>
 }
 
@@ -11774,6 +11989,8 @@ async function extractPdfVerificationContent (blob: Blob): Promise<PdfVerificati
   const protocolPages: string[] = []
   const protocolLeftPages: string[] = []
   const protocolRightPages: string[] = []
+  const protocolPagePositionReliable: boolean[] = []
+  let protocolPositionReliable = false
   try {
     for (let pageNo = 1; pageNo <= Number(pdf?.numPages || 0); pageNo++) {
       const page = await pdf.getPage(pageNo)
@@ -11803,6 +12020,9 @@ async function extractPdfVerificationContent (blob: Blob): Promise<PdfVerificati
       // il PDF applica traslazioni/rotazioni, senza confondere i due margini.
       const viewport = page.getViewport({ scale: 1 })
       const pageWidth = Number(viewport?.width) || 0
+      const pagePositionReliable = pageWidth > 0 && records.some(r => Number.isFinite(r.x) && Math.abs(r.x) > 0.5)
+      protocolPagePositionReliable.push(pagePositionReliable)
+      if (pagePositionReliable) protocolPositionReliable = true
       const sideWidth = pageWidth > 0 ? pageWidth * 0.30 : 0
       const leftRecords = sideWidth > 0 ? records.filter(r => r.x <= sideWidth) : []
       const rightRecords = sideWidth > 0 ? records.filter(r => r.x >= pageWidth - sideWidth) : []
@@ -11817,13 +12037,19 @@ async function extractPdfVerificationContent (blob: Blob): Promise<PdfVerificati
   }
   const text = normalizePdfVerificationText(pages.join(' '))
   const protocolSearchText = normalizePdfVerificationText(protocolPages.join(' '))
-  const protocolLeftSearchText = normalizePdfVerificationText(protocolLeftPages.join(' '))
-  const protocolRightSearchText = normalizePdfVerificationText(protocolRightPages.join(' '))
+  const protocolLeftPageSearchTexts = protocolLeftPages.map(pageText => normalizePdfVerificationText(pageText))
+  const protocolRightPageSearchTexts = protocolRightPages.map(pageText => normalizePdfVerificationText(pageText))
+  const protocolLeftSearchText = normalizePdfVerificationText(protocolLeftPageSearchTexts.join(' '))
+  const protocolRightSearchText = normalizePdfVerificationText(protocolRightPageSearchTexts.join(' '))
   return {
     text,
     protocolSearchText,
     protocolLeftSearchText,
     protocolRightSearchText,
+    protocolLeftPageSearchTexts,
+    protocolRightPageSearchTexts,
+    protocolPagePositionReliable,
+    protocolPositionReliable,
     protocolReferences: extractPropostaProtocolReferences(text)
   }
 }
@@ -11881,20 +12107,48 @@ function extractOfficialProtocolCandidates (textValue: string): OfficialProtocol
   const matches: OfficialProtocolMetadata[] = []
   const datePattern = String.raw`(?:\d{4}[\/.\-]\d{1,2}[\/.\-]\d{1,2})|(?:\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})|(?:\d{1,2}\s+(?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+\d{4})`
 
-  // Timbro marginale restituito dal protocollo CBSM. Esempio reale:
-  //   CBSM - 0 - 1 - 2026-09-09 - 0012958
-  // I due valori intermedi sono codici del sistema di protocollo; gli estremi
-  // utili alla pratica sono la data ISO e l'ultimo valore, cioè il numero.
-  const cbsmStampPattern = /\bCBSM\s*[-–—]\s*\d+\s*[-–—]\s*\d+\s*[-–—]\s*(\d{4}[\/.\-]\d{1,2}[\/.\-]\d{1,2})\s*[-–—]\s*([A-Z0-9][A-Z0-9._\/-]{2,40})\b/gi
+  // Prima fonte autorevole: timbro CBSM marginale ricomposto senza spazi.
+  // PDF.js puo' spezzare la segnatura verticale in molti frammenti; la ricerca
+  // spaziale ha gia' isolato il margine corretto. Il numero di protocollo CBSM
+  // e' numerico: restringere qui il pattern evita che ordinamenti alternativi
+  // dei frammenti producano candidati spurii su PDF multipagina.
+  const compactCbsmMatches: OfficialProtocolMetadata[] = []
+  const compactStampText = text.replace(/\s+/g, '')
+  const compactCbsmStampPattern = /\bCBSM[-–—]\d+[-–—]\d+[-–—](\d{4}[\/.\-]\d{1,2}[\/.\-]\d{1,2})[-–—](\d{4,12})(?!\d)/gi
+  let compactCbsmMatch: RegExpExecArray | null = null
+  while ((compactCbsmMatch = compactCbsmStampPattern.exec(compactStampText)) != null) {
+    const dataRaw = String(compactCbsmMatch[1] || '').trim()
+    const numero = String(compactCbsmMatch[2] || '').trim()
+    const dataMs = parseItalianAdministrativeDate(dataRaw)
+    if (numero && dataMs != null) compactCbsmMatches.push({ numero, dataMs, dataRaw })
+    if (compactCbsmMatch.index === compactCbsmStampPattern.lastIndex) compactCbsmStampPattern.lastIndex++
+  }
+  const authoritativeCompact = uniqueAdministrativeMatches(
+    compactCbsmMatches,
+    x => `${normalizeProtocolVerificationValue(x.numero)}|${new Date(x.dataMs).toISOString().slice(0, 10)}`
+  )
+  if (authoritativeCompact.length) return authoritativeCompact
+
+  // Seconda fonte strutturata: stessa segnatura CBSM con spazi conservati.
+  // Anche qui il numero finale deve essere esclusivamente numerico.
+  const cbsmMatches: OfficialProtocolMetadata[] = []
+  const cbsmStampPattern = /\bCBSM\s*[-–—]\s*\d+\s*[-–—]\s*\d+\s*[-–—]\s*(\d{4}[\/.\-]\d{1,2}[\/.\-]\d{1,2})\s*[-–—]\s*(\d{4,12})(?!\d)/gi
   let cbsmMatch: RegExpExecArray | null = null
   while ((cbsmMatch = cbsmStampPattern.exec(text)) != null) {
     const dataRaw = String(cbsmMatch[1] || '').trim()
-    const numero = String(cbsmMatch[2] || '').replace(/[.,;:]+$/g, '').trim()
+    const numero = String(cbsmMatch[2] || '').trim()
     const dataMs = parseItalianAdministrativeDate(dataRaw)
-    if (numero && dataMs != null) matches.push({ numero, dataMs, dataRaw })
+    if (numero && dataMs != null) cbsmMatches.push({ numero, dataMs, dataRaw })
     if (cbsmMatch.index === cbsmStampPattern.lastIndex) cbsmStampPattern.lastIndex++
   }
+  const authoritativeCbsmMatches = uniqueAdministrativeMatches(
+    cbsmMatches,
+    x => `${normalizeProtocolVerificationValue(x.numero)}|${new Date(x.dataMs).toISOString().slice(0, 10)}`
+  )
+  if (authoritativeCbsmMatches.length) return authoritativeCbsmMatches
 
+  // Solo in assenza di una segnatura CBSM strutturata usiamo i fallback
+  // generici, necessari per eventuali PDF legacy provenienti da altri formati.
   const strictPatterns = [
     new RegExp(String.raw`\bprotocollo\s*(?:generale\s*)?(?:n(?:umero)?\.?|n[°º])?\s*[:#-]?\s*([A-Z0-9][A-Z0-9._\/-]{1,40})\s*(?:del|data)\s*(${datePattern})`, 'gi'),
     new RegExp(String.raw`\bprot\.?\s*(?:n(?:umero)?\.?|n[°º])?\s*[:#-]?\s*([A-Z0-9][A-Z0-9._\/-]{1,40})\s*(?:del|data)\s*(${datePattern})`, 'gi')
@@ -11910,9 +12164,6 @@ function extractOfficialProtocolCandidates (textValue: string): OfficialProtocol
     }
   }
 
-  // Fallback spaziale: il timbro laterale può arrivare da PDF.js come una
-  // sequenza di frammenti separati. Per ogni occorrenza "Prot./Protocollo"
-  // analizziamo una finestra locale e cerchiamo indipendentemente numero e data.
   const protocolHead = /\b(?:protocollo|prot\.?)(?=\s|[:#\-]|$)/gi
   let head: RegExpExecArray | null = null
   while ((head = protocolHead.exec(text)) != null) {
@@ -11967,10 +12218,12 @@ function extractOfficialProtocolCandidatesFromContent (content: PdfVerificationC
   const sideCandidates = extractOfficialProtocolCandidates(protocolSearchTextForMargin(content, side))
   if (sideCandidates.length) return sideCandidates
 
-  // Compatibilita' con vecchi PDF o generatori che non espongono coordinate
-  // affidabili: il fallback generale e' ammesso solo se esiste un unico protocollo
-  // nell'intero documento. Se sono presenti due segnature, il lato deve essere
-  // riconosciuto senza ambiguita'.
+  // Se PDF.js ha fornito coordinate spaziali affidabili, l'assenza della segnatura
+  // sul lato richiesto e' un errore reale: non dobbiamo recuperare una segnatura
+  // presente sul margine opposto tramite il testo globale. Il fallback generale
+  // resta solo per PDF legacy privi di coordinate utilizzabili.
+  if (content.protocolPositionReliable) return []
+
   const globalCandidates = extractOfficialProtocolCandidates(content.protocolSearchText || content.text || '')
   return globalCandidates.length === 1 ? globalCandidates : []
 }
@@ -11981,6 +12234,42 @@ function extractOfficialProtocolMetadataFromContent (content: PdfVerificationCon
   if (unique.length === 0) throw new Error(`Nel PDF non sono stati riconosciuti in modo affidabile il numero e la data di protocollo${sideLabel}.`)
   if (unique.length > 1) throw new Error(`Nel PDF sono presenti più riferimenti di protocollo${sideLabel}. Non è possibile individuare automaticamente quello ufficiale senza ambiguità.`)
   return unique[0]
+}
+
+function assertProtocolOnEveryPdfPage (
+  content: PdfVerificationContent,
+  side: 'left' | 'right',
+  expected: OfficialProtocolMetadata,
+  fileName: string
+): void {
+  const pageTexts = side === 'left' ? content.protocolLeftPageSearchTexts : content.protocolRightPageSearchTexts
+  const pageReliability = content.protocolPagePositionReliable || []
+  const sideLabel = side === 'left' ? 'sinistro' : 'destro'
+  const expectedKey = `${normalizeProtocolVerificationValue(expected.numero)}|${new Date(expected.dataMs).toISOString().slice(0, 10)}`
+
+  if (!Array.isArray(pageTexts) || !pageTexts.length) return
+
+  for (let pageIndex = 0; pageIndex < pageTexts.length; pageIndex++) {
+    // Il controllo pagina-per-pagina ha senso solo quando PDF.js fornisce
+    // coordinate spaziali affidabili per quella pagina. Nei PDF legacy privi
+    // di coordinate resta attivo il controllo documentale complessivo.
+    if (pageReliability.length && !pageReliability[pageIndex]) continue
+    const candidates = extractOfficialProtocolCandidates(pageTexts[pageIndex] || '')
+    const unique = uniqueAdministrativeMatches(
+      candidates,
+      x => `${normalizeProtocolVerificationValue(x.numero)}|${new Date(x.dataMs).toISOString().slice(0, 10)}`
+    )
+    if (unique.length === 0) {
+      throw new Error(`Il documento “${fileName}” non presenta la segnatura di protocollo attesa sul margine ${sideLabel} a pagina ${pageIndex + 1}. Nessun documento è stato acquisito.`)
+    }
+    if (unique.length > 1) {
+      throw new Error(`Il documento “${fileName}” presenta più riferimenti di protocollo sul margine ${sideLabel} a pagina ${pageIndex + 1}. Nessun documento è stato acquisito.`)
+    }
+    const key = `${normalizeProtocolVerificationValue(unique[0].numero)}|${new Date(unique[0].dataMs).toISOString().slice(0, 10)}`
+    if (key !== expectedKey) {
+      throw new Error(`Il documento “${fileName}” riporta una segnatura di protocollo diversa da quella attesa sul margine ${sideLabel} a pagina ${pageIndex + 1}. Nessun documento è stato acquisito.`)
+    }
+  }
 }
 
 function extractOfficialProtocolMetadata (textValue: string): OfficialProtocolMetadata {
@@ -12583,7 +12872,10 @@ function pdfContainsViolationSet (textValue: string, data: any, fields: LayerFie
 }
 
 function pdfContainsTotalAmount (textValue: string, data: any): boolean {
-  const total = Math.max(0, parseNumberInput(pickAttrCI(data || {}, ['pagamento_importo_totale'])) || 0)
+  // Il PDF della Determinazione deve essere confrontato con l'importo definito
+  // nella fase determinativa, quindi al netto delle spese di notifica aggiunte
+  // successivamente nella scheda Notifica.
+  const total = determinationAmountBeforeNotificationCosts(data)
   if (!(total > 0)) return true
   const text = normalizeDeterminationCheckText(textValue)
   const amountIt = total.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
