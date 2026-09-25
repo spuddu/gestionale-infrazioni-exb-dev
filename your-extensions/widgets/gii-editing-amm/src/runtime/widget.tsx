@@ -534,9 +534,10 @@ const ADMIN_FIELDS: AdminField[] = [
   { group: 'notifica', name: 'protocollo_atto_accertamento_numero', label: 'N. protocollo accertamento', kind: 'text', readonly: true },
   { group: 'notifica', name: 'protocollo_atto_accertamento_data', label: 'Data protocollo accertamento', kind: 'date', readonly: true },
   { group: 'notifica', name: 'notifica_tipo', label: 'Tipo notifica', kind: 'domain' },
-  { group: 'notifica', name: 'notifica_data', label: 'Data notifica', kind: 'date' },
   { group: 'notifica', name: 'notifica_esito', label: 'Esito notifica', kind: 'domain' },
-  { group: 'notifica', name: 'notifica_estremi', label: 'Estremi notifica', kind: 'textarea', full: true },
+  { group: 'notifica', name: 'notifica_esito_prot_numero', label: 'N. protocollo esito notifica', kind: 'text', readonly: true },
+  { group: 'notifica', name: 'notifica_esito_prot_data', label: 'Data protocollo esito notifica', kind: 'date', readonly: true },
+  { group: 'notifica', name: 'notifica_note', label: 'Note notifica', kind: 'textarea', full: true },
 
   { group: 'sanzione', name: 'sanzione_importo_base', label: 'Importo sanzione base', kind: 'number' },
   { group: 'sanzione', name: 'sanzione_importo_ridotta', label: 'Importo sanzione ridotta', kind: 'number' },
@@ -707,7 +708,7 @@ const DETERMINAZIONE_DOMAIN_STATES = new Set(['BOZZA', 'TRASMESSA_RIA', 'VALIDAT
 // Il DOCX generato dal gestionale è una copia di lavoro locale e non viene più
 // caricato nel fascicolo. Il riconoscimento di bozza/proposta è centralizzato nello
 // shared attachment viewer, così editor e viewer usano la stessa regola.
-const NOTIFICA_ATTO_FIELDS = ['notifica_tipo', 'notifica_data', 'notifica_esito', 'notifica_estremi']
+const NOTIFICA_ATTO_FIELDS = ['notifica_tipo', 'notifica_esito', 'notifica_esito_prot_numero', 'notifica_esito_prot_data', 'notifica_note']
 const ATTO_PREPARATION_SOURCE_FIELDS = ['pagamento_modalita', 'notifica_tipo', 'sanzione_spese_notifica'] as const
 
 const SYSTEM_CALCULATED_ADMIN_FIELDS = new Set([
@@ -5503,8 +5504,11 @@ function notificaEsitoCode (data: Record<string, any>): string {
 }
 
 function isNotificaPerfezionata (data: Record<string, any>): boolean {
-  const esito = notificaEsitoCode(data || {})
-  return NOTIFICA_ESITI_PERFEZIONATI.has(esito) && hasAdminValue(pickAttrCI(data || {}, ['notifica_data']))
+  const d = data || {}
+  const esito = notificaEsitoCode(d)
+  return NOTIFICA_ESITI_PERFEZIONATI.has(esito) &&
+    hasAdminValue(pickAttrCI(d, ['notifica_esito_prot_numero'])) &&
+    hasAdminValue(pickAttrCI(d, ['notifica_esito_prot_data']))
 }
 
 function isNotificaDaRipetere (data: Record<string, any>): boolean {
@@ -6067,7 +6071,7 @@ function paymentStatusDisplay (code: string, fields: LayerFieldInfo[]): string {
 
 function getSanzioneReferenceDate (data: any): number {
   const d = data || {}
-  return dateMsOrNull(pickAttrCI(d, ['accertamento_data', 'protocollo_atto_accertamento_data', 'notifica_data', 'data_rilevazione'])) || Date.now()
+  return dateMsOrNull(pickAttrCI(d, ['accertamento_data', 'protocollo_atto_accertamento_data', 'data_rilevazione'])) || Date.now()
 }
 
 function isRowValidAt (row: any, refMs: number): boolean {
@@ -7264,8 +7268,7 @@ function IaVerificationSummary (props: {
     attoCycleStartedForDetermination ||
     hasAdminValue(pickAttrCI(props.savedData || {}, ['accertamento_data'])) ||
     hasAdminValue(pickAttrCI(props.savedData || {}, ['protocollo_atto_accertamento_numero'])) ||
-    hasAdminValue(pickAttrCI(props.savedData || {}, ['protocollo_atto_accertamento_data'])) ||
-    hasAdminValue(pickAttrCI(props.savedData || {}, ['notifica_data']))
+    hasAdminValue(pickAttrCI(props.savedData || {}, ['protocollo_atto_accertamento_data']))
   const canEditDetermination = props.canEdit && (role === 'IA' || role === 'ADMIN') && !determinazioneCorrectionLocked
   const bozzaRientrataDaRia = isBozzaDeterminazioneRientrataDaRia(d)
   const iaRoutingDest = String(pickAttrCI(d, ['GII_a', 'gii_a']) || '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
@@ -7478,6 +7481,7 @@ function PostAttestazioneIaWorkSection (props: {
   workflowScope?: 'approvazione' | 'notifica'
   onPaymentPendingDirtyChange?: (dirty: boolean) => void
   registerPaymentPendingActions?: (actions: GiiPaymentPendingActions | null) => void
+  onAttachmentsChanged?: () => void
 }) {
   const st = useAdminStyle()
   const iaRoutingDest = String(pickAttrCI(props.data || {}, ['GII_a', 'gii_a']) || '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
@@ -7535,8 +7539,7 @@ function PostAttestazioneIaWorkSection (props: {
     (isDeterminazioneAdottata(saved) && attoContestazioneWorkflowState(saved) !== '') ||
     hasAdminValue(pickAttrCI(saved, ['accertamento_data'])) ||
     hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_numero'])) ||
-    hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_data'])) ||
-    hasAdminValue(pickAttrCI(saved, ['notifica_data']))
+    hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_data']))
   const determinationSectionVisible = emailDirettorePreparata || determinazioneAdottata || hasAdminValue(savedDeterminationNumberRaw) || hasAdminValue(savedDeterminationDateRaw)
   const canEditDetermination = !!props.canEditDetermination && determinationSectionVisible && !determinationLocked && !props.saving
   const attoFinaleNumero = String(pickAttrCI(d, ['accertamento_numero']) || '').trim()
@@ -7545,8 +7548,7 @@ function PostAttestazioneIaWorkSection (props: {
   const attoWorkflow = showAttoWorkflow && isDeterminazioneAdottata(d) && !!attoFinaleNumero
   const attoWorkflowLocked =
     hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_numero'])) ||
-    hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_data'])) ||
-    hasAdminValue(pickAttrCI(saved, ['notifica_data']))
+    hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_data']))
   const attoState = attoWorkflow ? attoContestazioneWorkflowState(d) : ''
   // Prima della trasmissione al RIA la generazione del Word è un'operazione locale:
   // non deve alterare i campi di workflow RIA, che appartengono alla precedente
@@ -7800,7 +7802,6 @@ function PostAttestazioneIaWorkSection (props: {
     !hasAdminValue(pickAttrCI(saved, ['accertamento_data'])) &&
     !hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_numero'])) &&
     !hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_data'])) &&
-    !hasAdminValue(pickAttrCI(saved, ['notifica_data'])) &&
     !props.saving &&
     !attachmentsBusy
   // Ripristino archivistico: se la Determinazione risulta già adottata ma il PDF GII
@@ -8362,6 +8363,80 @@ function PostAttestazioneIaWorkSection (props: {
     !props.saving &&
     !attachmentsBusy
 
+  const notificaEsito = notificaEsitoCode(d)
+  const hasNotificaEsitoProtocollo =
+    hasAdminValue(pickAttrCI(d, ['notifica_esito_prot_numero'])) &&
+    hasAdminValue(pickAttrCI(d, ['notifica_esito_prot_data']))
+  const canUploadNotificaEsitoDocuments =
+    props.canEdit &&
+    showAttoWorkflow &&
+    protocolloAttoCompleto &&
+    !!notificaEsito &&
+    notificaEsito !== 'DA_NOTIFICARE' &&
+    !props.saving &&
+    !attachmentsBusy
+
+  const uploadNotificaEsitoDocuments = React.useCallback(async (selectedFiles: File[]) => {
+    const files = Array.from(selectedFiles || []).filter(Boolean)
+    if (!files.length || !oid || !canUploadNotificaEsitoDocuments) return
+    if (files.some(file => !/\.pdf$/i.test(String(file.name || '')))) {
+      setAttachmentsErrorSection('atto')
+      setAttachmentsError('Caricare esclusivamente documenti PDF relativi all’esito della notifica.')
+      return
+    }
+
+    setAttachmentsBusy(true)
+    setAttachmentsErrorSection('atto')
+    setAttachmentsError(null)
+    setAttachmentsInfo(null)
+    try {
+      const { layer, layerUrl } = await resolveAttachmentLayer()
+      if (!layer && !layerUrl) throw new Error('Allegati non disponibili.')
+
+      const contents = await Promise.all(files.map(file => extractPdfVerificationContent(file)))
+      const protocolCandidates: OfficialProtocolMetadata[] = []
+      for (const content of contents) {
+        const leftCandidates = extractOfficialProtocolCandidatesFromContent(content, 'left')
+        protocolCandidates.push(...leftCandidates)
+      }
+      const uniqueProtocols = uniqueAdministrativeMatches(
+        protocolCandidates,
+        item => `${normalizeProtocolVerificationValue(item.numero)}|${new Date(item.dataMs).toISOString().slice(0, 10)}`
+      )
+      if (!uniqueProtocols.length) {
+        throw new Error('Nella documentazione caricata non è stato riconosciuto un protocollo di esito notifica sul margine sinistro.')
+      }
+      if (uniqueProtocols.length > 1) {
+        throw new Error('Nella documentazione caricata sono presenti più protocolli di esito notifica. Caricare documenti riferiti allo stesso protocollo.')
+      }
+      const meta = uniqueProtocols[0]
+      const protocolloAttoMs = dateMsOrNull(pickAttrCI(d, ['protocollo_atto_accertamento_data']))
+      if (protocolloAttoMs != null && meta.dataMs < protocolloAttoMs) {
+        throw new Error('La data del protocollo dell’esito non può precedere la data del protocollo dell’Atto.')
+      }
+
+      const fileCreatedAt = Date.now()
+      const protocolDateKey = new Date(meta.dataMs).toISOString().slice(0, 10)
+      await addAmmAttachments(
+        layer,
+        oid,
+        files,
+        layerUrl,
+        `${GII_ATTACHMENT_KEYWORDS.administrative}|documentKind=NOTIFICA_ESITO|protocolloNumero=${String(meta.numero).trim()}|protocolloData=${protocolDateKey}|fileCreatedAt=${fileCreatedAt}`
+      )
+
+      props.onChange('notifica_esito_prot_numero', meta.numero)
+      props.onChange('notifica_esito_prot_data', meta.dataMs)
+      props.onAttachmentsChanged?.()
+      setAttachmentsInfo(`Documentazione dell’esito di notifica acquisita. Protocollo ${meta.numero} del ${new Date(meta.dataMs).toLocaleDateString('it-IT')} rilevato automaticamente. Premere Salva per registrare l’esito.`)
+      setInputKey(k => k + 1)
+    } catch (e: any) {
+      setAttachmentsError(e?.message || String(e))
+    } finally {
+      setAttachmentsBusy(false)
+    }
+  }, [canUploadNotificaEsitoDocuments, d, oid, props, resolveAttachmentLayer])
+
   const deletePagoPaPdf = React.useCallback(async (att: AmmAttachmentInfo) => {
     if (!att || !oid || !props.canEdit || protocolloAttoCompleto || props.saving || attachmentsBusy) return
     setAttachmentsBusy(true)
@@ -8901,6 +8976,10 @@ function PostAttestazioneIaWorkSection (props: {
     }
   }
 
+  if (guideEnabled && attoWorkflow && protocolloAttoCompleto && canUploadNotificaEsitoDocuments && !hasNotificaEsitoProtocollo) {
+    nextIaAction = 'UPLOAD_PDF'
+  }
+
   const preApprovalGuideText = nextIaAction === 'GENERATE_WORD' && !riaHaApprovatoProposta
     ? (bozzaDaRigenerare
         ? 'L’esito dell’istruttoria è cambiato. Rigenerare la bozza Word della determinazione.'
@@ -8959,24 +9038,30 @@ function PostAttestazioneIaWorkSection (props: {
     : generateBozzaActionTitle
   const uploadActionDisabled = !attachmentsResolved || (canRestoreMissingDeterminationPdf
     ? false
-    : (attoWorkflow ? !canUploadAttoContestazione : !canUploadBozza))
+    : (canUploadNotificaEsitoDocuments
+        ? false
+        : (attoWorkflow ? !canUploadAttoContestazione : !canUploadBozza)))
   const uploadActionTitle = canRestoreMissingDeterminationPdf
     ? 'Ripristina PDF determinazione'
-    : (attoWorkflow
-        ? ((attoEmailDirettorePreparata || hasAttoDaFirmare || hasAttoFirmato)
-            ? (hasAttoFirmato ? 'Carica insieme i PDF restituiti dal protocollo' : 'Carica il PDF firmato digitalmente dal Direttore')
-            : (attoApprovedRia
-                ? (hasAttoDaFirmare
-                    ? 'PDF pronto per la firma'
-                    : 'Carica PDF senza filigrana')
-                : (hasAttoPdfCaricato ? 'Bozza PDF dell’Atto di accertamento già caricata' : (attoWordGenerated ? 'Carica la bozza PDF dell’Atto di accertamento' : 'Generare prima il Word in bozza dell’Atto di accertamento'))))
-        : (propostaUfficialeDaAcquisire
-            ? 'Carica fascicolo protocollato'
-            : (determinazioneUfficialeDaAcquisire
-                ? 'Carica determinazione firmata e acquisisci gli estremi'
-                : (canReplaceArchivedDeterminationPdf
-                    ? 'Sostituisci PDF determinazione'
-                    : uploadBozzaActionTitle))))
+    : (showAttoWorkflow && protocolloAttoCompleto
+        ? ((!notificaEsito || notificaEsito === 'DA_NOTIFICARE')
+            ? 'Selezionare prima l’esito della notifica'
+            : 'Carica documentazione esito notifica')
+        : (attoWorkflow
+            ? ((attoEmailDirettorePreparata || hasAttoDaFirmare || hasAttoFirmato)
+                ? (hasAttoFirmato ? 'Carica insieme i PDF restituiti dal protocollo' : 'Carica il PDF firmato digitalmente dal Direttore')
+                : (attoApprovedRia
+                    ? (hasAttoDaFirmare
+                        ? 'PDF pronto per la firma'
+                        : 'Carica PDF senza filigrana')
+                    : (hasAttoPdfCaricato ? 'Bozza PDF dell’Atto di accertamento già caricata' : (attoWordGenerated ? 'Carica la bozza PDF dell’Atto di accertamento' : 'Generare prima il Word in bozza dell’Atto di accertamento'))))
+            : (propostaUfficialeDaAcquisire
+                ? 'Carica fascicolo protocollato'
+                : (determinazioneUfficialeDaAcquisire
+                    ? 'Carica determinazione firmata e acquisisci gli estremi'
+                    : (canReplaceArchivedDeterminationPdf
+                        ? 'Sostituisci PDF determinazione'
+                        : uploadBozzaActionTitle)))))
   const transmitActionDisabled = !attachmentsResolved || (attoWorkflow ? !canTransmitAttoContestazione : !canTransmitBozza)
   const transmitActionTitle = attoWorkflow
     ? (attoTransmittedRia
@@ -9229,7 +9314,7 @@ function PostAttestazioneIaWorkSection (props: {
               <InfoBox kind='ok'>Atto firmato acquisito. Procedere con l’invio al protocollo.</InfoBox>
             )}
             {protocolloAttoCompleto && (
-              <InfoBox kind='ok'>Protocollo registrato. Procedere con la notifica.</InfoBox>
+              <InfoBox kind='ok'>Protocollo registrato e trasmissione al trasgressore effettuata dal Protocollo.</InfoBox>
             )}
             {attoWorkflowLocked && (
               <InfoBox kind='warn'>L’Atto non è più modificabile perché è stata avviata la fase successiva di protocollazione/notifica.</InfoBox>
@@ -9412,11 +9497,13 @@ function PostAttestazioneIaWorkSection (props: {
             </span>
 
             <span style={{ position: 'relative', display: 'inline-flex' }}>
-              {nextIaAction === 'UPLOAD_PDF' && <NextActionPulse floating title={attoWorkflow
-                ? (attoEmailDirettorePreparata ? (hasAttoFirmato ? 'Azione successiva: carica insieme i PDF restituiti dal protocollo' : 'Azione successiva: carica l’Atto firmato digitalmente dal Direttore') : 'Azione successiva: carica il PDF dell’Atto')
-                : (propostaUfficialeDaAcquisire
-                    ? 'Azione successiva: carica il fascicolo protocollato'
-                    : (postApprovalProtocolSaved ? 'Azione successiva: carica il PDF della determinazione' : 'Azione successiva: carica la bozza PDF'))} />}
+              {nextIaAction === 'UPLOAD_PDF' && <NextActionPulse floating title={canUploadNotificaEsitoDocuments && protocolloAttoCompleto
+                ? 'Azione successiva: carica la documentazione dell’esito di notifica'
+                : (attoWorkflow
+                    ? (attoEmailDirettorePreparata ? (hasAttoFirmato ? 'Azione successiva: carica insieme i PDF restituiti dal protocollo' : 'Azione successiva: carica l’Atto firmato digitalmente dal Direttore') : 'Azione successiva: carica il PDF dell’Atto')
+                    : (propostaUfficialeDaAcquisire
+                        ? 'Azione successiva: carica il fascicolo protocollato'
+                        : (postApprovalProtocolSaved ? 'Azione successiva: carica il PDF della determinazione' : 'Azione successiva: carica la bozza PDF')))} />}
               <label
                 title={uploadActionTitle}
                 aria-label={uploadActionTitle}
@@ -9427,7 +9514,7 @@ function PostAttestazioneIaWorkSection (props: {
                 <input
                   key={inputKey}
                   type='file'
-                  multiple={!canRestoreMissingDeterminationPdf && ((!!propostaUfficialeDaAcquisire && !attoWorkflow) || (attoWorkflow && hasAttoFirmato && !protocolloAttoCompleto))}
+                  multiple={!canRestoreMissingDeterminationPdf && (canUploadNotificaEsitoDocuments || ((!!propostaUfficialeDaAcquisire && !attoWorkflow) || (attoWorkflow && hasAttoFirmato && !protocolloAttoCompleto)))}
                   disabled={uploadActionDisabled}
                   accept='.pdf,application/pdf'
                   style={{ display: 'none' }}
@@ -9435,6 +9522,7 @@ function PostAttestazioneIaWorkSection (props: {
                     const selectedFiles = Array.from(e.target.files || [])
                     const file = selectedFiles[0] || null
                     if (canRestoreMissingDeterminationPdf) void uploadDeterminazioneUfficiale(file)
+                    else if (canUploadNotificaEsitoDocuments && protocolloAttoCompleto) void uploadNotificaEsitoDocuments(selectedFiles)
                     else if (attoWorkflow && hasAttoFirmato && !protocolloAttoCompleto) void uploadProtocolloAttoBatch(selectedFiles)
                     else if (attoWorkflow) void uploadAttoContestazionePdf(file)
                     else if (propostaUfficialeDaAcquisire) void uploadProtocolloFascicolo(selectedFiles)
@@ -9617,7 +9705,7 @@ const DOMICILIO_NOTIFICA_READONLY_INFO = `I dati del domicilio per le notifiche 
 const RAPPRESENTANTE_LEGALE_READONLY_INFO = `I dati del rappresentante legale sono riportati in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
 const ANNOTAZIONI_TI_READONLY_INFO = `Le annotazioni dell’istruttore tecnico sono riportate in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
 const PAYMENT_MODE_INFO = 'Selezionare la modalità di pagamento: pagoPA, bonifico bancario, pagamento misto o altro.'
-const PROTOCOLLO_NOTIFICA_INFO = 'Numero e data di protocollo vengono registrati dopo il rientro dell’Atto firmato e la trasmissione al protocollo. Gli estremi della notifica si compilano solo dopo la protocollazione.'
+const PROTOCOLLO_NOTIFICA_INFO = 'Numero e data di protocollo vengono registrati al rientro dei documenti trasmessi dal Protocollo al trasgressore. La data di notifica coincide con la data del protocollo in uscita ed è valorizzata automaticamente; restano da registrare l’esito e gli eventuali estremi della notifica.'
 const RIAPERTURA_INFO = 'La riapertura è di competenza del Responsabile dell’istruttoria amministrativa, su indicazione del Direttore dell’Area Affari Generali e Programmazione Finanziaria a seguito della decisione del CdA. Questa scheda registra gli estremi; la nuova lavorazione sarà gestita secondo l’iter previsto.'
 
 function trasgressoreField (fields: LayerFieldInfo[], candidates: string[]): string | null {
@@ -9808,7 +9896,6 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
 function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, showContextualInfo?: boolean, sectionInfo?: React.ReactNode, onChange: (name: string, value: any) => void }) {
   const d = props.data || {}
   const definitivo = isDeterminazioneAdottata(d) && hasAdminValue(pickAttrCI(d, ['accertamento_numero']))
-  const hasVerbale = tipoAttoAmmPrevedeVerbale(d)
   const protocolloNumero = pickAttrCI(d, ['protocollo_atto_accertamento_numero'])
   const protocolloData = pickAttrCI(d, ['protocollo_atto_accertamento_data'])
   const protocolloCompleto = hasAdminValue(protocolloNumero) && hasAdminValue(protocolloData)
@@ -9818,7 +9905,13 @@ function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, f
   const canEditProtocollo = props.canEdit && definitivo && protocolloCompleto
   const canEditNotifica = canEditProtocollo && protocolloCompleto
   const statoProtocollo = protocolloCompleto ? 'Registrato' : 'Da completare'
-  const statoNotifica = esito ? displayAdminFieldValue(d, props.fields, 'notifica_esito') : 'Da registrare'
+  const esitoProtocolloNumero = pickAttrCI(d, ['notifica_esito_prot_numero'])
+  const esitoProtocolloData = pickAttrCI(d, ['notifica_esito_prot_data'])
+  const esitoProtocolloCompleto = hasAdminValue(esitoProtocolloNumero) && hasAdminValue(esitoProtocolloData)
+  const showNotificaNote = esito === 'NON_NOTIFICATA' || esito === 'IRREPERIBILE' || esito === 'ALTRO'
+  const statoNotifica = esito && esito !== 'DA_NOTIFICARE'
+    ? displayAdminFieldValue(d, props.fields, 'notifica_esito')
+    : 'In attesa dell’esito'
 
   // Numero e data di protocollo esistono solo dopo il rientro della copia protocollata.
   // Prima di quel momento questa sezione non appartiene ancora al lavoro dell'IA.
@@ -9847,28 +9940,39 @@ function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, f
 
         <div>
           <div style={{ fontWeight: 900, color: '#0f4c81', marginBottom: 8 }}>Notifica dell’atto</div>
-          <div>
+          <div style={{ display: 'grid', gap: 10 }}>
             <AdminFieldsGrid
               group='notifica'
               draft={d}
               fields={props.fields}
               canEdit={canEditNotifica}
               onChange={props.onChange}
-              fieldNames={NOTIFICA_ATTO_FIELDS.filter(name => name !== 'notifica_tipo')}
+              fieldNames={NOTIFICA_ATTO_FIELDS.filter(name => name !== 'notifica_tipo' && name !== 'notifica_note')}
             />
+            {showNotificaNote && (
+              <AdminFieldsGrid
+                group='notifica'
+                draft={d}
+                fields={props.fields}
+                canEdit={canEditNotifica}
+                onChange={props.onChange}
+                fieldNames={['notifica_note']}
+              />
+            )}
           </div>
         </div>
 
-        {esito === 'DA_NOTIFICARE' && <InfoBox>Atto protocollato e ancora da notificare. Le fasi successive restano bloccate.</InfoBox>}
-        {daRipetere && <InfoBox kind='warn'>La notifica non risulta perfezionata. Registrare gli estremi del tentativo e procedere con una nuova notifica; le fasi successive restano bloccate.</InfoBox>}
-        {esito === 'ALTRO' && <InfoBox kind='warn'>Specificare dettagliatamente l’esito negli estremi della notifica. Le fasi successive restano bloccate finché non viene registrato un esito conclusivo.</InfoBox>}
+        {(!esito || esito === 'DA_NOTIFICARE') && <InfoBox>Trasmissione effettuata dal Protocollo. Selezionare l’esito della notifica; il pulsante Carica PDF si abiliterà per acquisire la documentazione probatoria.</InfoBox>}
+        {esito && esito !== 'DA_NOTIFICARE' && !esitoProtocolloCompleto && <InfoBox>Caricare con il pulsante Carica PDF la relata, le ricevute PEC, l’avviso di ricevimento o altra documentazione probatoria protocollata. Numero e data del protocollo dell’esito saranno rilevati automaticamente.</InfoBox>}
+        {esitoProtocolloCompleto && <InfoBox kind='ok'>Documentazione dell’esito acquisita. Protocollo {displayAdminFieldValue(d, props.fields, 'notifica_esito_prot_numero')} del {displayAdminFieldValue(d, props.fields, 'notifica_esito_prot_data')}.</InfoBox>}
+        {daRipetere && <InfoBox kind='warn'>La notifica non risulta perfezionata. È possibile descrivere il tentativo o le circostanze nel campo Note; le fasi successive restano bloccate.</InfoBox>}
+        {esito === 'ALTRO' && <InfoBox kind='warn'>Descrivere l’esito nel campo Note. Le fasi successive restano bloccate finché non viene registrato un esito conclusivo.</InfoBox>}
         {perfezionata && <InfoBox kind='ok'>Notifica perfezionata. Le funzioni post-notifica sono disponibili.</InfoBox>}
-        {protocolloCompleto && <InfoBox>Le ricevute PEC, la relata, l’avviso di ricevimento o altra documentazione probatoria devono essere caricati nella scheda Allegati.</InfoBox>}
+        {esito && esito !== 'DA_NOTIFICARE' && <InfoBox>I PDF caricati da questa fase vengono archiviati automaticamente nella scheda Allegati.</InfoBox>}
       </div>
     </Section>
   )
 }
-
 
 
 type PagoPaTestGeneratorRow = {
@@ -10749,8 +10853,7 @@ function PreparazioneNotificaAttoSection (props: { data: Record<string, any>, fi
   const statoAtto = attoContestazioneWorkflowState(d)
   const attoLocked = ['TRASMESSA_RIA', 'VALIDATA_RIA', TRASMESSA_FIRMA_DA_STATE].includes(statoAtto) ||
     hasAdminValue(pickAttrCI(d, ['protocollo_atto_accertamento_numero'])) ||
-    hasAdminValue(pickAttrCI(d, ['protocollo_atto_accertamento_data'])) ||
-    hasAdminValue(pickAttrCI(d, ['notifica_data']))
+    hasAdminValue(pickAttrCI(d, ['protocollo_atto_accertamento_data']))
   const canEditPreparation = props.canEdit && isDeterminazioneAdottata(d) && !attoLocked
   const snapshot = getPaymentSnapshot(d, props.fields)
   const paymentModeDefined = !!getPaymentMode(d, props.fields)
@@ -13488,7 +13591,7 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
               {hasVerbale && <StatusSummaryItem label='Numero atto' value={displayVerbaleNumber(d, props.fields, oid)} tone={hasAdminValue(verbaleNumberValue(d, oid)) ? 'auto' : 'warn'} />}
               <StatusSummaryItem label='Data approvazione' value={displayVerbaleApprovalDate(d, props.fields)} tone={hasAdminValue(verbaleApprovalDateValue(d)) ? 'auto' : 'warn'} />
               <StatusSummaryItem label='Stato' value={verbaleDefinitivo ? 'Definitivo' : 'In corso di istruttoria'} tone={verbaleDefinitivo ? 'auto' : 'warn'} />
-              <StatusSummaryItem label='Notifica' value={verbaleNotificato ? displayAdminFieldValue(d, props.fields, 'notifica_data') : 'Non registrata'} tone={verbaleNotificato ? 'auto' : 'warn'} />
+              <StatusSummaryItem label='Notifica' value={verbaleNotificato ? displayAdminFieldValue(d, props.fields, 'notifica_esito_prot_data') : 'Non registrata'} tone={verbaleNotificato ? 'auto' : 'warn'} />
               <StatusSummaryItem label='Istruttore amministrativo' value={displayAdminFieldValue(d, props.fields, 'ia_assegnato_nome', displayAdminFieldValue(d, props.fields, 'ia_assegnato_username'))} tone='auto' />
             </div>
           </div>
@@ -16149,9 +16252,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const protocolloNumero = pickAttrCI(current, ['protocollo_atto_accertamento_numero'])
     const protocolloData = pickAttrCI(current, ['protocollo_atto_accertamento_data'])
     const notificaTipo = pickAttrCI(current, ['notifica_tipo'])
-    const notificaData = pickAttrCI(current, ['notifica_data'])
     const notificaEsito = notificaEsitoCode(current)
-    const notificaEstremi = pickAttrCI(current, ['notifica_estremi'])
+    const notificaEsitoProtNumero = pickAttrCI(current, ['notifica_esito_prot_numero'])
+    const notificaEsitoProtData = pickAttrCI(current, ['notifica_esito_prot_data'])
 
     if (!hasAdminValue(protocolloNumero)) issues.push('Protocollo: indicare il numero di protocollo dell’atto.')
     if (!hasAdminValue(protocolloData)) issues.push('Protocollo: indicare la data di protocollo dell’atto.')
@@ -16162,17 +16265,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       issues.push('Notifica: l’atto risulta ancora da notificare.')
     } else {
       if (!hasAdminValue(notificaTipo)) issues.push('Notifica: indicare il tipo di notifica.')
-      if (!hasAdminValue(notificaData)) issues.push('Notifica: indicare la data della notifica o del tentativo effettuato.')
-      if (!hasAdminValue(notificaEstremi)) issues.push('Notifica: indicare gli estremi della notifica o del tentativo effettuato.')
+      if (!hasAdminValue(notificaEsitoProtNumero)) issues.push('Notifica: acquisire il numero di protocollo dell’esito tramite il PDF.')
+      if (!hasAdminValue(notificaEsitoProtData)) issues.push('Notifica: acquisire la data di protocollo dell’esito tramite il PDF.')
       if (isNotificaDaRipetere(current)) issues.push('Notifica: la notifica non risulta perfezionata e deve essere ripetuta.')
       if (notificaEsito === 'ALTRO') issues.push('Notifica: registrare un esito conclusivo per proseguire con la fase post-notifica.')
     }
 
     const approvalMs = dateMsOrNull(pickAttrCI(current, ['determinazione_data']))
     const protocolloMs = dateMsOrNull(protocolloData)
-    const notificaMs = dateMsOrNull(notificaData)
+    const esitoProtocolloMs = dateMsOrNull(notificaEsitoProtData)
     if (approvalMs != null && protocolloMs != null && protocolloMs < approvalMs) issues.push('Protocollo: la data non può precedere la data della determinazione adottata.')
-    if (protocolloMs != null && notificaMs != null && notificaMs < protocolloMs) issues.push('Notifica: la data non può precedere la data di protocollo dell’atto.')
+    if (protocolloMs != null && esitoProtocolloMs != null && esitoProtocolloMs < protocolloMs) issues.push('Notifica: la data del protocollo dell’esito non può precedere la data di protocollo dell’Atto.')
     const totale = parseNumberInput(pickAttrCI(current, ['pagamento_importo_totale'])) || 0
     if (totale > 0) {
       const mode = getPaymentMode(current, layerFields)
@@ -16201,7 +16304,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (paymentStatus === 'PARZIALE' && !(paid > 0 && paid < totale - 0.005)) issues.push('Pagamento: verificare l’importo incassato.')
       if (paymentStatus === 'NOTIFICATO' && !isNotificaPerfezionata(current)) issues.push('Pagamento: lo stato Notificato richiede una notifica perfezionata.')
       const paymentDeadlineMs = dateMsOrNull(pickAttrCI(current, ['pagamento_scadenza']))
-      if (notificaMs != null && paymentDeadlineMs != null && paymentDeadlineMs < notificaMs) issues.push('Pagamento: la scadenza non può precedere la data di notifica.')
       if (paymentStatus === 'SCADUTO' && paymentDeadlineMs != null && paymentDeadlineMs >= new Date().setHours(0, 0, 0, 0)) issues.push('Pagamento: lo stato Scaduto non è coerente con la scadenza indicata.')
     }
     return issues
@@ -16931,8 +17033,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (!numeroAtto) throw new Error('Numero dell’Atto non disponibile. Registrare prima gli estremi della determinazione.')
       if (
         hasAdminValue(pickAttrCI(liveAttrs, ['protocollo_atto_accertamento_numero'])) ||
-        hasAdminValue(pickAttrCI(liveAttrs, ['protocollo_atto_accertamento_data'])) ||
-        hasAdminValue(pickAttrCI(liveAttrs, ['notifica_data']))
+        hasAdminValue(pickAttrCI(liveAttrs, ['protocollo_atto_accertamento_data']))
       ) throw new Error('L’Atto non può essere modificato dopo l’avvio della protocollazione o della notifica.')
 
       const statoCorrente = attoContestazioneWorkflowState(liveAttrs)
@@ -17428,8 +17529,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const statoAtto = attoContestazioneWorkflowState(current)
     const attoLocked = ['TRASMESSA_RIA', 'VALIDATA_RIA', TRASMESSA_FIRMA_DA_STATE].includes(statoAtto) ||
       hasAdminValue(pickAttrCI(current, ['protocollo_atto_accertamento_numero'])) ||
-      hasAdminValue(pickAttrCI(current, ['protocollo_atto_accertamento_data'])) ||
-      hasAdminValue(pickAttrCI(current, ['notifica_data']))
+      hasAdminValue(pickAttrCI(current, ['protocollo_atto_accertamento_data']))
 
     const preparationFieldsChanged = ATTO_PREPARATION_SOURCE_FIELDS.some(name => {
       const real = realFieldName(layerFields, name) || name
@@ -17450,24 +17550,22 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
     }
 
-    const notificaFieldsChanged = ['notifica_data', 'notifica_esito', 'notifica_estremi'].some(name => {
+    const notificaFieldsChanged = ['notifica_esito', 'notifica_esito_prot_numero', 'notifica_esito_prot_data', 'notifica_note'].some(name => {
       const real = realFieldName(layerFields, name) || name
       const before = pickAttrCI(initialDraft || {}, [real, name])
       const after = pickAttrCI(current, [real, name])
       return !sameDraftValue(before, after, name)
     })
 
-    // La registrazione della notifica può rimanere completamente vuota finché non
-    // viene avviata. Dal primo dato inserito, invece, il salvataggio deve rispettare
-    // il blocco obbligatorio della notifica. DA_NOTIFICARE è lo stato esplicito che
-    // consente di registrare l'Atto protocollato senza data/estremi di notificazione.
+    // L'esito della notifica viene consolidato tramite la documentazione probatoria
+    // restituita dal Protocollo: numero e data del relativo protocollo sono obbligatori
+    // e vengono letti automaticamente dai PDF caricati.
     if (notificaFieldsChanged) {
       const esito = notificaEsitoCode(current)
-      if (!esito) issues.push('Esito notifica')
       if (esito && esito !== 'DA_NOTIFICARE') {
         if (!hasAdminValue(pickAttrCI(current, ['notifica_tipo']))) issues.push('Tipo notifica')
-        if (!hasAdminValue(pickAttrCI(current, ['notifica_data']))) issues.push('Data notifica')
-        if (!hasAdminValue(pickAttrCI(current, ['notifica_estremi']))) issues.push('Estremi notifica')
+        if (!hasAdminValue(pickAttrCI(current, ['notifica_esito_prot_numero']))) issues.push('N. protocollo esito notifica (caricare il PDF)')
+        if (!hasAdminValue(pickAttrCI(current, ['notifica_esito_prot_data']))) issues.push('Data protocollo esito notifica (caricare il PDF)')
       }
     }
 
@@ -17606,8 +17704,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         }
         if (hasAdminValue(pickAttrCI(initialDraft, ['accertamento_data'])) ||
             hasAdminValue(pickAttrCI(initialDraft, ['protocollo_atto_accertamento_numero'])) ||
-            hasAdminValue(pickAttrCI(initialDraft, ['protocollo_atto_accertamento_data'])) ||
-            hasAdminValue(pickAttrCI(initialDraft, ['notifica_data']))) {
+            hasAdminValue(pickAttrCI(initialDraft, ['protocollo_atto_accertamento_data']))) {
           throw new Error('I dati della determina non possono essere modificati dopo la formalizzazione dell’Atto di accertamento.')
         }
 
@@ -18387,6 +18484,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     workflowScope='notifica'
                     onPaymentPendingDirtyChange={setPaymentPendingDirty}
                     registerPaymentPendingActions={actions => { paymentPendingActionsRef.current = actions }}
+                    onAttachmentsChanged={() => setLiveRefreshVersion(v => v + 1)}
                     bozzaRefreshKey={[
                       oid ?? '',
                       liveRefreshVersion,

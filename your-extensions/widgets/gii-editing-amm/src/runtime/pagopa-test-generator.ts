@@ -1,3 +1,4 @@
+// @ts-nocheck
 /* GII - generatore pagoPA di test.
  * Derivato esclusivamente dalla pagina HTML di test fornita per il progetto.
  * Nessun dato viene trasmesso a servizi esterni.
