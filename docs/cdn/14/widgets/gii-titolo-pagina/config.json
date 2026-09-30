@@ -1,0 +1,19 @@
+{
+  "titleOverride": "",
+  "titleColor": "#1F4E79",
+  "titleFontSize": 18,
+  "titleFontWeight": 800,
+  "iconSize": 23,
+  "iconGap": 9,
+  "dividerColor": "#1F4E79",
+  "dividerWidth": 2,
+  "dividerPaddingBottom": 6,
+  "paddingTop": 0,
+  "paddingRight": 0,
+  "paddingBottom": 0,
+  "paddingLeft": 0,
+  "descriptionOverride": "",
+  "showDescription": true,
+  "subtitleColor": "#475569",
+  "subtitleFontSize": 14
+}
