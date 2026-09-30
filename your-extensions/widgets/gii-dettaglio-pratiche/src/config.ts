@@ -154,6 +154,8 @@ export interface Config {
   msgFontSize: number
 
   // --- Titolo pratica (sopra il pannello)
+  showTitleSubtitle: boolean
+  showTitleDivider: boolean
   detailTitlePrefix: string
   detailTitleHeight: number
   detailTitlePaddingBottom: number
@@ -162,6 +164,11 @@ export interface Config {
   detailTitleFontSize: number
   detailTitleFontWeight: number
   detailTitleColor: string
+  detailTitleIconSize: number
+  detailTitleSubtitleFontSize: number
+  detailTitleSubtitleColor: string
+  detailTitleDividerColor: string
+  detailTitleDividerWidth: number
 
 
   // --- Sfondo titolo pratica
@@ -247,6 +254,8 @@ export const defaultConfig: Config = {
   msgFontSize: 15,
 
   // Titolo pratica
+  showTitleSubtitle: true,
+  showTitleDivider: true,
   detailTitlePrefix: 'Dettaglio pratica selezionata',
   detailTitleHeight: 40,
   detailTitlePaddingBottom: 10,
@@ -255,6 +264,11 @@ export const defaultConfig: Config = {
   detailTitleFontSize: 14,
   detailTitleFontWeight: 600,
   detailTitleColor: 'rgba(0,0,0,0.85)',
+  detailTitleIconSize: 22,
+  detailTitleSubtitleFontSize: 12,
+  detailTitleSubtitleColor: '#475569',
+  detailTitleDividerColor: '#1F4E79',
+  detailTitleDividerWidth: 2,
 
 
   detailTitleBg: 'transparent',

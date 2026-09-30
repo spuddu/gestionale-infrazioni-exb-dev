@@ -7,6 +7,7 @@ import {
   pickGiiRuntimeView,
   type GiiRuntimeView as RuntimeDsView
 } from '../../../_shared/gii-runtime/runtime-views'
+import { GiiPageTitle } from '../../../_shared/gii-ui/page-title'
 
 type GiiAssignment = {
   ruoloCod: string
@@ -1499,6 +1500,21 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         boxShadow: '0 28px 90px rgba(0,0,0,0.30)'
       }}>
         <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: activeTab === 'statistiche' ? 'auto' : 'hidden', overflowX: 'hidden', paddingRight: 2 }}>
+          <GiiPageTitle
+          showSubtitle={(cfg as any).showTitleSubtitle !== false}
+          showDivider={(cfg as any).showTitleDivider !== false}
+            title={cfg.title || undefined}
+            fallbackIcon='dashboard'
+            titleColor={cfg.textColor}
+            titleFontSize={Number(cfg.pageTitleFontSize ?? 22)}
+            titleFontWeight={900}
+            subtitleColor={String(cfg.pageTitleDescriptionColor || cfg.mutedColor)}
+            subtitleFontSize={Number(cfg.pageTitleDescriptionFontSize ?? 13)}
+            iconSize={Number(cfg.titleIconSize ?? 26)}
+            dividerColor={String(cfg.titleDividerColor || cfg.accentColor)}
+            dividerWidth={Math.max(0, Number(cfg.titleDividerWidth ?? 2))}
+            style={{ marginBottom: 10, flex: '0 0 auto' }}
+          />
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14, borderBottom: `1px solid ${cfg.cardBorder}`, flexWrap: 'wrap' }}>
             {[
               { id: 'operativo' as DashboardTab, label: 'Operativo' },

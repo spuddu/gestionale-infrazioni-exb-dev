@@ -17,10 +17,17 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const cfg: any = props.config || {}
   const title = String(cfg.title || 'Regolamento irriguo')
   const titleColor = String(cfg.titleColor || '#1F4E79')
-  const titleFontSize = Number(cfg.titleFontSize || 15)
+  const titleFontSize = Number(cfg.mainTitleFontSize || 18)
   const sectionTitleColor = String(cfg.sectionTitleColor || '#1F4E79')
-  const sectionTitleFontSize = Number(cfg.sectionTitleFontSize || 13)
+  const sectionTitleFontSize = Number(cfg.sectionHeaderFontSize || 15)
+  const bodyFontSize = Number(cfg.bodyFontSize || 15)
+  const indexFontSize = Number(cfg.indexFontSize || 14)
   const accentColor = String(cfg.accentColor || '#1F4E79')
+  const subtitleColor = String(cfg.subtitleColor || '#475569')
+  const subtitleFontSize = Number(cfg.subtitleFontSize || 14)
+  const approvalMetaColor = String(cfg.approvalMetaColor || '#475569')
+  const approvalMetaFontSize = Number(cfg.approvalMetaFontSize || 13)
+  const approvalMetaFontWeight = Number(cfg.approvalMetaFontWeight || 600)
   const titleDividerColor = String(cfg.titleDividerColor || '#1F4E79')
   const titleDividerWidth = cfg.titleDividerWidth == null ? 2 : Number(cfg.titleDividerWidth)
   const leftPanelBackgroundColor = String(cfg.leftPanelBackgroundColor || '#ffffff')
@@ -73,7 +80,31 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         </div>
 
         <label style={lbl}>Dimensione titolo (px)</label>
-        <input style={inp} type='number' min={10} max={36} step={1} value={titleFontSize} onChange={(e) => set('titleFontSize', Number(e.target.value || 15))} />
+        <input style={inp} type='number' min={10} max={36} step={1} value={titleFontSize} onChange={(e) => set('mainTitleFontSize', Number(e.target.value || 18))} />
+        <label style={lbl}>Dimensione icona titolo (px)</label>
+        <input style={inp} type='number' min={16} max={48} step={1} value={Number(cfg.titleIconSize || 23)} onChange={(e) => set('titleIconSize', Number(e.target.value || 23))} />
+
+        <label style={{ ...lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={cfg.showTitleSubtitle !== false} onChange={e=>set('showTitleSubtitle',e.target.checked)}/> Mostra sottotitolo / descrizione</label>
+        <label style={{ ...lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={cfg.showTitleDivider !== false} onChange={e=>set('showTitleDivider',e.target.checked)}/> Mostra separatore sotto il titolo</label>
+        <label style={lbl}>Colore descrizione sotto il separatore</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={subtitleColor} onChange={(e) => set('subtitleColor', e.target.value)} aria-label='Colore descrizione' />
+          <input style={inp} value={subtitleColor} onChange={(e) => set('subtitleColor', e.target.value)} />
+        </div>
+        <label style={lbl}>Dimensione descrizione sotto il separatore (px)</label>
+        <input style={inp} type='number' min={10} max={30} step={1} value={subtitleFontSize} onChange={(e) => set('subtitleFontSize', Number(e.target.value || 14))} />
+
+        <div style={{ ...sectionTitle, marginTop: 16, marginBottom: 0 }}>Delibera di approvazione</div>
+        <label style={lbl}>Colore testo delibera</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={approvalMetaColor} onChange={(e) => set('approvalMetaColor', e.target.value)} aria-label='Colore testo delibera' />
+          <input style={inp} value={approvalMetaColor} onChange={(e) => set('approvalMetaColor', e.target.value)} />
+        </div>
+        <label style={lbl}>Dimensione testo delibera (px)</label>
+        <input style={inp} type='number' min={9} max={24} step={1} value={approvalMetaFontSize} onChange={(e) => set('approvalMetaFontSize', Number(e.target.value || 13))} />
+        <label style={lbl}>Peso testo delibera</label>
+        <input style={inp} type='number' min={100} max={900} step={100} value={approvalMetaFontWeight} onChange={(e) => set('approvalMetaFontWeight', Number(e.target.value || 600))} />
+        <div style={hint}>Il testo della delibera è allineato sulla destra della stessa riga del titolo e mantiene dimensione, colore e peso indipendenti dal titolo.</div>
 
         <label style={lbl}>Colore separatore sotto il titolo</label>
         <div style={colorRow}>
@@ -95,7 +126,16 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         </div>
 
         <label style={lbl}>Dimensione titoli di sezione (px)</label>
-        <input style={inp} type='number' min={10} max={24} step={0.5} value={sectionTitleFontSize} onChange={(e) => set('sectionTitleFontSize', Number(e.target.value || 13))} />
+        <input style={inp} type='number' min={10} max={24} step={0.5} value={sectionTitleFontSize} onChange={(e) => set('sectionHeaderFontSize', Number(e.target.value || 15))} />
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Testo di consultazione</div>
+        <label style={lbl}>Dimensione testo articoli (px)</label>
+        <input style={inp} type='number' min={12} max={22} step={1} value={bodyFontSize} onChange={(e) => set('bodyFontSize', Number(e.target.value || 15))} />
+        <label style={lbl}>Dimensione indice articoli (px)</label>
+        <input style={inp} type='number' min={11} max={20} step={1} value={indexFontSize} onChange={(e) => set('indexFontSize', Number(e.target.value || 14))} />
+        <div style={hint}>Metadati, numeri articolo, titoli articolo e controlli secondari vengono proporzionati automaticamente a questi valori.</div>
       </div>
 
       <div style={section}>

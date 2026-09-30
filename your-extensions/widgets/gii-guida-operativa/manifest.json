@@ -1,0 +1,14 @@
+{
+  "name": "gii-guida-operativa",
+  "label": "GII - Guida operativa",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Guida operativa interattiva del Gestionale Infrazioni Irrigue con indice, ricerca globale, consultazione per attività e filtro per ruolo.",
+  "translatedLocales": ["it"],
+  "defaultSize": {
+    "width": 1200,
+    "height": 760
+  }
+}

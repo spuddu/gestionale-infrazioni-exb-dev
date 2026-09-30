@@ -1,1 +1,7 @@
-{}
+{
+  "subtitleColor": "#475569",
+  "subtitleFontSize": 13,
+  "titleIconSize": 22,
+  "titleDividerColor": "#1F4E79",
+  "titleDividerWidth": 2
+}

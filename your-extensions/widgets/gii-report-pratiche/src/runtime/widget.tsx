@@ -7,6 +7,7 @@ import {
   pickGiiRuntimeView,
   type GiiRuntimeView as RuntimeDsView
 } from '../../../_shared/gii-runtime/runtime-views'
+import { GiiPageTitle } from '../../../_shared/gii-ui/page-title'
 
 type TransferActionIconName = 'import' | 'export'
 
@@ -1366,16 +1367,26 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   return (
     <div style={{ width: '100%', height: '100%', overflow: 'hidden', color: cfg.textColor, boxSizing: 'border-box', padding: `${Number(cfg.outerPaddingTop ?? defaultConfig.outerPaddingTop)}px ${Number(cfg.outerPaddingRight ?? defaultConfig.outerPaddingRight)}px ${Number(cfg.outerPaddingBottom ?? defaultConfig.outerPaddingBottom)}px ${Number(cfg.outerPaddingLeft ?? defaultConfig.outerPaddingLeft)}px` }}>
       <div style={{ height: '100%', background: cfg.panelBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: 22, padding: `${Number(cfg.panelPaddingTop ?? defaultConfig.panelPaddingTop)}px ${Number(cfg.panelPaddingRight ?? defaultConfig.panelPaddingRight)}px ${Number(cfg.panelPaddingBottom ?? defaultConfig.panelPaddingBottom)}px ${Number(cfg.panelPaddingLeft ?? defaultConfig.panelPaddingLeft)}px`, boxShadow: '0 18px 60px rgba(0,0,0,0.22)', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10, flexShrink: 0, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', minWidth: 0 }}>
-            <div style={{ color: cfg.mutedColor, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap' }}>Quadro di sintesi delle fasi procedimentali delle pratiche di competenza.</div>
-            {lastLoad && <div style={{ color: cfg.mutedColor, fontSize: 12, whiteSpace: 'nowrap' }}>Ultimo aggiornamento: {new Date(lastLoad).toLocaleString('it-IT')}</div>}
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 0 }}>
+        <GiiPageTitle
+          showSubtitle={(cfg as any).showTitleSubtitle !== false}
+          showDivider={(cfg as any).showTitleDivider !== false}
+          title={cfg.title || undefined}
+          fallbackIcon='report'
+          titleColor={cfg.textColor}
+          titleFontSize={Number(cfg.pageTitleFontSize ?? 22)}
+          titleFontWeight={900}
+          subtitleColor={String(cfg.pageTitleDescriptionColor || cfg.mutedColor)}
+          subtitleFontSize={Number(cfg.pageTitleDescriptionFontSize ?? 13)}
+          iconSize={Number(cfg.titleIconSize ?? 26)}
+          dividerColor={String(cfg.titleDividerColor || cfg.accentColor)}
+          dividerWidth={Math.max(0, Number(cfg.titleDividerWidth ?? 2))}
+          style={{ marginBottom: 7, flex: '0 0 auto' }}
+          rightContent={<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 0 }}>
             <button onClick={() => setNonce(n => n + 1)} style={{ border: `1px solid ${cfg.cardBorder}`, background: 'rgba(255,255,255,0.08)', color: cfg.textColor, borderRadius: 12, padding: '8px 12px', fontWeight: 700, cursor: 'pointer' }}>Aggiorna</button>
             <button onClick={exportCsv} disabled={filtered.length === 0} style={{ border: `1px solid ${cfg.cardBorder}`, background: filtered.length ? cfg.accentColor : 'rgba(255,255,255,0.08)', color: filtered.length ? '#111827' : cfg.mutedColor, borderRadius: 12, padding: '8px 12px', fontWeight: 800, cursor: filtered.length ? 'pointer' : 'not-allowed' }}>Esporta CSV</button>
-          </div>
-        </div>
+          </div>}
+        />
+        {lastLoad && <div style={{ color: cfg.mutedColor, fontSize: 12, whiteSpace: 'nowrap', marginBottom: 10, flexShrink: 0 }}>Ultimo aggiornamento: {new Date(lastLoad).toLocaleString('it-IT')}</div>}
 
         {loading && <div style={{ padding: 10, marginBottom: 10, borderRadius: 14, background: 'rgba(255,255,255,0.08)', color: cfg.mutedColor, flexShrink: 0 }}>Caricamento report…</div>}
         {error && <div style={{ padding: 10, marginBottom: 10, borderRadius: 14, background: 'rgba(127,29,29,0.40)', border: '1px solid rgba(248,113,113,0.35)', color: '#fecaca', flexShrink: 0 }}>{error}</div>}

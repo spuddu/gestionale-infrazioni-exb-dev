@@ -225,6 +225,8 @@ export interface Config {
   maskRadius: number
 
   // --- Titolo elenco (sopra l'area bianca)
+  showTitleSubtitle: boolean
+  showTitleDivider: boolean
   listTitleText: string
   listTitleHeight: number
   listTitlePaddingBottom: number
@@ -232,6 +234,14 @@ export interface Config {
   listTitleFontSize: number
   listTitleFontWeight: number
   listTitleColor: string
+  listTitleDividerColor: string
+  listTitleDividerWidth: number
+  listTitleIconSize: number
+  listTitleSubtitleColor: string
+  listTitleSubtitleFontSize: number
+  listLastUpdateColor: string
+  listLastUpdateFontSize: number
+  listLastUpdateFontWeight: number
 }
 
 export type IMConfig = ImmutableObject<Config>
@@ -393,13 +403,23 @@ export const defaultConfig: IMConfig = {
   maskRadius: 12,
 
   // Titolo elenco
+  showTitleSubtitle: true,
+  showTitleDivider: true,
   listTitleText: 'Elenco pratiche',
   listTitleHeight: 28,
   listTitlePaddingBottom: 10,
   listTitlePaddingLeft: 0,
   listTitleFontSize: 14,
   listTitleFontWeight: 600,
-  listTitleColor: 'rgba(0,0,0,0.85)'
+  listTitleColor: 'rgba(0,0,0,0.85)',
+  listTitleDividerColor: '#1F4E79',
+  listTitleDividerWidth: 2,
+  listTitleIconSize: 22,
+  listTitleSubtitleColor: '#475569',
+  listTitleSubtitleFontSize: 12,
+  listLastUpdateColor: 'rgba(0,0,0,0.58)',
+  listLastUpdateFontSize: 12,
+  listLastUpdateFontWeight: 600
 } as unknown as IMConfig
 
 export default defaultConfig

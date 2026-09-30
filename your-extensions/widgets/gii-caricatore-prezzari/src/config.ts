@@ -1,6 +1,8 @@
 import { type ImmutableObject } from 'jimu-core'
 
 export interface Config {
+  showTitleSubtitle?: boolean
+  showTitleDivider?: boolean
   importUrl?: string
   regionaleArticoliUrl?: string
   regionaleAnalisiUrl?: string
@@ -9,6 +11,11 @@ export interface Config {
   title?: string
   titleColor?: string
   titleFontSize?: number
+  titleIconSize?: number
+  titleDividerColor?: string
+  titleDividerWidth?: number
+  subtitleColor?: string
+  subtitleFontSize?: number
   sectionTitleColor?: string
   sectionTitleFontSize?: number
   toolbarLabelColor?: string

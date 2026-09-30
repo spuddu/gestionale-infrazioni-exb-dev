@@ -1,53 +1,32 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, ReactRedux, type IMState, getAppStore } from 'jimu-core'
+import { React, jsx, ReactRedux, type IMState } from 'jimu-core'
 import { type AllWidgetSettingProps } from 'jimu-for-builder'
-import { defaultConfig, type IMConfig, type NavItem } from '../config'
-import { applyHomeCardColors, findHomeCardForNavItem } from '../home-card-colors'
+import { defaultConfig, type IMConfig } from '../config'
+import { buildNavItemsFromHome } from '../home-card-colors'
 
 const P = {
-  wrap:    { padding:'0 12px 32px', fontSize:13, background:'#1a1f2e', minHeight:'100%', color:'#e5e7eb' } as React.CSSProperties,
-  sec:     { fontSize:11, fontWeight:700, color:'#93c5fd', textTransform:'uppercase' as const, letterSpacing:1.2, borderBottom:'1px solid rgba(255,255,255,0.10)', paddingBottom:6, marginBottom:14, marginTop:22 } as React.CSSProperties,
-  lbl:     { fontSize:11.5, fontWeight:600, color:'#d1d5db', display:'block', marginBottom:4, marginTop:10 } as React.CSSProperties,
-  hint:    { fontSize:10.5, color:'#a0aec0', marginTop:3, lineHeight:1.4 } as React.CSSProperties,
-  row2:    { display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 } as React.CSSProperties,
-  row3:    { display:'grid', gridTemplateColumns:'repeat(3, minmax(0, 1fr))', gap:6 } as React.CSSProperties,
-  inp:     { width:'100%', padding:'5px 8px', fontSize:12, border:'1px solid rgba(255,255,255,0.15)', borderRadius:6, outline:'none', boxSizing:'border-box' as const, background:'rgba(255,255,255,0.07)', color:'#e5e7eb' } as React.CSSProperties,
-  check:   { display:'flex', alignItems:'center', gap:8, fontSize:12, color:'#d1d5db', cursor:'pointer', marginTop:8 } as React.CSSProperties,
+  wrap: { padding:'0 12px 32px', fontSize:13, background:'#1a1f2e', minHeight:'100%', color:'#e5e7eb' } as React.CSSProperties,
+  sec:  { fontSize:11, fontWeight:700, color:'#93c5fd', textTransform:'uppercase' as const, letterSpacing:1.2, borderBottom:'1px solid rgba(255,255,255,0.10)', paddingBottom:6, marginBottom:14, marginTop:22 } as React.CSSProperties,
+  lbl:  { fontSize:11.5, fontWeight:600, color:'#d1d5db', display:'block', marginBottom:4, marginTop:10 } as React.CSSProperties,
+  hint: { fontSize:10.5, color:'#a0aec0', marginTop:3, lineHeight:1.45 } as React.CSSProperties,
+  row2: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 } as React.CSSProperties,
+  row3: { display:'grid', gridTemplateColumns:'repeat(3, minmax(0, 1fr))', gap:6 } as React.CSSProperties,
+  inp:  { width:'100%', padding:'5px 8px', fontSize:12, border:'1px solid rgba(255,255,255,0.15)', borderRadius:6, outline:'none', boxSizing:'border-box' as const, background:'rgba(255,255,255,0.07)', color:'#e5e7eb' } as React.CSSProperties,
 }
 
-function Inp(p: { value:string|number; onChange:(v:string)=>void; type?:string; placeholder?:string }) {
-  return <input type={p.type||'text'} value={p.value} onChange={e=>p.onChange(e.target.value)} placeholder={p.placeholder} style={P.inp}/>
-}
 function NumInp(p: { value:number; onChange:(v:number)=>void; min?:number; max?:number; step?:number; unit?:string; compact?:boolean }) {
   const inputWidth = p.compact ? 42 : 68
   return (
     <div style={{ display:'flex', alignItems:'center', gap:p.compact?3:5, width:'100%', minWidth:0 }}>
       <input type='number' value={p.value} min={p.min} max={p.max} step={p.step||1}
-        onChange={e=>p.onChange(Number(e.target.value))} style={{ ...P.inp, width:inputWidth, minWidth:0, padding:p.compact?'5px 4px':'5px 8px', textAlign:p.compact?'center':'left' }}/>
+        onChange={e=>p.onChange(Number(e.target.value))}
+        style={{ ...P.inp, width:inputWidth, minWidth:0, padding:p.compact?'5px 4px':'5px 8px', textAlign:p.compact?'center':'left' }}/>
       {p.unit && <span style={{ fontSize:10.5, color:'#a0aec0', flexShrink:0 }}>{p.unit}</span>}
     </div>
   )
 }
-function ColInp(p: { value:string; onChange:(v:string)=>void }) {
-  const hexVal = /^#[0-9a-fA-F]{3,8}$/.test(p.value) ? p.value : '#1d4ed8'
-  return (
-    <div style={{ display:'flex', alignItems:'center', gap:7 }}>
-      <input type='color' value={hexVal} onChange={e=>p.onChange(e.target.value)}
-        style={{ width:32, height:28, padding:2, border:'1px solid rgba(255,255,255,0.15)', borderRadius:6, cursor:'pointer', background:'transparent', flexShrink:0 }}/>
-      <input type='text' value={p.value} onChange={e=>p.onChange(e.target.value)}
-        placeholder='#rrggbb o rgba(...)' style={{ ...P.inp, flex:1, fontSize:11 }}/>
-    </div>
-  )
-}
-function Check(p: { value:boolean; onChange:(v:boolean)=>void; label:string }) {
-  return (
-    <label style={P.check}>
-      <input type='checkbox' checked={p.value} onChange={e=>p.onChange(e.target.checked)}/>
-      {p.label}
-    </label>
-  )
-}
+
 function Sel(p: { value:string; onChange:(v:string)=>void; options:Array<{value:string;label:string}> }) {
   return (
     <select value={p.value} onChange={e=>p.onChange(e.target.value)} style={{ ...P.inp, cursor:'pointer' }}>
@@ -56,158 +35,35 @@ function Sel(p: { value:string; onChange:(v:string)=>void; options:Array<{value:
   )
 }
 
-function PageSel(p: { value:string; onChange:(v:string)=>void }) {
-  const pages = React.useMemo(() => {
-    try {
-      const state: any = getAppStore()?.getState?.()
-      const appConfig = state?.appStateInBuilder?.appConfig ?? state?.appConfig
-      const rawPages: any = appConfig?.pages ?? {}
-      const pagesMap: Record<string, any> =
-        rawPages?.asMutable ? rawPages.asMutable({ deep: true }) :
-        rawPages?.toJS ? rawPages.toJS() :
-        rawPages
-      const entries = Object.entries(pagesMap)
-      if (entries.length === 0) return []
-      return entries
-        .filter(([, pg]: any) => pg?.isVisible !== false)
-        .map(([pageId, pg]: [string, any]) => {
-          const label = pg?.label || pg?.title || pg?.name || pageId
-          const value = pg?.name || appConfig?.historyLabels?.page?.[pageId] || pageId
-          return { value: String(value), label: String(label) }
-        })
-        .sort((a, b) => a.label.localeCompare(b.label, 'it'))
-    } catch { return [] }
-  }, [])
-
-  if (pages.length === 0) {
-    return (
-      <div>
-        <Inp value={p.value} onChange={p.onChange} placeholder='inserisci il nome/ID della pagina'/>
-        <div style={{ ...P.hint, color:'#f87171', marginTop:4 }}>
-          ⚠ Impossibile leggere le pagine. Inserisci manualmente il valore che vedi nell&apos;URL (es: elenco, nuova…).
-        </div>
-      </div>
-    )
-  }
-  return (
-    <div>
-      <select value={p.value} onChange={e=>p.onChange(e.target.value)} style={{ ...P.inp, cursor:'pointer' }}>
-        <option value='' style={{ background:'#1a1f2e', color:'#9ca3af' }}>— seleziona una pagina —</option>
-        {pages.map(pg=>(
-          <option key={pg.value} value={pg.value} style={{ background:'#1a1f2e', color:'#e5e7eb' }}>{pg.label}</option>
-        ))}
-      </select>
-      {p.value && <div style={{ fontSize:10, color:'#a0aec0', marginTop:3 }}>Target: {p.value}</div>}
-    </div>
-  )
-}
-
 const FONTS = [
   { value:"'Crimson Pro', Georgia, serif",           label:'Crimson Pro (serif)' },
   { value:"'Source Sans 3', 'Segoe UI', sans-serif", label:'Source Sans 3 (sans)' },
-  { value:"Georgia, serif",                          label:'Georgia' },
+  { value:'Georgia, serif',                           label:'Georgia' },
   { value:"'Times New Roman', serif",                label:'Times New Roman' },
   { value:"'Trebuchet MS', sans-serif",              label:'Trebuchet MS' },
   { value:"'Palatino Linotype', serif",              label:'Palatino Linotype' },
   { value:"'Courier New', monospace",                label:'Courier New' },
-  { value:"Impact, sans-serif",                      label:'Impact' },
+  { value:'Impact, sans-serif',                       label:'Impact' },
 ]
 const WEIGHTS = [300,400,500,600,700,800,900].map(w=>({
   value:String(w),
   label:`${w} — ${['Thin','Regular','Medium','SemiBold','Bold','ExtraBold','Black'][[300,400,500,600,700,800,900].indexOf(w)]}`
 }))
-const ROLE_OPTIONS = [
-  {value:'*',label:'Tutti'},{value:'TR',label:'Tecnico rilevatore'},{value:'IT',label:'Istruttore tecnico'},
-  {value:'IA',label:'Istruttore amministrativo'},{value:'CS',label:'Capo Settore'},{value:'RIT',label:'Responsabile istruttoria tecnica'},{value:'RIA',label:'Responsabile istruttoria amministrativa'},
-  {value:'RIA',label:'Responsabile istruttoria amministrativa'},{value:'DT',label:'Direttore tecnico'},
-  {value:'DA',label:'Direttore amministrativo'},{value:'ADMIN',label:'Amministratore'}
-]
-const ICON_OPTIONS = [
-  {value:'home',        label:'🏠 Home'},
-  {value:'elenco',      label:'📋 Elenco'},
-  {value:'regolamento',  label:'📖 Regolamento'},
-  {value:'nuova',       label:'➕ Nuova'},
-  {value:'mappa',       label:'🗺 Mappa'},
-  {value:'dashboard',   label:'📊 Dashboard'},
-  {value:'report',      label:'📄 Report'},
-  {value:'utenti',      label:'👤 Utenti'},
-  {value:'gruppo',      label:'👥 Gruppo'},
-  {value:'prezzari',    label:'€ Prezzari'},
-  {value:'impostazioni',label:'⚙️ Impostazioni'},
-  {value:'allegati',    label:'📎 Allegati'},
-  {value:'calendario',  label:'📅 Calendario'},
-  {value:'allarmi',     label:'🔔 Allarmi'},
-  {value:'archivio',    label:'🗄 Archivio'},
-  {value:'ricerca',     label:'🔎 Ricerca'},
-  {value:'modifica',    label:'✏️ Modifica'},
-  {value:'verbale',     label:'📝 Verbale / Atto'},
-  {value:'tabelle',     label:'▦ Tabelle'},
-  {value:'statistiche', label:'📈 Statistiche'},
-  {value:'documenti',   label:'📑 Documenti'},
-]
-
-function makeNewItem(order: number): NavItem {
-  return {
-    id: `nav_custom_${Date.now()}`,
-    visible: true,
-    order,
-    label: 'Nuova voce',
-    hashPage: '',
-    colorBg: '#1e3a5f',
-    colorAccent: '#60a5fa',
-    colorBgRest: 'rgba(255,255,255,0.05)',
-    colorBgHover: '#1e3a5fee',
-    roles: ['*'],
-    icon: 'home'
-  }
-}
 
 export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const cfg: any = { ...defaultConfig, ...(props.config as any) }
-  const items: NavItem[] = Array.isArray(cfg.items) ? cfg.items.map((i:any)=>({...i})) : defaultConfig.items
 
-  // Config dell'Experience in editing: serve solo per mostrare nel Setting del nav
-  // gli stessi colori della card Home corrispondente. I colori si modificano dalla Home.
   const appConfig = ReactRedux.useSelector((state: IMState) => {
     const s: any = state as any
     return s?.appStateInBuilder?.appConfig ?? s?.appConfig
   })
-
-  const [openItem, setOpenItem] = React.useState<string|null>(null)
+  const homeItems = React.useMemo(() => buildNavItemsFromHome(appConfig), [appConfig])
 
   const set = (key:string, value:any) =>
     props.onSettingChange({ id:props.id, config:{ ...cfg, [key]:value } as any })
-  const setItem = (idx:number, patch:Partial<NavItem>) =>
-    set('items', items.map((it,i)=>i===idx?{...it,...patch}:it))
-  const moveItem = (id:string, dir:-1|1) => {
-    const ordered = items
-      .map((it, originalIndex) => ({ ...it, originalIndex }))
-      .sort((a,b) => (a.order - b.order) || (a.originalIndex - b.originalIndex))
-    const idx = ordered.findIndex(it=>it.id===id)
-    const t = idx + dir
-    if(idx<0||t<0||t>=ordered.length) return
-    ;[ordered[idx], ordered[t]] = [ordered[t], ordered[idx]]
-    const orderById = new Map(ordered.map((it, index)=>[it.id, index + 1]))
-    set('items', items.map(it=>({...it,order:orderById.get(it.id) ?? it.order})))
-  }
-  const addItem = () => {
-    const maxOrder = items.reduce((m, it) => Math.max(m, it.order), 0)
-    const newItem = makeNewItem(maxOrder + 1)
-    set('items', [...items, newItem])
-    setOpenItem(newItem.id)
-  }
-  const removeItem = (id: string) => {
-    if (!window.confirm('Rimuovere questa voce dal nav?')) return
-    set('items', items.filter(it => it.id !== id))
-    setOpenItem(null)
-  }
-
-  const sorted = [...items].sort((a,b)=>a.order-b.order)
 
   return (
     <div style={P.wrap}>
-
-      {/* ── Layout ── */}
       <div style={P.sec}>⚙ Layout</div>
       <label style={P.lbl}>Orientamento</label>
       <Sel value={cfg.direction} onChange={v=>set('direction',v)} options={[
@@ -225,130 +81,41 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       <label style={P.lbl}>Font etichette</label>
       <Sel value={cfg.labelFont} onChange={v=>set('labelFont',v)} options={FONTS}/>
       <div style={P.row2}>
-        <div><label style={P.lbl}>Dimensione</label><NumInp value={cfg.labelSize} onChange={v=>set('labelSize',v)} min={10} max={22} unit='px'/></div>
-        <div><label style={P.lbl}>Peso</label><Sel value={String(cfg.labelWeight)} onChange={v=>set('labelWeight',Number(v))} options={WEIGHTS}/></div>
+        <div><label style={P.lbl}>Dimensione</label><NumInp value={Math.max(16, Number(cfg.labelSize) || 16)} onChange={v=>set('labelSize',v)} min={16} max={24} unit='px'/></div>
+        <div><label style={P.lbl}>Peso</label><Sel value={String(Math.max(700, Number(cfg.labelWeight) || 700))} onChange={v=>set('labelWeight',Number(v))} options={WEIGHTS.filter(o=>Number(o.value)>=700)}/></div>
+      </div>
+      <div style={{ ...P.hint, marginTop:7, color:'#cbd5e1' }}>Per garantire leggibilità, il nav applica comunque un minimo di 16 px e peso 700 anche alle vecchie istanze salvate con valori inferiori.</div>
+
+      <div style={P.sec}>🔗 Voci di navigazione</div>
+      <div style={{
+        padding:'10px 11px', borderRadius:8,
+        border:'1px solid rgba(147,197,253,0.22)',
+        background:'rgba(59,130,246,0.08)', color:'#bfdbfe',
+        fontSize:11, lineHeight:1.5
+      }}>
+        Le voci del menu non si configurano più qui. Sono generate automaticamente dalle card del <strong>GII Homepage</strong>, da cui ereditano etichetta, pagina, icona, colori, ordine, ruoli e visibilità.
+        <div style={{ marginTop:6, color:'#dbeafe' }}>
+          Eccezioni: <strong>Home</strong> resta sempre disponibile nel nav anche se la sua card è nascosta nella Home; la <strong>pagina corrente</strong> viene invece esclusa automaticamente dal proprio menu.
+        </div>
       </div>
 
-      {/* ── Voci ── */}
-      <div style={P.sec}>🔗 Voci di navigazione</div>
-
-      {/* Pulsante aggiungi */}
-      <button type='button' onClick={addItem}
-        style={{ width:'100%', padding:'8px', borderRadius:8, border:'1px dashed rgba(147,197,253,0.4)', background:'rgba(59,130,246,0.08)', color:'#93c5fd', fontSize:12, fontWeight:600, cursor:'pointer', marginBottom:12, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
-        ＋ Aggiungi voce
-      </button>
-
-      {sorted.map((item, si) => {
-        const ri = items.findIndex(it=>it.id===item.id)
-        const isCustom = item.id.startsWith('nav_custom_')
-        const isO = openItem===item.id
-        const homeCard = findHomeCardForNavItem(item, appConfig)
-        const visualItem = applyHomeCardColors(item, appConfig)
-        return (
-          <div key={item.id} style={{ border:'1px solid rgba(255,255,255,0.10)', borderRadius:10, padding:'10px 12px', marginBottom:8, background:'rgba(255,255,255,0.04)', opacity:item.visible?1:0.55 }}>
-            {/* Header voce */}
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',cursor:'pointer',userSelect:'none' as const}}
-              onClick={()=>setOpenItem(isO?null:item.id)}>
-              <div style={{display:'flex',alignItems:'center',gap:8,minWidth:0}}>
-                <div style={{width:12,height:12,borderRadius:3,background:visualItem.colorBg,flexShrink:0,border:`1px solid ${visualItem.colorAccent}`}}/>
-                <span style={{fontWeight:600,fontSize:12,color:'#e5e7eb',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{item.label}</span>
-                {!item.visible && <span style={{fontSize:10,color:'#a0aec0',fontStyle:'italic',flexShrink:0}}>(nascosta)</span>}
-                {isCustom && <span style={{fontSize:9,color:'#6b7280',fontStyle:'italic',flexShrink:0}}>custom</span>}
-              </div>
-              <div style={{display:'flex',alignItems:'center',gap:3,flexShrink:0}}>
-                {si>0 && <button type='button' onClick={e=>{e.stopPropagation();moveItem(item.id,-1)}} style={{padding:'1px 5px',fontSize:11,border:'1px solid rgba(255,255,255,0.15)',borderRadius:4,background:'rgba(255,255,255,0.05)',color:'#d1d5db',cursor:'pointer'}}>↑</button>}
-                {si<sorted.length-1 && <button type='button' onClick={e=>{e.stopPropagation();moveItem(item.id,1)}} style={{padding:'1px 5px',fontSize:11,border:'1px solid rgba(255,255,255,0.15)',borderRadius:4,background:'rgba(255,255,255,0.05)',color:'#d1d5db',cursor:'pointer'}}>↓</button>}
-                <span style={{fontSize:10,color:'#a0aec0',marginLeft:2}}>{isO?'▲':'▼'}</span>
-              </div>
-            </div>
-
-            {/* Dettaglio (espandibile) */}
-            {isO && <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid rgba(255,255,255,0.08)'}}>
-              <Check value={item.visible} onChange={v=>setItem(ri,{visible:v})} label='Visibile'/>
-
-              <label style={P.lbl}>Etichetta</label>
-              <Inp value={item.label} onChange={v=>setItem(ri,{label:v})}/>
-
-              <label style={P.lbl}>Icona</label>
-              <Sel
-                value={/regolamento/.test(`${item.id || ''} ${item.label || ''} ${item.hashPage || ''}`.toLowerCase()) && (!item.icon || item.icon === 'elenco') ? 'regolamento' : (item.icon || 'home')}
-                onChange={v=>setItem(ri,{icon:v})}
-                options={ICON_OPTIONS}
-              />
-
-              <label style={P.lbl}>Pagina di destinazione</label>
-              <PageSel value={item.hashPage} onChange={v=>setItem(ri,{hashPage:v})}/>
-
-              <div style={{
-                marginTop:10,
-                padding:'9px 10px',
-                borderRadius:7,
-                border:'1px solid rgba(147,197,253,0.18)',
-                background:'rgba(59,130,246,0.07)',
-                display:'flex',
-                alignItems:'center',
-                gap:8
-              }}>
-                <div style={{
-                  width:14,
-                  height:14,
-                  borderRadius:4,
-                  background:visualItem.colorBg,
-                  border:`1px solid ${visualItem.colorAccent}`,
-                  flexShrink:0
-                }}/>
-                <div style={{ fontSize:10.5, lineHeight:1.4, color:homeCard ? '#bfdbfe' : '#fbbf24' }}>
-                  {homeCard
-                    ? <>Colori ereditati dalla card <strong>{homeCard.label || item.label}</strong> della Home. Per modificarli usa il Setting di GII Homepage.</>
-                    : <>Nessuna card Home corrispondente trovata: questa voce usa i colori di fallback già salvati nel nav.</>}
-                </div>
-              </div>
-
-              <label style={P.lbl}>Ruoli visibili</label>
-              <div style={{display:'flex',flexWrap:'wrap' as const,gap:5,marginTop:4}}>
-                {ROLE_OPTIONS.map(ro=>{
-                  const isAll=ro.value==='*'
-                  const checked=isAll?item.roles.includes('*'):(!item.roles.includes('*')&&item.roles.includes(ro.value))
-                  return (
-                    <label key={ro.value} style={{display:'flex',alignItems:'center',gap:4,fontSize:11,cursor:'pointer',
-                      background:checked?'rgba(59,130,246,0.25)':'rgba(255,255,255,0.06)',
-                      border:`1px solid ${checked?'#93c5fd':'rgba(255,255,255,0.12)'}`,
-                      borderRadius:6,padding:'3px 8px',color:checked?'#93c5fd':'#9ca3af',userSelect:'none' as const}}>
-                      <input type='checkbox' checked={checked} style={{display:'none'}} onChange={()=>{
-                        let next=[...item.roles]
-                        if(isAll){next=checked?[]:['*']}
-                        else{if(next.includes('*'))next=[];if(checked)next=next.filter(r=>r!==ro.value);else next=[...next,ro.value]}
-                        setItem(ri,{roles:next})
-                      }}/>
-                      {ro.label}
-                    </label>
-                  )
-                })}
-              </div>
-              <div style={{ fontSize:10, color:'#a0aec0', marginTop:4, lineHeight:1.4 }}>
-                Le voci con ruoli limitati sono visibili a runtime solo agli utenti con quel ruolo.
-              </div>
-
-              {/* Rimuovi */}
-              <div style={{marginTop:14,paddingTop:10,borderTop:'1px solid rgba(255,255,255,0.08)',display:'flex',alignItems:'center',gap:8}}>
-                <button type='button' onClick={()=>removeItem(item.id)}
-                  style={{padding:'5px 12px',borderRadius:7,border:'1px solid rgba(252,165,165,0.4)',background:'rgba(239,68,68,0.10)',color:'#fca5a5',fontSize:11,cursor:'pointer',fontWeight:600}}>
-                  🗑 Rimuovi voce
-                </button>
-                {!isCustom && <span style={{fontSize:10,color:'#6b7280'}}>Le voci predefinite si possono ripristinare in fondo.</span>}
-              </div>
-            </div>}
+      <div style={{ marginTop:12, fontSize:10.5, color:'#a0aec0', lineHeight:1.45 }}>
+        Anteprima sorgente Home: {homeItems.length} {homeItems.length === 1 ? 'voce' : 'voci'} disponibili prima del filtro della pagina corrente e del ruolo utente.
+      </div>
+      <div style={{ marginTop:8, display:'flex', flexDirection:'column', gap:5 }}>
+        {homeItems.map(item => (
+          <div key={item.id} style={{
+            display:'flex', alignItems:'center', gap:8,
+            padding:'6px 8px', borderRadius:7,
+            border:'1px solid rgba(255,255,255,0.08)',
+            background:'rgba(255,255,255,0.035)'
+          }}>
+            <div style={{ width:11, height:11, borderRadius:3, flexShrink:0, background:item.colorBg, border:`1px solid ${item.colorAccent}` }}/>
+            <div style={{ minWidth:0, flex:1, fontSize:11.5, fontWeight:600, color:'#e5e7eb', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' as const }}>{item.label}</div>
+            <div style={{ flexShrink:0, fontSize:9.5, color:'#94a3b8' }}>{item.roles.includes('*') ? 'Tutti' : item.roles.join(', ')}</div>
           </div>
-        )
-      })}
-
-      {/* Reset */}
-      <div style={{marginTop:24,paddingTop:14,borderTop:'1px solid rgba(255,255,255,0.08)'}}>
-        <button type='button'
-          onClick={()=>{if(window.confirm('Ripristinare i valori predefiniti? Le voci personalizzate saranno perse.')) props.onSettingChange({id:props.id,config:defaultConfig as any})}}
-          style={{padding:'6px 14px',borderRadius:7,border:'1px solid rgba(252,165,165,0.4)',background:'rgba(239,68,68,0.10)',color:'#fca5a5',fontSize:12,cursor:'pointer',fontWeight:600}}>
-          ↺ Ripristina predefiniti
-        </button>
+        ))}
+        {!homeItems.length && <div style={{ ...P.hint, color:'#fbbf24' }}>La configurazione della Home non è leggibile in questo momento; a runtime resta attivo il fallback alle voci già salvate nel nav.</div>}
       </div>
     </div>
   )

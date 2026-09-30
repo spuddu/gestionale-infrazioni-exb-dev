@@ -670,8 +670,27 @@ export default function Setting(props: Props) {
           <div><label style={P.lbl}>Pad. bottom</label><NumInp value={cfg.listTitlePaddingBottom} onChange={n=>update('listTitlePaddingBottom',n)} min={0} unit='px'/></div>
           <div><label style={P.lbl}>Pad. left</label><NumInp value={cfg.listTitlePaddingLeft} onChange={n=>update('listTitlePaddingLeft',n)} min={0} unit='px'/></div>
         </div>
+        <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={(cfg as any).showTitleSubtitle !== false} onChange={e=>update('showTitleSubtitle',e.target.checked)}/> Mostra sottotitolo / descrizione</label>
+        <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={(cfg as any).showTitleDivider !== false} onChange={e=>update('showTitleDivider',e.target.checked)}/> Mostra separatore sotto il titolo</label>
         <label style={P.lbl}>Colore testo</label>
         <ColInp value={String(cfg.listTitleColor||'rgba(0,0,0,0.85)')} onChange={v=>update('listTitleColor',v)}/>
+        <div style={P.row2}>
+          <div><label style={P.lbl}>Dim. descrizione</label><NumInp value={parseNum((cfg as any).listTitleSubtitleFontSize,12)} onChange={n=>update('listTitleSubtitleFontSize',n)} min={10} max={30} unit='px'/></div>
+          <div><label style={P.lbl}>Dim. Ultimo aggiornamento</label><NumInp value={parseNum((cfg as any).listLastUpdateFontSize,12)} onChange={n=>update('listLastUpdateFontSize',n)} min={9} max={24} unit='px'/></div>
+        </div>
+        <label style={P.lbl}>Colore descrizione sotto il separatore</label>
+        <ColInp value={String((cfg as any).listTitleSubtitleColor||'#475569')} onChange={v=>update('listTitleSubtitleColor',v)}/>
+        <label style={P.lbl}>Colore “Ultimo aggiornamento”</label>
+        <ColInp value={String((cfg as any).listLastUpdateColor||'rgba(0,0,0,0.58)')} onChange={v=>update('listLastUpdateColor',v)}/>
+        <label style={P.lbl}>Peso “Ultimo aggiornamento”</label>
+        <NumInp value={parseNum((cfg as any).listLastUpdateFontWeight,600)} onChange={n=>update('listLastUpdateFontWeight',n)} min={100} max={900} step={100}/>
+        <div style={P.row2}>
+          <div><label style={P.lbl}>Dim. icona</label><NumInp value={parseNum((cfg as any).listTitleIconSize,22)} onChange={n=>update('listTitleIconSize',n)} min={16} max={48} unit='px'/></div>
+          <div><label style={P.lbl}>Spessore separatore</label><NumInp value={parseNum((cfg as any).listTitleDividerWidth,2)} onChange={n=>update('listTitleDividerWidth',n)} min={0} max={8} unit='px'/></div>
+        </div>
+        <label style={P.lbl}>Colore separatore sotto il titolo</label>
+        <ColInp value={String((cfg as any).listTitleDividerColor||'#1F4E79')} onChange={v=>update('listTitleDividerColor',v)}/>
+        <div style={P.hint}>Usa i due interruttori sopra per mostrare o nascondere descrizione e separatore. L’icona e la descrizione vengono lette automaticamente dalla card Home associata alla pagina. “Ultimo aggiornamento” ha dimensione, colore e peso indipendenti dal titolo.</div>
       </div>}
 
       <Acc id='maschera-generale' label='🎨 Maschera generale' open={isOpen('maschera-generale')} onToggle={()=>toggle('maschera-generale')}/>

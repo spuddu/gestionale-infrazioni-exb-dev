@@ -3,7 +3,7 @@
 import { React, jsx, ReactRedux, type IMState, type AllWidgetProps, SessionManager, UrlManager, getAppStore } from 'jimu-core'
 import type { IMConfig, NavItem } from '../config'
 import { defaultConfig } from '../config'
-import { applyHomeCardColors } from '../home-card-colors'
+import { buildNavItemsFromHome, resolvePageIdFromAppConfig } from '../home-card-colors'
 
 
 const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
@@ -158,6 +158,7 @@ const NAV_ICONS: Record<string, string> = {
   home:        `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
   elenco:      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>`,
   regolamento: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.4v15.8"/><path d="M12 4.4C9.2 2.8 5.8 2.3 2.6 3.2v15.9c3.3-.9 6.6-.4 9.4 1.2"/><path d="M12 4.4c2.8-1.6 6.2-2.1 9.4-1.2v15.9c-3.3-.9-6.6-.4-9.4 1.2"/></svg>`,
+  guida:       `<svg fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><!-- Generator: Adobe Illustrator 29.1.0, SVG Export Plug-In . SVG Version: 2.1.0 Build 142) --><defs><style> .st0 { stroke-width: 1.8px; } .st0, .st1 { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; } .st1 { stroke-width: 1.8px; } </style></defs><path class="st0" d="M12,19.5h-6.2c-1,0-1.8-.8-1.8-1.8V4.5c0-1.4,1.1-2.5,2.5-2.5h13.5v17.5h-4"/><path class="st0" d="M20,16H5.8c-1,0-1.8.8-1.8,1.8"/><polyline class="st0" points="12 16 12 22.5 14 20.8 16 22.5 16 16"/><g><line class="st1" x1="12.2" y1="8.9" x2="8" y2="13.2"/><path d="M14.5,4.1l-1.7,1.7.5,2,2,.5,1.7-1.7c.5,1.9-.6,3.8-2.5,4.3-1.9.5-3.8-.6-4.3-2.5-.5-1.9.6-3.8,2.5-4.3.6-.2,1.2-.2,1.8,0Z"/></g></svg>`,
   nuova:       `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>`,
   mappa:       `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>`,
   dashboard:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="13" width="8" height="8" rx="1.5"/><rect x="14" y="13" width="8" height="8" rx="1.5"/><rect x="2" y="3" width="8" height="8" rx="1.5"/><rect x="14" y="3" width="8" height="8" rx="1.5"/></svg>`,
@@ -204,8 +205,18 @@ function NavButton(p: { item: NavItem; cfg: any; idx: number; currentPageId: str
   const isActive = !!currentPageId && !!itemPageId && currentPageId === itemPageId
   const hot = hov || isActive
   const itemText = `${item.id || ''} ${item.hashPage || ''} ${item.label || ''}`.toLowerCase()
-  const iconKey = /regolamento/.test(itemText) && (!item.icon || item.icon === 'elenco') ? 'regolamento' : item.icon
+  const iconKey =
+    /guida\s+operativa|(^|[^a-z])guida([^a-z]|$)/.test(itemText) && (!item.icon || item.icon === 'nuova')
+      ? 'guida'
+      : (/regolamento/.test(itemText) && (!item.icon || item.icon === 'elenco') ? 'regolamento' : item.icon)
   const icon = NAV_ICONS[iconKey] || NAV_DEFAULT_ICON
+  // Leggibilità: le vecchie istanze salvano ancora 14px/600 nel config.
+  // Applichiamo una soglia minima a runtime senza richiedere di aggiornare
+  // manualmente tutte le istanze già presenti nelle pagine.
+  const effectiveLabelSize = Math.max(16, Number(cfg.labelSize) || 16)
+  const effectiveLabelWeight = Math.max(700, Number(cfg.labelWeight) || 700)
+  const iconBoxSize = 36
+  const iconGlyphPadding = 5
 
   return (
     <div
@@ -219,7 +230,7 @@ function NavButton(p: { item: NavItem; cfg: any; idx: number; currentPageId: str
         background: hot ? (item.colorBgHover || item.colorBg) : (item.colorBgRest || 'rgba(255,255,255,0.05)'),
         backdropFilter: 'blur(12px)',
         padding: cfg.itemPadding,
-        display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10,
+        display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12,
         transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)',
         boxShadow: hov ? `0 20px 40px rgba(0,0,0,0.3),0 0 0 1px ${colorWithAlpha(item.colorAccent, 0.27)}` : '0 4px 16px rgba(0,0,0,0.15)',
         ...(animate ? {
@@ -229,18 +240,19 @@ function NavButton(p: { item: NavItem; cfg: any; idx: number; currentPageId: str
         } : {})
       }}>
       <div style={{
-        width: 28, height: 28, borderRadius: 7, flexShrink: 0,
-        background: hov ? colorWithAlpha(item.colorAccent, 0.20) : 'rgba(255,255,255,0.08)',
+        width: iconBoxSize, height: iconBoxSize, borderRadius: 8, flexShrink: 0,
+        background: hov ? colorWithAlpha(item.colorAccent, 0.24) : 'rgba(255,255,255,0.11)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: hov ? item.colorAccent : 'rgba(255,255,255,0.7)',
-        transition: 'background 0.25s', padding: 4, boxSizing: 'border-box' as const
+        color: hov ? item.colorAccent : 'rgba(255,255,255,0.92)',
+        transition: 'background 0.25s, color 0.25s', padding: iconGlyphPadding, boxSizing: 'border-box' as const
       }}>
         <div style={{ width: '100%', height: '100%' }} dangerouslySetInnerHTML={{ __html: icon }}/>
       </div>
       <span style={{
-        fontFamily: cfg.labelFont, fontSize: cfg.labelSize, fontWeight: cfg.labelWeight,
-        color: hov ? '#fff' : 'rgba(255,255,255,0.90)',
-        transition: 'color 0.2s', textAlign: 'left', lineHeight: 1.25
+        fontFamily: cfg.labelFont, fontSize: effectiveLabelSize, fontWeight: effectiveLabelWeight,
+        color: '#ffffff',
+        transition: 'color 0.2s', textAlign: 'left', lineHeight: 1.28,
+        letterSpacing: '0.01em', textShadow: '0 1px 1px rgba(0,0,0,0.20)'
       }}>
         {item.label}
       </span>
@@ -254,18 +266,20 @@ type Props = AllWidgetProps<IMConfig>
 
 export default function Widget(props: Props) {
   const cfg: any = { ...defaultConfig, ...(props.config as any) }
-  const items: NavItem[] = Array.isArray(cfg.items) ? cfg.items : defaultConfig.items
 
-  // AppConfig corrente. In Builder usiamo la copia in editing, così un cambio colore
-  // nella Home si riflette immediatamente su tutte le istanze del nav senza salvarlo qui.
+  // La Home è la fonte unica delle voci del menu. In Builder leggiamo la copia in editing,
+  // così modifiche a etichetta, icona, colori, ordine, ruoli e visibilità si riflettono
+  // immediatamente in tutte le istanze del nav senza doverle configurare una per una.
   const appConfig = ReactRedux.useSelector((state: IMState) => {
     const s: any = state as any
     return s?.appStateInBuilder?.appConfig ?? s?.appConfig
   })
 
-  // I colori delle voci sono ereditati dalla card Home che punta alla stessa pagina.
-  // I valori presenti nel config del nav restano solo come fallback di compatibilità.
-  const effectiveItems: NavItem[] = items.map(item => applyHomeCardColors(item, appConfig))
+  const homeItems = React.useMemo(() => buildNavItemsFromHome(appConfig), [appConfig])
+  // Compatibilità di sicurezza: se la Home non è leggibile, non svuotiamo il menu.
+  const effectiveItems: NavItem[] = homeItems.length
+    ? homeItems
+    : (Array.isArray(cfg.items) ? cfg.items : defaultConfig.items)
 
   // Pagina corrente dallo store Redux di ExB (reagisce a UrlManager.changePage)
   const currentPageId = ReactRedux.useSelector((state: IMState) => {
@@ -339,7 +353,16 @@ export default function Widget(props: Props) {
     return item.roles.some(role => effectiveRoles.includes(role))
   }
 
-  const visibleItems = [...effectiveItems].sort((a, b) => a.order - b.order).filter(isVisible)
+  const visibleItems = [...effectiveItems]
+    .sort((a, b) => a.order - b.order)
+    .filter(isVisible)
+    // La pagina corrente non deve proporre un collegamento a se stessa.
+    // Es.: in Elenco pratiche la voce "Elenco pratiche" scompare dal nav.
+    .filter(item => {
+      if (!currentPageId) return true
+      const pid = resolvePageIdFromAppConfig(appConfig, item.hashPage)
+      return !pid || pid !== currentPageId
+    })
   const isHorizontal = cfg.direction === 'horizontal'
   const initialPadding = Number.isFinite(Number(cfg.initialPadding)) ? Number(cfg.initialPadding) : 8
 

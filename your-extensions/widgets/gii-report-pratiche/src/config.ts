@@ -1,8 +1,16 @@
 import { type ImmutableObject, Immutable } from 'jimu-core'
 
 export interface Config {
+  showTitleSubtitle: boolean
+  showTitleDivider: boolean
   title: string
   subtitle: string
+  pageTitleFontSize: number
+  pageTitleDescriptionFontSize: number
+  pageTitleDescriptionColor: string
+  titleIconSize: number
+  titleDividerColor: string
+  titleDividerWidth: number
   whereClause: string
   pageSize: number
   staleDays: number
@@ -26,8 +34,16 @@ export interface Config {
 }
 
 export const defaultConfig: Config = {
+  showTitleSubtitle: true,
+  showTitleDivider: true,
   title: 'Report pratiche',
   subtitle: 'Quadro di sintesi delle fasi procedimentali delle pratiche di competenza.',
+  pageTitleFontSize: 22,
+  pageTitleDescriptionFontSize: 13,
+  pageTitleDescriptionColor: 'rgba(255,255,255,0.70)',
+  titleIconSize: 26,
+  titleDividerColor: '#b79ffe',
+  titleDividerWidth: 2,
   whereClause: '1=1',
   pageSize: 2000,
   staleDays: 15,

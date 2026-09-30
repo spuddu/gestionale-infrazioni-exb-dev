@@ -2,6 +2,7 @@
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps } from 'jimu-core'
 import type { IMConfig } from '../config'
+import { GiiPageTitle } from '../../../_shared/gii-ui/page-title'
 
 const { Fragment } = React
 const LIST_STEP = 250
@@ -1281,7 +1282,21 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     <Fragment>
       <style>{styles}</style>
       <div className='gcp' style={layoutVars}>
-        <div className='gcp-title' style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
+        <GiiPageTitle
+          showSubtitle={(cfg as any).showTitleSubtitle !== false}
+          showDivider={(cfg as any).showTitleDivider !== false}
+          title={title}
+          fallbackIcon='prezzari'
+          titleColor={titleColor}
+          titleFontSize={titleFontSize}
+          titleFontWeight={800}
+          subtitleColor={String(cfg.subtitleColor || '#475569')}
+          subtitleFontSize={Number(cfg.subtitleFontSize || Math.max(12, titleFontSize - 2))}
+          iconSize={Number(cfg.titleIconSize || Math.max(22, titleFontSize + 6))}
+          dividerColor={String(cfg.titleDividerColor || titleColor)}
+          dividerWidth={Math.max(0, Number(cfg.titleDividerWidth ?? 2))}
+          style={{ marginBottom: 10 }}
+        />
         {!sources.length ? <div className='gcp-msg gcp-msg-err'>Configura gli URL delle tabelle nel setting del widget.</div> : null}
         {msg && <div className={`gcp-msg ${msg.ok ? 'gcp-msg-ok' : 'gcp-msg-err'}`}>{msg.text}</div>}
 

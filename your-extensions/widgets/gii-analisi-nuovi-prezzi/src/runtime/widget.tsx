@@ -3,6 +3,7 @@
 import { React, jsx, type AllWidgetProps } from 'jimu-core'
 import type { IMConfig } from '../config'
 import GiiActiveToggle from '../../../_shared/gii-ui/active-toggle'
+import { GiiPageTitle } from '../../../_shared/gii-ui/page-title'
 
 const { Fragment } = React
 
@@ -1523,7 +1524,21 @@ ${r.codice_riferimento} — ${r.descrizione}`,
     <Fragment>
       <style>{styles}</style>
       <div className='gap' ref={rootRef} style={{ '--gap-detail-card-background': detailCardBackgroundColor, '--gap-records-card-background': recordsCardBackgroundColor, ...(interactionLocked ? { position: 'relative', zIndex: 9999 } : {}) } as React.CSSProperties}>
-        <div className='gap-title' style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
+        <GiiPageTitle
+          showSubtitle={(cfg as any).showTitleSubtitle !== false}
+          showDivider={(cfg as any).showTitleDivider !== false}
+          title={title}
+          fallbackIcon='prezzari'
+          titleColor={titleColor}
+          titleFontSize={titleFontSize}
+          titleFontWeight={800}
+          subtitleColor={String(cfg.subtitleColor || '#475569')}
+          subtitleFontSize={Number(cfg.subtitleFontSize || Math.max(12, titleFontSize - 2))}
+          iconSize={Number(cfg.titleIconSize || Math.max(22, titleFontSize + 6))}
+          dividerColor={String(cfg.titleDividerColor || titleColor)}
+          dividerWidth={Math.max(0, Number(cfg.titleDividerWidth ?? 2))}
+          style={{ marginBottom: 10 }}
+        />
 
         {(!serviceUrl || !parentTableUrl || !generalDataUrl) ? <div className='gap-msg gap-err'>Configura gli URL delle tabelle nel setting del widget.</div> : null}
         {msg && !msg.ok ? <div className='gap-msg gap-err'>{msg.text}</div> : null}

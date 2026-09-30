@@ -28,6 +28,7 @@ const CARD_ICONS: Record<string, string> = {
   home:        `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
   elenco:      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>`,
   regolamento: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.4v15.8"/><path d="M12 4.4C9.2 2.8 5.8 2.3 2.6 3.2v15.9c3.3-.9 6.6-.4 9.4 1.2"/><path d="M12 4.4c2.8-1.6 6.2-2.1 9.4-1.2v15.9c-3.3-.9-6.6-.4-9.4 1.2"/></svg>`,
+  guida:       `<svg fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><!-- Generator: Adobe Illustrator 29.1.0, SVG Export Plug-In . SVG Version: 2.1.0 Build 142) --><defs><style> .st0 { stroke-width: 1.8px; } .st0, .st1 { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; } .st1 { stroke-width: 1.8px; } </style></defs><path class="st0" d="M12,19.5h-6.2c-1,0-1.8-.8-1.8-1.8V4.5c0-1.4,1.1-2.5,2.5-2.5h13.5v17.5h-4"/><path class="st0" d="M20,16H5.8c-1,0-1.8.8-1.8,1.8"/><polyline class="st0" points="12 16 12 22.5 14 20.8 16 22.5 16 16"/><g><line class="st1" x1="12.2" y1="8.9" x2="8" y2="13.2"/><path d="M14.5,4.1l-1.7,1.7.5,2,2,.5,1.7-1.7c.5,1.9-.6,3.8-2.5,4.3-1.9.5-3.8-.6-4.3-2.5-.5-1.9.6-3.8,2.5-4.3.6-.2,1.2-.2,1.8,0Z"/></g></svg>`,
   mappa:       `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>`,
   nuova:       `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>`,
   dashboard:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="13" width="8" height="8" rx="1.5"/><rect x="14" y="13" width="8" height="8" rx="1.5"/><rect x="2" y="3" width="8" height="8" rx="1.5"/><rect x="14" y="3" width="8" height="8" rx="1.5"/></svg>`,
@@ -57,6 +58,9 @@ function inferCardIcon(card: Partial<CardConfig>): string {
   // La scheda Regolamento irriguo usa il libro aperto dedicato al posto
   // della vecchia icona "elenco". Eventuali scelte esplicite diverse restano rispettate.
   if (/regolamento/.test(text) && (!explicit || explicit === 'elenco')) return 'regolamento'
+  // Compatibilità con la card Guida operativa autogenerata quando non esisteva ancora
+  // l'icona dedicata: il vecchio valore automatico "nuova" viene sostituito da "guida".
+  if (/guida\s+operativa|(^|[^a-z])guida([^a-z]|$)/.test(text) && (!explicit || explicit === 'nuova')) return 'guida'
   if (explicit && CARD_ICONS[explicit]) return explicit
   if (id && CARD_ICONS[id]) return id
 

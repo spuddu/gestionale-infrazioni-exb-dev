@@ -706,20 +706,31 @@ export default function Setting(props: Props) {
       {/* ═══ TITOLO ═══ */}
       <Acc id='titolo' label='📝 Titolo dettaglio' open={isOpen('titolo')} onToggle={()=>toggle('titolo')}/>
       {isOpen('titolo') && <div>
+        <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={(cfgJs as any).showTitleSubtitle !== false} onChange={e=>patch({showTitleSubtitle:e.target.checked})}/> Mostra sottotitolo / descrizione</label>
+        <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={(cfgJs as any).showTitleDivider !== false} onChange={e=>patch({showTitleDivider:e.target.checked})}/> Mostra separatore sotto il titolo</label>
         <label style={P.lbl}>Testo prefisso</label>
         <Inp value={String(cfgJs.detailTitlePrefix || '')} onChange={v=>patch({detailTitlePrefix:v})} placeholder='Dettaglio pratica selezionata'/>
         <div style={P.titleRow3}>
           <div style={P.compactCell}><label style={P.lbl}>Altezza</label><NumInp compact value={parseNum(cfgJs.detailTitleHeight, 40)} onChange={n=>patch({detailTitleHeight:n})} min={0} unit='px'/></div>
-          <div style={P.compactCell}><label style={P.lbl}>Font sz</label><NumInp compact value={parseNum(cfgJs.detailTitleFontSize, 14)} onChange={n=>patch({detailTitleFontSize:n})} min={10} unit='px'/></div>
-          <div style={P.compactCell}><label style={P.lbl}>Font w</label><NumInp compact value={parseNum(cfgJs.detailTitleFontWeight, 600)} onChange={n=>patch({detailTitleFontWeight:n})} min={100} step={100}/></div>
+          <div style={P.compactCell}><label style={P.lbl}>Font titolo</label><NumInp compact value={parseNum(cfgJs.detailTitleFontSize, 14)} onChange={n=>patch({detailTitleFontSize:n})} min={10} unit='px'/></div>
+          <div style={P.compactCell}><label style={P.lbl}>Peso titolo</label><NumInp compact value={parseNum(cfgJs.detailTitleFontWeight, 600)} onChange={n=>patch({detailTitleFontWeight:n})} min={100} step={100}/></div>
+        </div>
+        <div style={P.titleRow3}>
+          <div style={P.compactCell}><label style={P.lbl}>Icona</label><NumInp compact value={parseNum(cfgJs.detailTitleIconSize, 22)} onChange={n=>patch({detailTitleIconSize:n})} min={12} unit='px'/></div>
+          <div style={P.compactCell}><label style={P.lbl}>Font sottotitolo</label><NumInp compact value={parseNum(cfgJs.detailTitleSubtitleFontSize, 12)} onChange={n=>patch({detailTitleSubtitleFontSize:n})} min={8} unit='px'/></div>
+          <div style={P.compactCell}><label style={P.lbl}>Spess. separatore</label><NumInp compact value={parseNum(cfgJs.detailTitleDividerWidth, 2)} onChange={n=>patch({detailTitleDividerWidth:n})} min={0} unit='px'/></div>
         </div>
         <div style={P.titleRow3}>
           <div style={P.compactCell}><label style={P.lbl}>Pad. bottom</label><NumInp compact value={parseNum(cfgJs.detailTitlePaddingBottom, 10)} onChange={n=>patch({detailTitlePaddingBottom:n})} min={0} unit='px'/></div>
           <div style={P.compactCell}><label style={P.lbl}>Pad. left</label><NumInp compact value={parseNum(cfgJs.detailTitlePaddingLeft, 0)} onChange={n=>patch({detailTitlePaddingLeft:n})} min={0} unit='px'/></div>
           <div style={P.compactCell}><label style={P.lbl}>Pad. right</label><NumInp compact value={parseNum(cfgJs.detailTitlePaddingRight, 0)} onChange={n=>patch({detailTitlePaddingRight:n})} min={0} unit='px'/></div>
         </div>
-        <label style={P.lbl}>Colore testo</label>
+        <label style={P.lbl}>Colore titolo e icona</label>
         <ColInp value={String(cfgJs.detailTitleColor || 'rgba(0,0,0,0.85)')} onChange={v=>patch({detailTitleColor:v})}/>
+        <label style={P.lbl}>Colore sottotitolo</label>
+        <ColInp value={String(cfgJs.detailTitleSubtitleColor || '#475569')} onChange={v=>patch({detailTitleSubtitleColor:v})}/>
+        <label style={P.lbl}>Colore separatore</label>
+        <ColInp value={String(cfgJs.detailTitleDividerColor || '#1F4E79')} onChange={v=>patch({detailTitleDividerColor:v})}/>
         <label style={P.lbl}>Sfondo</label>
         <ColInp value={String(cfgJs.detailTitleBg || 'transparent')} onChange={v=>patch({detailTitleBg:v})}/>
       </div>}

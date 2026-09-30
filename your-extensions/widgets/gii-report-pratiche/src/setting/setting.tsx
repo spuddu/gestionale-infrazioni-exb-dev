@@ -71,6 +71,21 @@ export default function Setting (props: AllWidgetSettingProps<IMConfig>) {
       <label style={P.lbl}>Sottotitolo</label>
       <Inp value={cfg.subtitle} onChange={v => update('subtitle', v)} />
 
+      <div style={P.sec}>Titolo pagina comune</div>
+      <div style={P.hint}>Titolo, icona e descrizione sono letti dalla card della Home associata alla pagina.</div>
+      <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={cfg.showTitleSubtitle !== false} onChange={e => update('showTitleSubtitle', e.target.checked)} /> Mostra sottotitolo / descrizione</label>
+      <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={cfg.showTitleDivider !== false} onChange={e => update('showTitleDivider', e.target.checked)} /> Mostra separatore sotto il titolo</label>
+      <div style={P.row2}>
+        <div><label style={P.lbl}>Dimensione titolo</label><NumInp value={Number(cfg.pageTitleFontSize ?? defaultConfig.pageTitleFontSize)} min={12} max={40} onChange={v => update('pageTitleFontSize', v)} /></div>
+        <div><label style={P.lbl}>Dimensione icona</label><NumInp value={Number(cfg.titleIconSize ?? defaultConfig.titleIconSize)} min={12} max={48} onChange={v => update('titleIconSize', v)} /></div>
+        <div><label style={P.lbl}>Dimensione descrizione</label><NumInp value={Number(cfg.pageTitleDescriptionFontSize ?? defaultConfig.pageTitleDescriptionFontSize)} min={10} max={24} onChange={v => update('pageTitleDescriptionFontSize', v)} /></div>
+        <div><label style={P.lbl}>Spessore separatore (0 = nascosto)</label><NumInp value={Number(cfg.titleDividerWidth ?? defaultConfig.titleDividerWidth)} min={0} max={8} onChange={v => update('titleDividerWidth', v)} /></div>
+      </div>
+      <label style={P.lbl}>Colore descrizione sotto il separatore</label>
+      <ColInp value={String(cfg.pageTitleDescriptionColor || defaultConfig.pageTitleDescriptionColor)} onChange={v => update('pageTitleDescriptionColor', v)} />
+      <label style={P.lbl}>Colore separatore</label>
+      <ColInp value={String(cfg.titleDividerColor || defaultConfig.titleDividerColor)} onChange={v => update('titleDividerColor', v)} />
+
       <div style={P.sec}>Query</div>
       <label style={P.lbl}>Where clause aggiuntiva</label>
       <Inp value={cfg.whereClause || '1=1'} onChange={v => update('whereClause', v)} placeholder='1=1' />

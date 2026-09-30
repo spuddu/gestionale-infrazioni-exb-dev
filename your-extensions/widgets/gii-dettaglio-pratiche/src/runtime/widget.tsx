@@ -1,6 +1,6 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, type AllWidgetProps, DataSourceComponent, DataSourceManager } from 'jimu-core'
+import { React, jsx, ReactRedux, type IMState, type AllWidgetProps, DataSourceComponent, DataSourceManager } from 'jimu-core'
 import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
@@ -9,6 +9,7 @@ import { filterGiiAttachmentsForAdministrativeGenericSection, filterGiiAttachmen
 import { ensureNsdJsonOnlyQueryFormat } from '../../../_shared/gii-anteprime/nsd-query-format-fix'
 import { isGiiIaUser, isPracticeAssignedToCurrentIa } from '../../../_shared/gii-access/ia-assignment'
 import { isGiiPracticePayloadCurrent, isGiiPracticeSelectionContextCurrent } from '../../../_shared/gii-selection/practice-context'
+import { GiiPageTitle } from '../../../_shared/gii-ui/page-title'
 
 
 
@@ -4302,6 +4303,15 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
 
 
 
+
+function toPlainConfigValue<T = any> (value: any): T {
+  try {
+    if (value?.asMutable) return value.asMutable({ deep: true }) as T
+    if (value?.toJS) return value.toJS() as T
+  } catch {}
+  return value as T
+}
+
 function DetailTabsPanel (props: {
   active: { key: string; state: SelState } | null
   ui: any
@@ -4314,7 +4324,6 @@ function DetailTabsPanel (props: {
   currentRole?: string
 }) {
   const { active, ui } = props
-
   // Migra e normalizza tabs
   const tabs = React.useMemo(() => {
     return migrateTabs(props.tabFields, props.tabs)
@@ -5572,41 +5581,48 @@ if (!hasSel) {
 
 return (
   <div style={outerStyle}>
-    {/* Titolo pratica - sopra l'area bianca */}
-    <div style={{
-      minHeight: ui.detailTitleHeight ?? 40,
-      paddingBottom: ui.detailTitlePaddingBottom ?? 10,
-      paddingLeft: ui.detailTitlePaddingLeft ?? 0,
-      paddingRight: ui.detailTitlePaddingRight ?? 0,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 12,
-      boxSizing: 'border-box',
-      flex: '0 0 auto',
-      background: (ui as any).detailTitleBg && (ui as any).detailTitleBg !== 'transparent' ? (ui as any).detailTitleBg : undefined
-    }}>
-      <span style={{
-        fontSize: ui.detailTitleFontSize ?? 14,
-        fontWeight: ui.detailTitleFontWeight ?? 600,
-        color: hasSel
-          ? (ui.detailTitleColor ?? 'rgba(0,0,0,0.85)')
-          : 'rgba(0,0,0,0.40)'
-      }}>
-        {String(ui.detailTitlePrefix ?? 'Dettaglio pratica selezionata')}
-      </span>
-      {!hasSel && (
-        <span style={{
-          marginLeft: 'auto',
-          fontSize: ui.detailTitleFontSize ?? 14,
+    {/* Titolo dettaglio: stessa grammatica visiva dell'Elenco pratiche. */}
+    <GiiPageTitle
+      showSubtitle={(ui as any).showTitleSubtitle !== false}
+      showDivider={(ui as any).showTitleDivider !== false}
+      title={String(ui.detailTitlePrefix ?? 'Dettaglio pratica selezionata')}
+      subtitle='Consulta i dati della pratica selezionata'
+      icon='dettaglio'
+      fallbackIcon='dettaglio'
+      titleColor={ui.detailTitleColor}
+      titleFontSize={ui.detailTitleFontSize}
+      titleFontWeight={ui.detailTitleFontWeight}
+      subtitleColor={ui.detailTitleSubtitleColor}
+      subtitleFontSize={ui.detailTitleSubtitleFontSize}
+      iconSize={ui.detailTitleIconSize}
+      dividerColor={ui.detailTitleDividerColor}
+      dividerWidth={ui.detailTitleDividerWidth}
+      style={{
+        minHeight: ui.detailTitleHeight,
+        paddingLeft: ui.detailTitlePaddingLeft,
+        paddingRight: ui.detailTitlePaddingRight ?? 0,
+        paddingBottom: Math.max(0, ui.detailTitlePaddingBottom),
+        flex: '0 0 auto',
+        boxSizing: 'border-box',
+        background: (ui as any).detailTitleBg && (ui as any).detailTitleBg !== 'transparent'
+          ? (ui as any).detailTitleBg
+          : undefined
+      }}
+      rightContent={
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          fontSize: ui.detailTitleSubtitleFontSize,
           lineHeight: 1.35,
-          whiteSpace: 'normal',
-          color: '#4b5563'
+          whiteSpace: 'nowrap',
+          color: ui.detailTitleSubtitleColor,
+          fontWeight: 600
         }}>
-          Selezionare una riga.
-        </span>
-      )}
-    </div>
+          {!hasSel ? 'Selezionare una riga.' : ''}
+        </div>
+      }
+    />
     <div style={frameStyle}>
       {!hasSel ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 200, fontWeight: 700, fontSize: 14, color: 'rgba(0,0,0,0.6)' }}>
@@ -5661,6 +5677,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     statusFontSize: Number.isFinite(Number(cfg.statusFontSize)) ? Number(cfg.statusFontSize) : defaultConfig.statusFontSize,
     msgFontSize: Number.isFinite(Number(cfg.msgFontSize)) ? Number(cfg.msgFontSize) : defaultConfig.msgFontSize,
 
+    showTitleSubtitle: (cfg as any).showTitleSubtitle !== false,
+    showTitleDivider: (cfg as any).showTitleDivider !== false,
     detailTitlePrefix: String(cfg.detailTitlePrefix ?? defaultConfig.detailTitlePrefix),
     detailTitleHeight: Number.isFinite(Number(cfg.detailTitleHeight)) ? Number(cfg.detailTitleHeight) : defaultConfig.detailTitleHeight,
     detailTitlePaddingBottom: Number.isFinite(Number(cfg.detailTitlePaddingBottom)) ? Number(cfg.detailTitlePaddingBottom) : defaultConfig.detailTitlePaddingBottom,
@@ -5669,6 +5687,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     detailTitleFontSize: Number.isFinite(Number(cfg.detailTitleFontSize)) ? Number(cfg.detailTitleFontSize) : defaultConfig.detailTitleFontSize,
     detailTitleFontWeight: Number.isFinite(Number(cfg.detailTitleFontWeight)) ? Number(cfg.detailTitleFontWeight) : defaultConfig.detailTitleFontWeight,
     detailTitleColor: String(cfg.detailTitleColor ?? defaultConfig.detailTitleColor),
+    detailTitleIconSize: Math.max(12, Number.isFinite(Number((cfg as any).detailTitleIconSize)) ? Number((cfg as any).detailTitleIconSize) : Number((defaultConfig as any).detailTitleIconSize ?? 22)),
+    detailTitleSubtitleFontSize: Math.max(8, Number.isFinite(Number((cfg as any).detailTitleSubtitleFontSize)) ? Number((cfg as any).detailTitleSubtitleFontSize) : Number((defaultConfig as any).detailTitleSubtitleFontSize ?? 12)),
+    detailTitleSubtitleColor: String((cfg as any).detailTitleSubtitleColor ?? (defaultConfig as any).detailTitleSubtitleColor ?? '#475569'),
+    detailTitleDividerColor: String((cfg as any).detailTitleDividerColor ?? (defaultConfig as any).detailTitleDividerColor ?? '#1F4E79'),
+    detailTitleDividerWidth: Math.max(0, Number.isFinite(Number((cfg as any).detailTitleDividerWidth)) ? Number((cfg as any).detailTitleDividerWidth) : Number((defaultConfig as any).detailTitleDividerWidth ?? 2)),
     detailTitleBg: String((cfg as any).detailTitleBg ?? 'transparent')
   }
 

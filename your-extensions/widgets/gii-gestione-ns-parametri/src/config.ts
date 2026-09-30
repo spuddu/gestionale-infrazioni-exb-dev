@@ -1,6 +1,8 @@
 import { type ImmutableObject } from 'jimu-core'
 
 export interface Config {
+  showTitleSubtitle?: boolean
+  showTitleDivider?: boolean
   /** Parametri tecnici usati per la nota spese. */
   serviceUrl?: string
   /** Vista editabile AMM filtrata su SANZIONE, RIDUZIONE e CAUZIONE. */
@@ -10,6 +12,11 @@ export interface Config {
   title?: string
   titleColor?: string
   titleFontSize?: number
+  titleIconSize?: number
+  titleDividerColor?: string
+  titleDividerWidth?: number
+  subtitleColor?: string
+  subtitleFontSize?: number
   sectionTitleColor?: string
   sectionTitleFontSize?: number
   toolbarLabelColor?: string

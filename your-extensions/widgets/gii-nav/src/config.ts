@@ -32,8 +32,8 @@ export const defaultConfig: Config = {
   initialPadding: 8,
   itemBorderRadius: 12,
   itemPadding: 14,
-  labelSize: 14,
-  labelWeight: 600,
+  labelSize: 16,
+  labelWeight: 700,
   labelFont: "'Trebuchet MS', sans-serif",
   items: [
     { id:'nav_home',      visible:true, order:1, label:'Home',           hashPage:'home',      colorBg:'#0d2444', colorAccent:'#60a5fa', colorBgRest:'rgba(255,255,255,0.05)', colorBgHover:'#0d2444', roles:['*'],                    icon:'home'      },

@@ -548,6 +548,7 @@ const ICON_OPTIONS = [
   {value:'home',        label:'🏠 Home'},
   {value:'elenco',      label:'📋 Elenco'},
   {value:'regolamento',  label:'📖 Regolamento'},
+  {value:'guida',       label:'📘 Guida operativa'},
   {value:'nuova',       label:'➕ Nuova'},
   {value:'mappa',       label:'🗺 Mappa'},
   {value:'dashboard',   label:'📊 Dashboard'},
@@ -577,6 +578,9 @@ function inferCardIconValue(input: any): string {
   // Mantiene il setting coerente con il runtime: la card Regolamento usa
   // l'icona dedicata anche nelle configurazioni storiche che avevano "elenco".
   if (/regolamento/.test(text) && (!explicit || explicit === 'elenco')) return 'regolamento'
+  // La card Guida operativa già autogenerata può avere ancora "nuova": nel setting
+  // mostriamo e salviamo l'icona dedicata senza richiedere modifiche al config esistente.
+  if (/guida\s+operativa|(^|[^a-z])guida([^a-z]|$)/.test(text) && (!explicit || explicit === 'nuova')) return 'guida'
   if (explicit && VALID_ICON_VALUES.has(explicit)) return explicit
 
   if (id && VALID_ICON_VALUES.has(id)) return id

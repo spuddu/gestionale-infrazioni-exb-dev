@@ -4,6 +4,7 @@ import { React, jsx, type AllWidgetProps } from 'jimu-core'
 import { createPortal } from 'react-dom'
 import type { IMConfig } from '../config'
 import GiiActiveToggle from '../../../_shared/gii-ui/active-toggle'
+import { GiiPageTitle } from '../../../_shared/gii-ui/page-title'
 
 const { Fragment } = React
 
@@ -504,7 +505,21 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     <Fragment>
       <style>{styles}</style>
       <div ref={rootRef} className={`gnp${editing ? ' gnp-editing-lock' : ''}`} style={{ '--gnp-title-color': titleColor, '--gnp-toolbar-label-color': toolbarLabelColor, '--gnp-toolbar-label-font-size': `${toolbarLabelFontSize}px`, '--gnp-section-title-color': sectionTitleColor, '--gnp-section-title-font-size': `${sectionTitleFontSize}px`, '--gnp-detail-card-background': detailCardBackgroundColor, '--gnp-records-card-background': recordsCardBackgroundColor, '--gnp-panel-border-color': panelBorderColor, '--gnp-control-background': controlBackgroundColor, '--gnp-control-text-color': controlTextColor, '--gnp-control-border-color': controlBorderColor, '--gnp-control-font-size': `${controlFontSize}px`, '--gnp-readonly-background': readonlyBackgroundColor, '--gnp-readonly-text-color': readonlyTextColor, '--gnp-table-header-background': tableHeaderBackgroundColor, '--gnp-table-header-text': tableHeaderTextColor, '--gnp-table-text-color': tableTextColor, '--gnp-table-font-size': `${tableFontSize}px`, '--gnp-primary-button-background': primaryButtonBackgroundColor, '--gnp-primary-button-text': primaryButtonTextColor, '--gnp-secondary-button-background': secondaryButtonBackgroundColor, '--gnp-secondary-button-text': secondaryButtonTextColor, '--gnp-danger-button-background': dangerButtonBackgroundColor, '--gnp-danger-button-text': dangerButtonTextColor } as React.CSSProperties}>
-        <div className='gnp-title' style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
+        <GiiPageTitle
+          showSubtitle={(cfg as any).showTitleSubtitle !== false}
+          showDivider={(cfg as any).showTitleDivider !== false}
+          title={title}
+          fallbackIcon='prezzari'
+          titleColor={titleColor}
+          titleFontSize={titleFontSize}
+          titleFontWeight={800}
+          subtitleColor={String(cfg.subtitleColor || '#475569')}
+          subtitleFontSize={Number(cfg.subtitleFontSize || Math.max(12, titleFontSize - 2))}
+          iconSize={Number(cfg.titleIconSize || Math.max(22, titleFontSize + 6))}
+          dividerColor={String(cfg.titleDividerColor || titleColor)}
+          dividerWidth={Math.max(0, Number(cfg.titleDividerWidth ?? 2))}
+          style={{ marginBottom: 10 }}
+        />
         {!serviceUrl ? <div className='gnp-msg gnp-err'>Configura l'URL della tabella nel setting del widget.</div> : null}
         {msg && <div className={`gnp-msg ${msg.ok ? 'gnp-ok' : 'gnp-err'}`}>{msg.text}</div>}
 

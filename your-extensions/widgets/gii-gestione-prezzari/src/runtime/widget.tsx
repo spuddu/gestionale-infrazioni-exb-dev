@@ -3,6 +3,7 @@
 import { React, jsx, type AllWidgetProps } from 'jimu-core'
 import type { IMConfig } from '../config'
 import GiiActiveToggle from '../../../_shared/gii-ui/active-toggle'
+import { GiiPageTitle } from '../../../_shared/gii-ui/page-title'
 
 const { Fragment } = React
 
@@ -331,7 +332,21 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     <Fragment>
       <style>{styles}</style>
       <div className='gnp' style={{ '--gnp-toolbar-label-color': toolbarLabelColor, '--gnp-toolbar-label-font-size': `${toolbarLabelFontSize}px`, '--gnp-section-title-color': sectionTitleColor, '--gnp-section-title-font-size': `${sectionTitleFontSize}px`, '--gnp-detail-card-background': detailCardBackgroundColor, '--gnp-records-card-background': recordsCardBackgroundColor } as React.CSSProperties}>
-        <div className='gnp-title' style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
+        <GiiPageTitle
+          showSubtitle={(cfg as any).showTitleSubtitle !== false}
+          showDivider={(cfg as any).showTitleDivider !== false}
+          title={title}
+          fallbackIcon='prezzari'
+          titleColor={titleColor}
+          titleFontSize={titleFontSize}
+          titleFontWeight={800}
+          subtitleColor={String(cfg.subtitleColor || '#475569')}
+          subtitleFontSize={Number(cfg.subtitleFontSize || Math.max(12, titleFontSize - 2))}
+          iconSize={Number(cfg.titleIconSize || Math.max(22, titleFontSize + 6))}
+          dividerColor={String(cfg.titleDividerColor || titleColor)}
+          dividerWidth={Math.max(0, Number(cfg.titleDividerWidth ?? 2))}
+          style={{ marginBottom: 10 }}
+        />
         {!serviceUrl ? <div className='gnp-msg gnp-err'>Configura l'URL della tabella nel setting del widget.</div> : null}
         {msg && <div className={`gnp-msg ${msg.ok ? 'gnp-ok' : 'gnp-err'}`}>{msg.text}</div>}
 

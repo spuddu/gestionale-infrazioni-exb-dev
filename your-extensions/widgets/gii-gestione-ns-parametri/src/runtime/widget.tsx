@@ -4,6 +4,7 @@ import { React, jsx, type AllWidgetProps } from 'jimu-core'
 import { createPortal } from 'react-dom'
 import type { IMConfig } from '../config'
 import GiiActiveToggle from '../../../_shared/gii-ui/active-toggle'
+import { GiiPageTitle } from '../../../_shared/gii-ui/page-title'
 
 const { Fragment } = React
 
@@ -947,7 +948,21 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     <Fragment>
       <style>{styles}</style>
       <div ref={rootRef} className={`gns${editing ? ' gns-editing-lock' : ''}`} style={{ '--gns-toolbar-label-color': toolbarLabelColor, '--gns-toolbar-label-font-size': `${toolbarLabelFontSize}px`, '--gns-section-title-color': sectionTitleColor, '--gns-section-title-font-size': `${sectionTitleFontSize}px`, '--gns-detail-card-background': detailCardBackgroundColor, '--gns-records-card-background': recordsCardBackgroundColor } as React.CSSProperties}>
-        <div className="gns-title" style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
+        <GiiPageTitle
+          showSubtitle={(cfg as any).showTitleSubtitle !== false}
+          showDivider={(cfg as any).showTitleDivider !== false}
+          title={title}
+          fallbackIcon='tabelle'
+          titleColor={titleColor}
+          titleFontSize={titleFontSize}
+          titleFontWeight={800}
+          subtitleColor={String(cfg.subtitleColor || '#475569')}
+          subtitleFontSize={Number(cfg.subtitleFontSize || Math.max(12, titleFontSize - 2))}
+          iconSize={Number(cfg.titleIconSize || Math.max(22, titleFontSize + 6))}
+          dividerColor={String(cfg.titleDividerColor || titleColor)}
+          dividerWidth={Math.max(0, Number(cfg.titleDividerWidth ?? 2))}
+          style={{ marginBottom: 10 }}
+        />
 
         {access.allowedDatasets.length > 1 && (
           <div className="gns-datasets">

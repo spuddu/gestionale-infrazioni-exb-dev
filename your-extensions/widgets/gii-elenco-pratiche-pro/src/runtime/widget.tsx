@@ -14,6 +14,7 @@ import { Loading } from "jimu-ui";
 import type { AllWidgetProps } from "jimu-core";
 import type { IMConfig, ColumnDef } from "../config";
 import { defaultConfig, DEFAULT_COLUMNS, OGGETTO_STATUS_CATALOG } from "../config";
+import { GiiPageTitle } from "../../../_shared/gii-ui/page-title";
 import { isPracticeAssignedToCurrentIa } from "../../../_shared/gii-access/ia-assignment";
 import { clearGiiPracticeSelectionContext, isGiiPracticePayloadCurrent, stampGiiPracticePayload, writeGiiPracticeSelectionContext } from "../../../_shared/gii-selection/practice-context";
 import {
@@ -6468,6 +6469,17 @@ export default function Widget(props: Props) {
   const listTitleFontSize = num(cfg.listTitleFontSize, 14);
   const listTitleFontWeight = num(cfg.listTitleFontWeight, 600);
   const listTitleColor = txt(cfg.listTitleColor || "rgba(0,0,0,0.85)");
+  const listTitleDividerColor = txt((cfg as any).listTitleDividerColor || "#1F4E79");
+  const listTitleDividerWidth = Math.max(0, num((cfg as any).listTitleDividerWidth, 2));
+  const listTitleIconSize = Math.max(16, num((cfg as any).listTitleIconSize, 22));
+  const listTitleSubtitleColor = txt((cfg as any).listTitleSubtitleColor || '#475569');
+  const listTitleSubtitleFontSize = Math.max(10, num((cfg as any).listTitleSubtitleFontSize, 12));
+  const listLastUpdateColor = txt((cfg as any).listLastUpdateColor || 'rgba(0,0,0,0.58)');
+  const listLastUpdateFontSize = Math.max(9, num((cfg as any).listLastUpdateFontSize, 12));
+  const listLastUpdateFontWeight = Math.max(100, num((cfg as any).listLastUpdateFontWeight, 600));
+  // Il comando a destra deve restare entro l'altezza della riga titolo,
+  // così non sposta separatore e sottotitolo.
+  const listTitleRowContentHeight = Math.ceil(Math.max(listTitleIconSize, listTitleFontSize * 1.25));
 
   return (
     <div
@@ -6487,52 +6499,30 @@ export default function Widget(props: Props) {
         zIndex: 2147483000,
       }}
     >
-      {/* Titolo elenco - sopra l'area bianca */}
+      {/* Titolo elenco - icona/etichetta derivate dalla card Home della pagina corrente */}
       {listTitleText && (
-        <div
-          style={{
-            height: listTitleHeight,
-            paddingBottom: listTitlePaddingBottom,
-            paddingLeft: listTitlePaddingLeft,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            boxSizing: "border-box",
-            flex: "0 0 auto",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              minWidth: 0,
-              flexWrap: "wrap",
-            }}
-          >
-            <span
-              style={{
-                fontSize: listTitleFontSize,
-                fontWeight: listTitleFontWeight,
-                color: listTitleColor,
-              }}
-            >
-              {listTitleText}
-            </span>
-            <span
-              style={{
-                fontSize: Math.max(11, listTitleFontSize - 2),
-                color: "rgba(0,0,0,0.58)",
-              }}
-            >
-              Ultimo aggiornamento:{" "}
-              {lastListRefreshAt ? formatDateIt(lastListRefreshAt) : "—"}
+        <GiiPageTitle
+          showSubtitle={(cfg as any).showTitleSubtitle !== false}
+          showDivider={(cfg as any).showTitleDivider !== false}
+          title={listTitleText}
+          fallbackIcon="elenco"
+          titleColor={listTitleColor}
+          titleFontSize={listTitleFontSize}
+          titleFontWeight={listTitleFontWeight}
+          subtitleColor={listTitleSubtitleColor}
+          subtitleFontSize={listTitleSubtitleFontSize}
+          iconSize={listTitleIconSize}
+          dividerColor={listTitleDividerColor}
+          dividerWidth={listTitleDividerWidth}
+          dividerPaddingBottom={Math.max(4, listTitlePaddingBottom)}
+          style={{ minHeight: listTitleHeight, paddingLeft: listTitlePaddingLeft, flex: "0 0 auto" }}
+          rightContent={<div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flexWrap: "nowrap", justifyContent: "flex-end", whiteSpace: "nowrap" }}>
+            <span style={{ fontSize: listLastUpdateFontSize, color: listLastUpdateColor, fontWeight: listLastUpdateFontWeight, whiteSpace: "nowrap", lineHeight: 1.1 }}>
+              Ultimo aggiornamento: {lastListRefreshAt ? formatDateIt(lastListRefreshAt) : "—"}
             </span>
             <button
               type="button"
               onClick={() => {
-                // Deseleziona prima di aggiornare per evitare disallineamento con azioni
                 setLocalSelectedByDs({});
                 Object.keys(dsDataRef.current).forEach((id) => {
                   const e = dsDataRef.current[id];
@@ -6542,25 +6532,16 @@ export default function Widget(props: Props) {
                 forceListRefresh({ refreshAlerts: true });
               }}
               style={{
-                height: 34,
-                padding: "0 12px",
-                borderRadius: 10,
-                border: "1px solid #2f6fed",
-                background: "#fff",
-                color: "#1d4ed8",
-                fontSize: 12,
-                fontWeight: 700,
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                whiteSpace: "nowrap",
+                height: listTitleRowContentHeight, minHeight: 0, boxSizing: "border-box",
+                padding: "0 10px", borderRadius: 10, border: "1px solid #2f6fed",
+                background: "#fff", color: "#1d4ed8", fontSize: 12, lineHeight: 1, fontWeight: 700, cursor: "pointer",
+                display: "inline-flex", alignItems: "center", justifyContent: "center", whiteSpace: "nowrap", flex: "0 0 auto"
               }}
             >
               Aggiorna elenco
             </button>
-          </div>
-        </div>
+          </div>}
+        />
       )}
       <div
         style={{

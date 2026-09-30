@@ -3994,8 +3994,14 @@ export default function Widget(props: Props) {
     // evita loop ravvicinati
     if (guardLockRef.current) return
 
+    // La pagina realmente renderizzata da Experience Builder e' la fonte
+    // primaria. Sul dominio pubblico l'URL puo' restare pulito (es.
+    // https://gii.cbsm.it/) anche quando la pagina corrente e' Accesso.
+    // In quel caso basarsi solo su hash/query impedirebbe il redirect
+    // automatico Accesso -> Home per una sessione gia' autenticata.
+    const runtimePageId = getRuntimeCurrentPageId()
     const currentTok = getCurrentPageToken() || ''
-    const curId = currentTok ? resolvePageId(currentTok) : null
+    const curId = runtimePageId || (currentTok ? resolvePageId(currentTok) : null)
 
     const outId = outTok ? resolvePageId(outTok) : null
     const inId  = inTok ? resolvePageId(inTok) : null

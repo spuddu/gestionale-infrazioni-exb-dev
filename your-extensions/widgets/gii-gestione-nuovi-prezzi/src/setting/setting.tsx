@@ -59,6 +59,34 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
 
         <label style={lbl}>Dimensione titolo principale (px)</label>
         <input style={inp} type='number' min={10} max={36} step={1} value={titleFontSize} onChange={(e) => set('titleFontSize', Number(e.target.value || 15))} />
+
+        <label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input type='checkbox' checked={cfg.showTitleSubtitle !== false} onChange={(e) => set('showTitleSubtitle', e.target.checked)} />
+          Mostra sottotitolo / descrizione
+        </label>
+        <label style={lbl}>Colore descrizione sotto il separatore</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={String(cfg.subtitleColor || '#475569')} onChange={(e) => set('subtitleColor', e.target.value)} aria-label='Colore descrizione' />
+          <input style={inp} value={String(cfg.subtitleColor || '#475569')} onChange={(e) => set('subtitleColor', e.target.value)} />
+        </div>
+        <label style={lbl}>Dimensione descrizione sotto il separatore (px)</label>
+        <input style={inp} type='number' min={10} max={30} step={1} value={Number(cfg.subtitleFontSize || Math.max(12, titleFontSize - 2))} onChange={(e) => set('subtitleFontSize', Number(e.target.value || 13))} />
+
+        <label style={lbl}>Dimensione icona titolo (px)</label>
+        <input style={inp} type='number' min={12} max={48} step={1} value={Number(cfg.titleIconSize || Math.max(22, titleFontSize + 6))} onChange={(e) => set('titleIconSize', Number(e.target.value || 22))} />
+
+        <label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input type='checkbox' checked={cfg.showTitleDivider !== false} onChange={(e) => set('showTitleDivider', e.target.checked)} />
+          Mostra separatore sotto il titolo
+        </label>
+        <label style={lbl}>Colore separatore titolo</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={String(cfg.titleDividerColor || titleColor)} onChange={(e) => set('titleDividerColor', e.target.value)} aria-label='Colore separatore titolo' />
+          <input style={inp} value={String(cfg.titleDividerColor || titleColor)} onChange={(e) => set('titleDividerColor', e.target.value)} />
+        </div>
+
+        <label style={lbl}>Spessore separatore titolo (px; 0 = nascosto)</label>
+        <input style={inp} type='number' min={0} max={8} step={1} value={Number(cfg.titleDividerWidth ?? 2)} onChange={(e) => set('titleDividerWidth', Math.max(0, Number(e.target.value || 0)))} />
       </div>
 
       <div style={section}>

@@ -1,6 +1,8 @@
 import { type ImmutableObject } from 'jimu-core'
 
 export interface Config {
+  showTitleSubtitle?: boolean
+  showTitleDivider?: boolean
   /** Modalità del widget: gestione utenti standard oppure Rubrica di servizio. */
   mode?: 'utenti' | 'rubrica'
   /** URL del layer/tabella GII_utenti. */
@@ -11,6 +13,11 @@ export interface Config {
   title?: string
   titleColor?: string
   titleFontSize?: number
+  titleIconSize?: number
+  titleDividerColor?: string
+  titleDividerWidth?: number
+  subtitleColor?: string
+  subtitleFontSize?: number
   /** Stile delle etichette della maschera utente. */
   fieldLabelColor?: string
   fieldLabelFontSize?: number

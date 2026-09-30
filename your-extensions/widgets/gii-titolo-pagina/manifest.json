@@ -1,0 +1,11 @@
+{
+  "name": "gii-titolo-pagina",
+  "label": "GII - Titolo pagina",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Titolo pagina GII con icona e denominazione derivate automaticamente dalla card Home della pagina corrente.",
+  "translatedLocales": ["it"],
+  "defaultSize": { "width": 1100, "height": 64 }
+}
