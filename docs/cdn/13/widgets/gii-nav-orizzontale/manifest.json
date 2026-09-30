@@ -1,0 +1,20 @@
+{
+  "name": "gii-nav-orizzontale",
+  "label": "GII Nav Orizzontale",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Menu di navigazione orizzontale GII con pulsanti personalizzabili e stato attivo.",
+  "dependency": [
+    "jimu-arcgis"
+  ],
+  "translatedLocales": [
+    "it"
+  ],
+  "defaultSize": {
+    "width": 1200,
+    "height": 60
+  },
+  "properties": {}
+}
