@@ -338,6 +338,10 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
     activeAnchorRef.current = activeAnchorId
   }, [activeAnchorId])
 
+  useEffect(() => {
+    setExpandedSteps(new Set())
+  }, [activeChapterId])
+
   const visibleChapters = useMemo(() => GUIDE_CHAPTERS.filter(c => chapterMatchesRole(c, roleFilter)), [roleFilter])
   const activeChapter = useMemo(() => GUIDE_CHAPTERS.find(c => c.id === activeChapterId) || GUIDE_CHAPTERS[0], [activeChapterId])
   const searchHits = useMemo(() => buildSearchHits(visibleChapters, query), [visibleChapters, query])
@@ -438,11 +442,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
     setActiveChapterId(chapterId)
     activeAnchorRef.current = navAnchor
     setActiveAnchorId(navAnchor)
-    setExpanded(prev => {
-      const next = new Set(prev)
-      next.add(chapterId)
-      return next
-    })
+    setExpanded(new Set([chapterId]))
     setPendingAnchor(requestedAnchor || '__TOP__')
   }
 
@@ -630,7 +630,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
                     style={{ width: '100%', border: 0, background: isOpen ? '#f8fafc' : '#fff', color: textColor, padding: '9px 10px', cursor: 'pointer', display: 'grid', gridTemplateColumns: '28px minmax(0,1fr) 20px', gap: 10, alignItems: 'start', textAlign: 'left', font: 'inherit' }}
                   >
                     <span style={{ width: 26, height: 26, borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff', background: accent, fontSize: Math.max(12, bodyFontSize - 3), fontWeight: 800, marginTop: 1 }}>{s.number ?? idx + 1}</span>
-                    <span style={{ fontSize: bodyFontSize, lineHeight: 1.55, fontWeight: 600 }}>{s.text}</span>
+                    <span style={{ fontSize: bodyFontSize, lineHeight: 1.55, fontWeight: 600 }}>{s.label || s.text}</span>
                     <span style={{ color: '#64748b', display: 'flex', justifyContent: 'center', paddingTop: 5 }}><Chevron open={isOpen} /></span>
                   </button>
                   {isOpen ? (
@@ -784,7 +784,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
                     {visibleChapters.map(chapter => {
                       const heads = chapterHeadings(chapter).filter(h => h.type === 'heading2')
                       const isOpen = expanded.has(chapter.id)
-                      const toggleChapter = () => setExpanded(prev => { const next = new Set(prev); if (next.has(chapter.id)) next.delete(chapter.id); else next.add(chapter.id); return next })
+                      const toggleChapter = () => setExpanded(prev => prev.has(chapter.id) ? new Set() : new Set([chapter.id]))
                       return <div key={chapter.id} style={{ borderRadius: 7, overflow: 'hidden', border: '1px solid transparent', background: 'transparent' }}>
                         <div style={{ display: 'grid', gridTemplateColumns: heads.length ? '25px minmax(0,1fr)' : 'minmax(0,1fr)', alignItems: 'stretch' }}>
                           {heads.length ? <button type='button' aria-label={isOpen ? 'Comprimi capitolo' : 'Espandi capitolo'} onClick={toggleChapter} style={{ border: 0, background: 'transparent', color: mutedColor, cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Chevron open={isOpen} /></button> : null}

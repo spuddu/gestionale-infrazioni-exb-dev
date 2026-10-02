@@ -454,6 +454,27 @@ function Card(p: { card: CardConfig; cfg: any; idx: number }) {
   )
 }
 
+function formatFooterLeft(value: any, year: number): string {
+  const build = String((window as any).__GII_BUILD__ || '').trim()
+  let text = String(value || '').replace(/\{year\}/g, String(year))
+
+  // Se il testo configurato usa il segnaposto, lo rispetta.
+  // In assenza di build (es. Builder locale) il segmento viene rimosso senza lasciare separatori doppi.
+  if (text.includes('{build}')) {
+    text = text.replace(/\{build\}/g, build ? `build ${build}` : '')
+  } else if (build && !/\bbuild\s+[0-9a-f]{7,}\b/i.test(text)) {
+    // Compatibilità con configurazioni già salvate che contengono ancora
+    // "GII v1.0 · CBSM © {year}": inserisce la build dopo la versione.
+    text = text.replace(/(GII\s+v[0-9]+(?:\.[0-9]+){1,2})/i, `$1 · build ${build}`)
+  }
+
+  return text
+    .replace(/\s*·\s*·\s*/g, ' · ')
+    .replace(/^\s*·\s*|\s*·\s*$/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
 // ── Widget ────────────────────────────────────────────────────────────────────
 type Props = AllWidgetProps<IMConfig>
 
@@ -728,7 +749,7 @@ export default function Widget(props: Props) {
               fontWeight:cfg.footerWeight ?? 400,
               fontStyle:cfg.footerItalic ? 'italic' : 'normal',
               color:cfg.footerColor
-            }}>{String(cfg.footerLeft || '').replace('{year}',String(now.getFullYear()))}</div>
+            }}>{formatFooterLeft(cfg.footerLeft, now.getFullYear())}</div>
             <div style={{
               fontFamily:cfg.footerFont || "'Source Sans 3', 'Segoe UI', sans-serif",
               fontSize:cfg.footerSize,

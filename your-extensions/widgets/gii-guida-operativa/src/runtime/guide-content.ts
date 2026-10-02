@@ -3,7 +3,7 @@ export type GuideRole = '*' | 'TR' | 'IT' | 'CS' | 'RIT' | 'DT' | 'IA' | 'RIA' |
 export type GuideBlock =
   | { type: 'heading2' | 'heading3'; id: string; text: string }
   | { type: 'lead' | 'paragraph' | 'bullet' | 'figure'; text: string }
-  | { type: 'step'; number: number | null; text: string }
+  | { type: 'step'; number: number | null; text: string; label?: string }
   | { type: 'callout'; title: string; text: string }
   | { type: 'table'; headers: string[]; rows: string[][] }
 
@@ -76,8 +76,8 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
             "Valida l’istruttoria tecnica, può richiedere integrazioni e, quando previsto, interviene su Occorrenza e Grado di gravità."
           ],
           [
-            "Direttore Aree Agraria e Tecnica",
-            "Approva la fase tecnica e può richiedere integrazioni o respingere la pratica nei casi previsti."
+            "Direttore tecnico",
+            "È il direttore competente per la pratica nella fase tecnica. Approva l’istruttoria tecnica e può richiedere integrazioni o respingere la pratica nei casi previsti."
           ],
           [
             "Istruttore amministrativo",
@@ -88,8 +88,8 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
             "Assegna le pratiche all’Istruttore amministrativo, verifica e valida l’istruttoria amministrativa, può richiedere integrazioni e verifica l’Atto di accertamento prima dei successivi adempimenti."
           ],
           [
-            "Direttore Area AA.GG. e P.F.",
-            "Definisce il procedimento amministrativo mediante l’adozione del provvedimento dirigenziale, sottoscrive la notifica dell’Atto di accertamento e può richiedere integrazioni nei passaggi previsti."
+            "Direttore amministrativo",
+            "È il direttore competente per la fase amministrativa. Definisce il procedimento amministrativo mediante l’adozione del provvedimento dirigenziale e sottoscrive la notifica dell’Atto di accertamento."
           ],
           [
             "Amministratore del sistema",
@@ -131,7 +131,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
             "Le pratiche dell’Area Agraria o dell’Area Tecnica di competenza."
           ],
           [
-            "Direttore Aree Agraria e Tecnica",
+            "Direttore tecnico",
             "Le pratiche dell’Area Agraria o dell’Area Tecnica di competenza."
           ],
           [
@@ -143,7 +143,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
             "Le pratiche della fase amministrativa."
           ],
           [
-            "Direttore Area AA.GG. e P.F.",
+            "Direttore amministrativo",
             "Le pratiche della fase amministrativa."
           ],
           [
@@ -281,7 +281,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "Lo stato sintetico del ruolo è normalizzato in etichette operative: Da prendere in carico, In carico, Rimandato, Trasmesso, Istruttoria assegnata e Respinto; per l’Amministratore del sistema può inoltre comparire Archiviata. Non va confuso con il singolo evento registrato nell’Iter."
+        "text": "Lo stato della pratica è mostrato con etichette operative: Da prendere in carico, In carico, Rimandato, Trasmesso, Istruttoria assegnata e Respinto; per l’Amministratore del sistema può inoltre comparire Archiviata. Non va confuso con il singolo evento registrato nell’Iter."
       },
       {
         "type": "heading3",
@@ -291,27 +291,32 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Elenco pratiche e scegliere anzitutto la scheda coerente con lo scopo: In attesa mia, In attesa di altri o Tutte le pratiche."
+        "text": "Aprire Elenco pratiche e scegliere anzitutto la scheda coerente con lo scopo: In attesa mia, In attesa di altri o Tutte le pratiche.",
+        "label": "Scegliere la scheda dell’Elenco pratiche"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Aprire il pannello filtri quando serve restringere l’elenco e impostare uno o più criteri disponibili."
+        "text": "Aprire il pannello filtri quando serve restringere l’elenco e impostare uno o più criteri disponibili.",
+        "label": "Filtrare le pratiche"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Ordinare le colonne utili; per il lavoro corrente è normalmente utile mantenere visibile l’Ultimo aggiornamento."
+        "text": "Ordinare le colonne utili; per il lavoro corrente è normalmente utile mantenere visibile l’Ultimo aggiornamento.",
+        "label": "Ordinare l’elenco"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Per azzerare la ricerca utilizzare Pulisci filtri: questo evita che una pratica risulti apparentemente “scomparsa” a causa di un filtro rimasto attivo."
+        "text": "Per azzerare la ricerca utilizzare Pulisci filtri: questo evita che una pratica risulti apparentemente “scomparsa” a causa di un filtro rimasto attivo.",
+        "label": "Azzerare i filtri"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Selezionare una pratica per visualizzarne i dettagli e le azioni disponibili."
+        "text": "Selezionare una pratica per visualizzarne i dettagli e le azioni disponibili.",
+        "label": "Selezionare una pratica"
       },
       {
         "type": "callout",
@@ -363,6 +368,10 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "text": "Ricostruire l’iter della pratica."
       },
       {
+        "type": "paragraph",
+        "text": "Le funzioni qui richiamate solo per la consultazione sono approfondite nei capitoli dedicati: Nota spese (Cap. 18), Mappa (Cap. 20) e Allegati, Anteprima fascicolo e Iter (Cap. 24)."
+      },
+      {
         "type": "heading2",
         "id": "cap-2-orientarsi-home-elenco-pratiche-dettaglio-e-allarmi-2-4-allarmi-e-scadenze",
         "text": "2.4 Allarmi e scadenze"
@@ -390,6 +399,10 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "type": "callout",
         "title": "Attenzione",
         "text": "Gli allarmi dell’iter che richiedono la presa in carico non vanno trattati come semplici promemoria: la loro chiusura deriva dall’azione operativa sulla pratica."
+      },
+      {
+        "type": "paragraph",
+        "text": "Per il significato degli allarmi, degli eventi e degli stati sintetici della pratica vedere Cap. 25."
       }
     ]
   },
@@ -415,7 +428,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "rows": [
           [
             "Origine",
-            "Tecnico rilevatore tramite Survey123 → Capo Settore, oppure l’Istruttore tecnico crea direttamente la pratica nel gestionale",
+            "Tecnico rilevatore tramite Esri Survey123, utilizzando il rilevamento Infrazioni → Capo Settore, oppure l’Istruttore tecnico crea direttamente la pratica nel gestionale",
             "Rilevazione disponibile nel gestionale."
           ],
           [
@@ -430,28 +443,28 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           ],
           [
             "Validazione",
-            "Responsabile dell’istruttoria tecnica → Direttore Aree Agraria e Tecnica",
-            "Istruttoria validata."
+            "Responsabile dell’istruttoria tecnica → Direttore tecnico",
+            "Istruttoria tecnica validata."
           ],
           [
             "Approvazione",
-            "Direttore Aree Agraria e Tecnica → Responsabile dell’istruttoria amministrativa",
-            "Istruttoria approvata; ingresso nella fase amministrativa."
+            "Direttore tecnico → Responsabile dell’istruttoria amministrativa",
+            "Istruttoria tecnica approvata; ingresso nella fase amministrativa."
           ],
           [
             "Assegnazione amministrativa",
             "Responsabile dell’istruttoria amministrativa → Istruttore amministrativo",
-            "Istruttoria assegnata."
+            "Istruttoria amministrativa assegnata."
           ],
           [
             "Istruttoria amministrativa",
             "L’Istruttore amministrativo esprime l’esito; in caso di conformità il gestionale genera la Proposta di contestazione, l’Istruttore amministrativo predispone la bozza di determinazione e trasmette il fascicolo → Responsabile dell’istruttoria amministrativa",
-            "Fascicolo trasmesso per verifica."
+            "Fascicolo amministrativo trasmesso per verifica."
           ],
           [
             "Validazione amministrativa",
             "Responsabile dell’istruttoria amministrativa → Istruttore amministrativo",
-            "Istruttoria validata; l’Istruttore amministrativo prosegue gli adempimenti documentali."
+            "Istruttoria amministrativa validata; l’Istruttore amministrativo prosegue gli adempimenti documentali."
           ],
           [
             "Atto di accertamento",
@@ -466,13 +479,66 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         ]
       },
       {
-        "type": "callout",
-        "title": "Regola delle integrazioni",
-        "text": "Tutti i ruoli che intervengono nelle fasi di verifica, validazione, approvazione o istruttoria amministrativa possono richiedere integrazioni nei passaggi di propria competenza. L’Istruttore tecnico esegue l’istruttoria e risponde alle richieste ricevute, ma non apre a sua volta richieste di integrazione. Se la richiesta proviene da un ruolo successivo, dopo la correzione l’esito viene trasmesso attraverso i ruoli previsti fino a raggiungere chi ha richiesto l’integrazione. Nei passaggi intermedi viene registrato “Esito integrazione trasmesso”. Quando la risposta arriva al richiedente, quest’ultimo riprende la propria verifica, validazione o approvazione."
-      },
-      {
         "type": "figure",
         "text": "Figura – Schema generale dell’iter tecnico-amministrativo"
+      },
+      {
+        "type": "heading3",
+        "id": "cap-3-il-ciclo-completo-della-pratica-percorsi-di-integrazione",
+        "text": "Percorsi di integrazione"
+      },
+      {
+        "type": "table",
+        "headers": [
+          "Chi richiede l’integrazione",
+          "A chi viene trasmessa",
+          "Come torna l’esito"
+        ],
+        "rows": [
+          [
+            "Capo Settore",
+            "Istruttore tecnico",
+            "Istruttore tecnico → Capo Settore"
+          ],
+          [
+            "Responsabile dell’istruttoria tecnica",
+            "Istruttore tecnico",
+            "Istruttore tecnico → Capo Settore → Responsabile dell’istruttoria tecnica"
+          ],
+          [
+            "Direttore tecnico",
+            "Istruttore tecnico oppure Responsabile dell’istruttoria tecnica, secondo gli aspetti da correggere",
+            "Attraverso i passaggi tecnici previsti fino al Direttore tecnico"
+          ],
+          [
+            "Istruttore amministrativo",
+            "Responsabile dell’istruttoria amministrativa",
+            "Il Responsabile dell’istruttoria amministrativa esamina la richiesta e la pratica torna all’Istruttore amministrativo per le correzioni necessarie"
+          ],
+          [
+            "Responsabile dell’istruttoria amministrativa — aspetti amministrativi",
+            "Istruttore amministrativo",
+            "Istruttore amministrativo → Responsabile dell’istruttoria amministrativa"
+          ],
+          [
+            "Responsabile dell’istruttoria amministrativa — aspetti tecnici",
+            "Responsabile dell’istruttoria tecnica",
+            "Responsabile dell’istruttoria tecnica → Direttore tecnico → Responsabile dell’istruttoria amministrativa; se occorrono correzioni dell’Istruttore tecnico, l’esito passa prima dal Capo Settore e dal Responsabile dell’istruttoria tecnica"
+          ]
+        ]
+      },
+      {
+        "type": "paragraph",
+        "text": "Le trasmissioni, le verifiche e le richieste di integrazione vengono effettuate attraverso le Azioni disponibili per la pratica. Nei ruoli che devono esprimere una valutazione, Gestisci istruttoria consente di scegliere l’esito previsto e, quando necessario, indicare la motivazione o gli aspetti da integrare. I comandi da utilizzare in ciascun passaggio sono illustrati nel dettaglio nei capitoli dedicati ai singoli ruoli."
+      },
+      {
+        "type": "paragraph",
+        "text": "Le integrazioni tecniche sono approfondite nel Cap. 9. Le fasi amministrative e documentali richiamate nello schema sono trattate nei Cap. 13, Cap. 14, Cap. 15, Cap. 16 e Cap. 17."
+      },
+      {
+        "type": "callout",
+        "title": "Regola delle integrazioni",
+        "text": "Nella fase tecnica, il Capo Settore, il Responsabile dell’istruttoria tecnica e il Direttore tecnico possono richiedere integrazioni nei passaggi di propria competenza. L’Istruttore tecnico esegue l’istruttoria e risponde alle richieste ricevute, ma non può aprire a sua volta una richiesta di integrazione. Nella fase amministrativa, l’Istruttore amministrativo e il Responsabile dell’istruttoria amministrativa possono richiedere integrazioni nei passaggi di propria competenza. Quando una richiesta comporta il ritorno della pratica a un ruolo precedente, dopo la correzione l’esito viene trasmesso attraverso i passaggi previsti fino al ruolo che aveva richiesto l’integrazione. Nei passaggi intermedi viene registrato “Esito integrazione trasmesso”. Quando l’esito torna al richiedente, quest’ultimo riprende la propria verifica, validazione o approvazione."
       }
     ]
   },
@@ -482,8 +548,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
     "title": "4. Nuova rilevazione e nuova pratica",
     "roles": [
       "CS",
-      "IT",
-      "ADMIN"
+      "IT"
     ],
     "blocks": [
       {
@@ -493,7 +558,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "Una rilevazione effettuata dal Tecnico rilevatore tramite Survey123 entra nel gestionale e viene indirizzata al Capo Settore. Il Capo Settore riceve l’allarme “Nuova rilevazione ricevuta”. In questo caso la pratica non è ancora assegnata a un Istruttore tecnico."
+        "text": "Una rilevazione effettuata dal Tecnico rilevatore tramite l’applicazione Esri Survey123, utilizzando il rilevamento Infrazioni, entra nel gestionale e viene indirizzata al Capo Settore. Il Capo Settore riceve l’allarme “Nuova rilevazione ricevuta”. In questo caso la pratica non è ancora assegnata a un Istruttore tecnico."
       },
       {
         "type": "heading3",
@@ -503,32 +568,31 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire l’allarme “Nuova rilevazione ricevuta” oppure entrare in Elenco pratiche → In attesa mia e selezionare la rilevazione."
+        "text": "Aprire la nuova rilevazione ricevuta.",
+        "label": "Aprire la rilevazione ricevuta"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Controllare nel Dettaglio gli elementi già rilevati, in particolare trasgressore, violazione, localizzazione, dati tecnici e allegati."
+        "text": "Controllare nel Dettaglio gli elementi già rilevati, in particolare trasgressore, violazione, localizzazione, dati tecnici e allegati.",
+        "label": "Verificare i dati della rilevazione"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Usare Prendi in carico se lo stato del Capo Settore è Da prendere in carico."
+        "text": "Prendere in carico una pratica.",
+        "label": "Prendere in carico la pratica"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Aprire Gestisci istruttoria. Per una rilevazione proveniente dal Tecnico rilevatore e non ancora assegnata, scegliere l’azione di assegnazione all’Istruttore tecnico."
+        "text": "Assegnare la pratica a un Istruttore tecnico."
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Selezionare l’Istruttore tecnico competente tra quelli disponibili per il contesto della pratica e confermare."
-      },
-      {
-        "type": "step",
-        "number": 6,
-        "text": "Verificare che la pratica esca da In attesa mia e passi al destinatario."
+        "text": "Verificare che la pratica esca da In attesa mia e passi a In attesa di altri.",
+        "label": "Verificare l’avvenuta assegnazione"
       },
       {
         "type": "callout",
@@ -561,47 +625,55 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Nuova pratica dalla Home o dal navigatore laterale."
+        "text": "Avviare una nuova pratica."
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Verificare i Dati generali proposti dal profilo: Area, Settore, Ufficio di zona, Istruttore tecnico e Data rilevazione. Correggere soltanto i dati che l’interfaccia consente effettivamente di modificare."
+        "text": "Verificare i Dati generali."
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Compilare il Trasgressore scegliendo il tipo di soggetto e i dati anagrafici pertinenti; gestire anche il domicilio per le notifiche quando diverso."
+        "text": "Compilare i dati del Trasgressore.",
+        "label": "Compilare il Trasgressore"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Compilare Violazione selezionando gli articoli/casistiche effettivamente accertati e i dati richiesti per quelle casistiche."
+        "text": "Compilare la Violazione."
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Compilare Luoghi e dati tecnici e impostare il punto sulla mappa quando richiesto dalla violazione."
+        "text": "Compilare Luoghi e dati tecnici."
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Compilare la Nota spese se la violazione rientra nelle casistiche che la attivano."
+        "text": "Salvare la nuova pratica."
       },
       {
         "type": "step",
         "number": 7,
-        "text": "Premere Salva. Il primo salvataggio crea la pratica e assegna l’identificativo; da questo momento diventano disponibili anche allegati e anteprima fascicolo."
+        "text": "Compilare la Nota spese, se prevista.",
+        "label": "Compilare la Nota spese"
       },
       {
         "type": "step",
         "number": 8,
-        "text": "Aggiungere o modificare gli allegati necessari e salvare nuovamente, perché le modifiche agli allegati diventano definitive con il salvataggio complessivo della pratica."
+        "text": "Gestire gli allegati della pratica.",
+        "label": "Gestire gli allegati"
       },
       {
         "type": "step",
         "number": 9,
-        "text": "Quando l’istruttoria tecnica è completa, tornare alle Azioni e usare il comando di trasmissione della nuova rilevazione al Capo Settore."
+        "text": "Salvare le modifiche."
+      },
+      {
+        "type": "step",
+        "number": 10,
+        "text": "Trasmettere la nuova rilevazione al Capo Settore."
       },
       {
         "type": "callout",
@@ -670,6 +742,10 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         ]
       },
       {
+        "type": "paragraph",
+        "text": "La compilazione della Nota spese è descritta nel Cap. 18. La gestione di Allegati e Anteprima fascicolo e la consultazione dell’Iter sono approfondite nel Cap. 24."
+      },
+      {
         "type": "heading2",
         "id": "cap-5-istruttoria-tecnica-dell-it-5-2-controlli-al-salvataggio",
         "text": "5.2 Controlli al salvataggio"
@@ -722,32 +798,38 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire la pratica da In attesa mia. Se è Da prendere in carico, usare Prendi in carico."
+        "text": "Prendere in carico la pratica assegnata.",
+        "label": "Prendere in carico la pratica"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Entrare nella lavorazione tecnica e verificare, una sezione alla volta, Trasgressore, Violazione, Luoghi e dati tecnici, Nota spese e Allegati."
+        "text": "Entrare nella lavorazione tecnica e verificare, una sezione alla volta, Trasgressore, Violazione, Luoghi e dati tecnici, Nota spese e Allegati.",
+        "label": "Verificare i dati dell’istruttoria"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Correggere i dati e premere Salva. Risolvere gli eventuali controlli bloccanti mostrati dal sistema."
+        "text": "Correggere i dati e premere Salva. Risolvere gli eventuali controlli bloccanti mostrati dal sistema.",
+        "label": "Correggere e salvare i dati"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Controllare l’Anteprima fascicolo e, se necessario, riaprire la sezione che contiene il dato da correggere."
+        "text": "Controllare l’Anteprima fascicolo e, se necessario, riaprire la sezione che contiene il dato da correggere.",
+        "label": "Verificare il fascicolo"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Tornare alle Azioni. Se è la prima trasmissione di una pratica creata direttamente dall’Istruttore tecnico, usare Trasmetti nuova rilevazione; negli altri casi usare Trasmetti istruttoria."
+        "text": "Tornare alle Azioni. Se è la prima trasmissione di una pratica creata direttamente dall’Istruttore tecnico, usare Trasmetti nuova rilevazione; negli altri casi usare Trasmetti istruttoria.",
+        "label": "Trasmettere l’istruttoria tecnica"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Confermare la trasmissione al Capo Settore."
+        "text": "Confermare la trasmissione al Capo Settore.",
+        "label": "Confermare la trasmissione"
       },
       {
         "type": "callout",
@@ -766,17 +848,20 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire la pratica interessata e verificare che sia ancora nella fase iniziale di competenza dell’Istruttore tecnico."
+        "text": "Aprire la pratica interessata e verificare che sia ancora nella fase iniziale di competenza dell’Istruttore tecnico.",
+        "label": "Verificare che la pratica sia archiviabile"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Aprire le Azioni e scegliere Elimina."
+        "text": "Aprire le Azioni e scegliere Elimina.",
+        "label": "Archiviare la pratica"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Inserire la nota obbligatoria che motiva l’archiviazione e confermare."
+        "text": "Inserire la nota obbligatoria che motiva l’archiviazione e confermare.",
+        "label": "Motivare e confermare l’archiviazione"
       },
       {
         "type": "callout",
@@ -831,32 +916,37 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire la pratica da In attesa mia e usare Prendi in carico, se richiesto."
+        "text": "Prendere in carico la pratica da verificare.",
+        "label": "Prendere in carico la pratica"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Consultare Dettaglio pratica e verificare coerenza di trasgressore, violazioni, localizzazione, Nota spese, allegati e Iter."
+        "text": "Consultare Dettaglio pratica e verificare coerenza di trasgressore, violazioni, localizzazione, Nota spese, allegati e Iter.",
+        "label": "Verificare l’istruttoria"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Aprire Gestisci istruttoria."
+        "text": "Scegliere l’esito della verifica."
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Se la pratica è corretta, scegliere Conforme e confermare la trasmissione al Responsabile istruttoria tecnica."
+        "text": "Se la pratica è corretta, scegliere Conforme e confermare la trasmissione al Responsabile dell’istruttoria tecnica.",
+        "label": "Approvare l’istruttoria"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Se servono correzioni, usare il rimando per integrazione verso l’Istruttore tecnico e inserire la motivazione richiesta."
+        "text": "Se servono correzioni, usare il rimando per integrazione verso l’Istruttore tecnico e inserire la motivazione richiesta.",
+        "label": "Richiedere un’integrazione"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Quando ricorrono i casi previsti, il Capo Settore può anche respingere la pratica."
+        "text": "Quando ricorrono i casi previsti, il Capo Settore può anche respingere la pratica.",
+        "label": "Respingere la pratica"
       },
       {
         "type": "callout",
@@ -872,7 +962,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
   {
     "id": "cap-7-validazione-del-responsabile-istruttoria-tecnica",
     "order": 7,
-    "title": "7. Validazione del Responsabile istruttoria tecnica",
+    "title": "7. Validazione del Responsabile dell’istruttoria tecnica",
     "roles": [
       "RIT",
       "ADMIN"
@@ -890,44 +980,50 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire l’allarme o In attesa mia, selezionare la pratica e usare Prendi in carico."
+        "text": "Prendere in carico la pratica da validare.",
+        "label": "Prendere in carico la pratica"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Consultare il fascicolo tecnico e l’Iter per verificare il percorso già svolto."
+        "text": "Consultare il fascicolo tecnico e l’Iter per verificare il percorso già svolto.",
+        "label": "Verificare fascicolo e Iter"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Se necessario aprire la lavorazione tecnica, modificare soltanto Occorrenza e Grado di gravità e premere Salva."
+        "text": "Se necessario aprire la lavorazione tecnica, modificare soltanto Occorrenza e Grado di gravità e premere Salva.",
+        "label": "Modificare Occorrenza e Grado di gravità"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Aprire Gestisci istruttoria."
+        "text": "Scegliere l’esito della validazione tecnica.",
+        "label": "Scegliere l’esito della validazione"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Se l’istruttoria è corretta, scegliere Conforme e confermare la trasmissione al Direttore Aree Agraria e Tecnica."
+        "text": "Se l’istruttoria è corretta, scegliere Conforme e confermare la trasmissione al Direttore tecnico.",
+        "label": "Validare l’istruttoria tecnica"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Se servono integrazioni, rimandare la pratica all’Istruttore tecnico con motivazione. Il Responsabile dell’istruttoria tecnica non dispone di un respingimento finale analogo a quello del Direttore Aree Agraria e Tecnica."
+        "text": "Se servono integrazioni, rimandare la pratica all’Istruttore tecnico con motivazione. Il Responsabile dell’istruttoria tecnica non dispone di un respingimento finale analogo a quello del Direttore tecnico.",
+        "label": "Richiedere un’integrazione"
       },
       {
         "type": "callout",
         "title": "Cosa accade dopo",
-        "text": "Con esito positivo viene registrato “Istruttoria validata” e il Direttore Aree Agraria e Tecnica riceve la pratica."
+        "text": "Con esito positivo viene registrato “Istruttoria validata” e il Direttore tecnico riceve la pratica."
       }
     ]
   },
   {
     "id": "cap-8-approvazione-del-direttore-d-area",
     "order": 8,
-    "title": "8. Approvazione del Direttore Aree Agraria e Tecnica",
+    "title": "8. Approvazione del Direttore tecnico",
     "roles": [
       "DT",
       "ADMIN"
@@ -935,42 +1031,48 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
     "blocks": [
       {
         "type": "lead",
-        "text": "Il Direttore Aree Agraria e Tecnica conclude la fase di approvazione tecnica. Non modifica i dati dell’istruttoria tecnica: consulta la pratica, la approva, richiede un’integrazione oppure la respinge nei casi previsti."
+        "text": "Il Direttore tecnico conclude la fase di approvazione tecnica. Non modifica i dati dell’istruttoria tecnica: consulta la pratica, la approva, richiede un’integrazione oppure la respinge nei casi previsti."
       },
       {
         "type": "heading3",
         "id": "cap-8-approvazione-del-direttore-d-area-dt-approvare-integrare-o-respingere",
-        "text": "Direttore Aree Agraria e Tecnica — approvare, integrare o respingere"
+        "text": "Direttore tecnico — approvare, integrare o respingere"
       },
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire la pratica ricevuta e usare Prendi in carico."
+        "text": "Prendere in carico la pratica da approvare.",
+        "label": "Prendere in carico la pratica"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Controllare il fascicolo, la Nota spese, gli allegati e l’Iter."
+        "text": "Controllare il fascicolo, la Nota spese, gli allegati e l’Iter.",
+        "label": "Verificare il fascicolo tecnico"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Aprire Gestisci istruttoria."
+        "text": "Scegliere l’esito dell’approvazione tecnica.",
+        "label": "Scegliere l’esito dell’approvazione"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Per l’esito positivo selezionare Conforme e confermare: la pratica entra nella fase amministrativa ed è trasmessa al Responsabile dell’istruttoria amministrativa."
+        "text": "Per l’esito positivo selezionare Conforme e confermare: la pratica entra nella fase amministrativa ed è trasmessa al Responsabile dell’istruttoria amministrativa.",
+        "label": "Approvare l’istruttoria tecnica"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Per una richiesta di integrazione selezionare l’esito negativo/da integrare e indicare gli aspetti da correggere. Se la richiesta riguarda esclusivamente Occorrenza e/o Grado di gravità, la pratica viene trasmessa al Responsabile dell’istruttoria tecnica; negli altri casi tecnici viene trasmessa all’Istruttore tecnico."
+        "text": "Per una richiesta di integrazione selezionare l’esito negativo/da integrare e indicare gli aspetti da correggere. Se la richiesta riguarda esclusivamente Occorrenza e/o Grado di gravità, la pratica viene trasmessa al Responsabile dell’istruttoria tecnica; negli altri casi tecnici viene trasmessa all’Istruttore tecnico.",
+        "label": "Richiedere un’integrazione"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Quando ricorrono i presupposti dell’iter, il Direttore Aree Agraria e Tecnica può respingere l’istruttoria tecnica. Il respingimento chiude il normale avanzamento verso la fase amministrativa."
+        "text": "Quando ricorrono i presupposti dell’iter, il Direttore tecnico può respingere l’istruttoria tecnica. Il respingimento chiude il normale avanzamento verso la fase amministrativa.",
+        "label": "Respingere l’istruttoria tecnica"
       },
       {
         "type": "callout",
@@ -1018,16 +1120,16 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
             "Quando l’esito arriva al Responsabile dell’istruttoria tecnica richiedente."
           ],
           [
-            "Direttore Aree Agraria e Tecnica",
+            "Direttore tecnico",
             "Istruttore tecnico oppure Responsabile dell’istruttoria tecnica se solo Occorrenza/Grado",
-            "Se Istruttore tecnico: Istruttore tecnico → Capo Settore → Responsabile dell’istruttoria tecnica → Direttore Aree Agraria e Tecnica. Se Responsabile dell’istruttoria tecnica: Responsabile dell’istruttoria tecnica → Direttore Aree Agraria e Tecnica.",
-            "Al Direttore Aree Agraria e Tecnica richiedente."
+            "Se Istruttore tecnico: Istruttore tecnico → Capo Settore → Responsabile dell’istruttoria tecnica → Direttore tecnico. Se Responsabile dell’istruttoria tecnica: Responsabile dell’istruttoria tecnica → Direttore tecnico.",
+            "Al Direttore tecnico richiedente."
           ],
           [
             "Responsabile dell’istruttoria amministrativa — integrazione tecnica",
             "Responsabile dell’istruttoria tecnica",
-            "Responsabile dell’istruttoria tecnica → Direttore Aree Agraria e Tecnica → Responsabile dell’istruttoria amministrativa",
-            "Al Responsabile dell’istruttoria amministrativa, che riprende la verifica amministrativa; il rientro non viene inoltrato automaticamente all’Istruttore amministrativo."
+            "Responsabile dell’istruttoria tecnica → Direttore tecnico → Responsabile dell’istruttoria amministrativa",
+            "Al Responsabile dell’istruttoria amministrativa, che riprende la verifica amministrativa; l’esito non viene inoltrato automaticamente all’Istruttore amministrativo."
           ]
         ]
       },
@@ -1039,32 +1141,38 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire l’allarme “Richiesta integrazione ricevuta” e la pratica."
+        "text": "Aprire la pratica rimandata per integrazione.",
+        "label": "Aprire la pratica rimandata"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Usare Prendi in carico. Finché la pratica è soltanto rimandata e non ripresa, i dati restano bloccati secondo le regole del ruolo."
+        "text": "Prendere in carico la pratica rimandata.",
+        "label": "Prendere in carico la pratica"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Leggere la motivazione del rimando e verificare nell’Iter chi ha originato la richiesta e quali aspetti sono stati indicati."
+        "text": "Leggere la motivazione del rimando e verificare nell’Iter chi ha originato la richiesta e quali aspetti sono stati indicati.",
+        "label": "Leggere la richiesta di integrazione"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Aprire la lavorazione consentita al proprio ruolo, correggere soltanto i dati richiesti e salvare."
+        "text": "Aprire la lavorazione consentita al proprio ruolo, correggere soltanto i dati richiesti e salvare.",
+        "label": "Eseguire le correzioni richieste"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Tornare a Gestisci istruttoria e trasmettere l’esito. Se la richiesta era stata formulata da un ruolo successivo, nei passaggi che precedono il ritorno al richiedente viene registrato l’evento “Esito integrazione trasmesso”."
+        "text": "Tornare a Gestisci istruttoria e trasmettere l’esito. Se la richiesta era stata formulata da un ruolo successivo, nei passaggi che precedono il ritorno al richiedente viene registrato l’evento “Esito integrazione trasmesso”.",
+        "label": "Trasmettere l’esito dell’integrazione"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Controllare che la pratica sia passata al ruolo successivo previsto."
+        "text": "Controllare che la pratica sia passata al ruolo successivo previsto.",
+        "label": "Verificare il passaggio della pratica"
       },
       {
         "type": "callout",
@@ -1074,7 +1182,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "callout",
         "title": "Attenzione",
-        "text": "Un Istruttore tecnico che risponde a un’integrazione richiesta dal Responsabile dell’istruttoria tecnica non salta il Capo Settore: ritrasmette comunque al Capo Settore. Analogamente, un’integrazione tecnica chiesta dal Responsabile dell’istruttoria amministrativa passa dal Responsabile dell’istruttoria tecnica al Direttore Aree Agraria e Tecnica prima di tornare al Responsabile dell’istruttoria amministrativa."
+        "text": "Un Istruttore tecnico che risponde a un’integrazione richiesta dal Responsabile dell’istruttoria tecnica non salta il Capo Settore: ritrasmette comunque al Capo Settore. Analogamente, un’integrazione tecnica chiesta dal Responsabile dell’istruttoria amministrativa passa dal Responsabile dell’istruttoria tecnica al Direttore tecnico prima di tornare al Responsabile dell’istruttoria amministrativa."
       }
     ]
   },
@@ -1090,7 +1198,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
     "blocks": [
       {
         "type": "lead",
-        "text": "Dopo l’approvazione del Direttore Aree Agraria e Tecnica, la pratica entra nella fase amministrativa. Il Responsabile dell’istruttoria amministrativa la prende in carico e la assegna a un Istruttore amministrativo."
+        "text": "Dopo l’approvazione del Direttore tecnico, la pratica entra nella fase amministrativa. Il Responsabile dell’istruttoria amministrativa la prende in carico e la assegna a un Istruttore amministrativo."
       },
       {
         "type": "heading3",
@@ -1100,32 +1208,36 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire l’allarme relativo al nuovo fascicolo/alla nuova istruttoria e la pratica da In attesa mia."
+        "text": "Aprire la nuova istruttoria amministrativa."
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Usare Prendi in carico."
+        "text": "Prendere in carico la pratica da assegnare.",
+        "label": "Prendere in carico la pratica"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Consultare il fascicolo tecnico e l’Iter per verificare che la fase tecnica sia stata approvata."
+        "text": "Consultare il fascicolo tecnico e l’Iter per verificare che la fase tecnica sia stata approvata.",
+        "label": "Verificare il fascicolo tecnico"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Aprire Gestisci istruttoria e scegliere l’azione di assegnazione."
+        "text": "Assegnare la pratica a un Istruttore amministrativo."
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Selezionare l’Istruttore amministrativo e confermare."
+        "text": "Confermare l’Istruttore amministrativo selezionato.",
+        "label": "Confermare l’assegnazione"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Verificare il passaggio della pratica all’Istruttore amministrativo assegnato."
+        "text": "Verificare il passaggio della pratica all’Istruttore amministrativo assegnato.",
+        "label": "Verificare l’avvenuta assegnazione"
       },
       {
         "type": "callout",
@@ -1139,7 +1251,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "La normale assegnazione iniziale è distinta dall’avvio di una nuova istruttoria amministrativa dopo una riapertura. In quest’ultimo caso il Responsabile dell’istruttoria amministrativa seleziona l’Istruttore amministrativo che svolgerà la nuova istruttoria. Restano disponibili lo storico del ricorso, l’esito del CdA e i dati della riapertura."
+        "text": "La normale assegnazione iniziale è distinta dall’avvio di una nuova istruttoria amministrativa dopo una riapertura. In quest’ultimo caso il Responsabile dell’istruttoria amministrativa seleziona l’Istruttore amministrativo che svolgerà la nuova istruttoria. Restano disponibili lo storico del ricorso, l’esito del CdA e i dati della riapertura. La procedura di riapertura è descritta nel Cap. 17.3."
       }
     ]
   },
@@ -1219,6 +1331,10 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         ]
       },
       {
+        "type": "paragraph",
+        "text": "Le attività qui solo inquadrate sono approfondite nei capitoli dedicati: determinazione (Cap. 13), Atto di accertamento (Cap. 14), modalità di pagamento e avvisi pagoPA (Cap. 15), notifica e stato del pagamento (Cap. 16), ricorso, CdA, riapertura e definizione (Cap. 17), Allegati, fascicolo e Iter (Cap. 24)."
+      },
+      {
         "type": "heading2",
         "id": "cap-11-istruttoria-amministrativa-dell-ia-11-2-importi-calcolati-e-dati-manuali",
         "text": "11.2 Importi calcolati e dati manuali"
@@ -1235,37 +1351,43 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire la pratica assegnata e usare Prendi in carico."
+        "text": "Prendere in carico la pratica assegnata.",
+        "label": "Prendere in carico la pratica"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Controllare Trasgressore, Contestazioni, allegati e Iter e completare i soli dati resi modificabili nella fase corrente."
+        "text": "Controllare Trasgressore, Contestazioni, allegati e Iter e completare i soli dati resi modificabili nella fase corrente.",
+        "label": "Verificare e completare i dati amministrativi"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Aprire Gestisci istruttoria nella sezione Iter approvativo."
+        "text": "Valutare l’istruttoria amministrativa."
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Scegliere Conforme se il fascicolo può proseguire alla predisposizione degli elaborati amministrativi; scegliere Non conforme se occorre un’integrazione tramite Responsabile dell’istruttoria amministrativa."
+        "text": "Scegliere Conforme se il fascicolo può proseguire alla predisposizione degli elaborati amministrativi; scegliere Non conforme se occorre un’integrazione tramite Responsabile dell’istruttoria amministrativa.",
+        "label": "Scegliere Conforme o Non conforme"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "In caso di Non conforme, compilare la motivazione richiesta e confermare il rimando al Responsabile dell’istruttoria amministrativa."
+        "text": "In caso di Non conforme, compilare la motivazione richiesta e confermare il rimando al Responsabile dell’istruttoria amministrativa.",
+        "label": "Motivare la non conformità"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "In caso di Conforme, confermare: il sistema registra l’esito dell’Istruttore amministrativo, genera o aggiorna automaticamente la Proposta di contestazione e apre la fase di predisposizione della bozza di determinazione, senza spostare immediatamente la pratica al Responsabile dell’istruttoria amministrativa."
+        "text": "In caso di Conforme, confermare: il sistema registra l’esito dell’Istruttore amministrativo, genera o aggiorna automaticamente la Proposta di contestazione e apre la fase di predisposizione della bozza di determinazione, senza spostare immediatamente la pratica al Responsabile dell’istruttoria amministrativa.",
+        "label": "Confermare l’esito conforme"
       },
       {
         "type": "step",
         "number": 7,
-        "text": "Proseguire con la generazione della bozza e, solo quando il fascicolo è pronto, usare Trasmetti fascicolo al Responsabile."
+        "text": "Proseguire con la generazione della bozza e, solo quando il fascicolo è pronto, usare Trasmetti fascicolo al Responsabile.",
+        "label": "Predisporre e trasmettere il fascicolo"
       },
       {
         "type": "callout",
@@ -1300,32 +1422,38 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire l’allarme “Nuovo fascicolo ricevuto” e usare Prendi in carico."
+        "text": "Prendere in carico il fascicolo da verificare.",
+        "label": "Prendere in carico il fascicolo"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Consultare Iter approvativo, fascicolo e allegati; verificare l’esito dell’Istruttore amministrativo e la documentazione predisposta."
+        "text": "Consultare Iter approvativo, fascicolo e allegati; verificare l’esito dell’Istruttore amministrativo e la documentazione predisposta.",
+        "label": "Verificare il fascicolo amministrativo"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Aprire Gestisci istruttoria."
+        "text": "Scegliere l’esito della verifica amministrativa.",
+        "label": "Scegliere l’esito della verifica"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Se il fascicolo è conforme, scegliere Conforme e confermare la validazione: la pratica torna all’Istruttore amministrativo assegnato per gli adempimenti successivi."
+        "text": "Se il fascicolo è conforme, scegliere Conforme e confermare la validazione: la pratica torna all’Istruttore amministrativo assegnato per gli adempimenti successivi.",
+        "label": "Validare il fascicolo"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Se non è conforme, scegliere Non conforme. Indicare gli aspetti che richiedono integrazione/rettifica nelle sezioni proposte."
+        "text": "Se non è conforme, scegliere Non conforme. Indicare gli aspetti che richiedono integrazione/rettifica nelle sezioni proposte.",
+        "label": "Richiedere un’integrazione"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Confermare. Il sistema individua automaticamente la destinazione: Istruttore amministrativo per aspetti amministrativi, Responsabile dell’istruttoria tecnica per aspetti tecnici."
+        "text": "Confermare. Il sistema individua automaticamente la destinazione: Istruttore amministrativo per aspetti amministrativi, Responsabile dell’istruttoria tecnica per aspetti tecnici.",
+        "label": "Confermare il rimando"
       },
       {
         "type": "callout",
@@ -1335,7 +1463,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "callout",
         "title": "Attenzione",
-        "text": "Durante la verifica dell’Atto di accertamento la non conformità è limitata alla correzione amministrativa dell’Atto e rientra all’Istruttore amministrativo; non viene aperta una nuova integrazione tecnica dell’istruttoria."
+        "text": "Durante la verifica dell’Atto di accertamento la non conformità è limitata alla correzione amministrativa dell’Atto e rientra all’Istruttore amministrativo; non viene aperta una nuova integrazione tecnica dell’istruttoria. La verifica dell’Atto è descritta nel Cap. 14.2."
       },
       {
         "type": "heading2",
@@ -1353,7 +1481,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "Quando il Responsabile dell’istruttoria amministrativa segnala un problema tecnico, la pratica viene trasmessa al Responsabile dell’istruttoria tecnica. Se la correzione può essere effettuata direttamente dal Responsabile dell’istruttoria tecnica, questo completa l’integrazione; negli altri casi la pratica segue i passaggi tecnici necessari. Dopo la correzione, l’esito passa dal Responsabile dell’istruttoria tecnica al Direttore Aree Agraria e Tecnica e quindi torna al Responsabile dell’istruttoria amministrativa, che riprende la propria verifica. L’esito non viene inoltrato automaticamente all’Istruttore amministrativo."
+        "text": "Quando il Responsabile dell’istruttoria amministrativa segnala un problema tecnico, la pratica viene trasmessa al Responsabile dell’istruttoria tecnica. Se la correzione può essere effettuata direttamente dal Responsabile dell’istruttoria tecnica, questo completa l’integrazione; negli altri casi la pratica segue i passaggi tecnici necessari. Dopo la correzione, l’esito passa dal Responsabile dell’istruttoria tecnica al Direttore tecnico e quindi torna al Responsabile dell’istruttoria amministrativa, che riprende la propria verifica. L’esito non viene inoltrato automaticamente all’Istruttore amministrativo."
       }
     ]
   },
@@ -1389,32 +1517,38 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Dopo aver espresso esito Conforme, verificare che la Proposta di contestazione sia stata generata o aggiornata e che la determinazione sia in fase di bozza."
+        "text": "Dopo aver espresso esito Conforme, verificare che la Proposta di contestazione sia stata generata o aggiornata e che la determinazione sia in fase di bozza.",
+        "label": "Verificare la Proposta di contestazione e la bozza"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Usare Genera bozza per creare il documento Word della determinazione; se i dati cambiano e il sistema segnala che la bozza è da rigenerare, usare Rigenera bozza."
+        "text": "Usare Genera bozza per creare il documento Word della determinazione; se i dati cambiano e il sistema segnala che la bozza è da rigenerare, usare Rigenera bozza.",
+        "label": "Generare la bozza di determinazione"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Aprire il Word esternamente, completare o modificare il testo dove previsto e convertirlo in PDF fuori dal gestionale."
+        "text": "Aprire il Word esternamente, completare o modificare il testo dove previsto e convertirlo in PDF fuori dal gestionale.",
+        "label": "Completare e convertire la bozza in PDF"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Caricare il PDF della bozza di determinazione, ottenuto dopo la conversione del documento Word predisposto dal gestionale. Il PDF può essere caricato soltanto dopo aver generato il Word."
+        "text": "Caricare il PDF della bozza di determinazione, ottenuto dopo la conversione del documento Word predisposto dal gestionale. Il PDF può essere caricato soltanto dopo aver generato il Word.",
+        "label": "Caricare il PDF della bozza"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Controllare l’Anteprima fascicolo e la completezza della documentazione."
+        "text": "Controllare l’Anteprima fascicolo e la completezza della documentazione.",
+        "label": "Verificare il fascicolo"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Usare Trasmetti fascicolo al Responsabile."
+        "text": "Usare Trasmetti fascicolo al Responsabile.",
+        "label": "Trasmettere il fascicolo al Responsabile"
       },
       {
         "type": "callout",
@@ -1443,37 +1577,31 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Dopo la validazione del Responsabile dell’istruttoria amministrativa usare Trasmetti fascicolo al protocollo. Il gestionale prepara il messaggio e memorizza la composizione esatta del fascicolo trasmesso."
+        "text": "Dopo la validazione del Responsabile dell’istruttoria amministrativa usare Trasmetti fascicolo al protocollo. Il gestionale prepara il messaggio e memorizza la composizione esatta del fascicolo trasmesso.",
+        "label": "Trasmettere il fascicolo al protocollo"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Eseguire la protocollazione tramite il sistema esterno previsto dall’Ente."
+        "text": "Eseguire la protocollazione tramite il sistema esterno previsto dall’Ente.",
+        "label": "Protocollare il fascicolo"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Al ritorno, selezionare insieme tutti i PDF protocollati richiesti dal gestionale."
+        "text": "Quando sono disponibili i PDF protocollati, selezionarli insieme come richiesto dal gestionale.",
+        "label": "Caricare i PDF protocollati"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Il sistema confronta il numero di file, i nomi/documenti attesi e gli estremi di protocollo; verifica inoltre la coerenza del protocollo sui documenti che devono condividerlo."
-      },
-      {
-        "type": "step",
-        "number": 5,
-        "text": "Se la verifica è superata, i PDF protocollati sostituiscono le copie precedenti e gli estremi del fascicolo vengono acquisiti."
-      },
-      {
-        "type": "step",
-        "number": 6,
-        "text": "Premere Salva per registrare definitivamente i dati di protocollo nella pratica."
+        "text": "Salvare i dati di protocollo acquisiti nella pratica.",
+        "label": "Salvare gli estremi di protocollo"
       },
       {
         "type": "callout",
         "title": "Attenzione",
-        "text": "Non caricare i documenti uno alla volta quando la procedura richiede il rientro completo del fascicolo: devono essere caricati insieme tutti i documenti richiesti."
+        "text": "Non caricare i documenti uno alla volta quando la procedura richiede l’acquisizione completa del fascicolo: devono essere caricati insieme tutti i documenti richiesti."
       },
       {
         "type": "heading2",
@@ -1488,32 +1616,31 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Dopo aver salvato gli estremi di protocollo, usare Genera/Aggiorna determinazione per produrre il Word aggiornato."
+        "text": "Dopo aver salvato gli estremi di protocollo, usare Genera/Aggiorna determinazione per produrre il Word aggiornato.",
+        "label": "Aggiornare la determinazione con il protocollo"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Convertire esternamente il Word in PDF e caricare il PDF definitivo con l’azione prevista."
+        "text": "Convertire esternamente il Word in PDF e caricare il PDF definitivo con l’azione prevista.",
+        "label": "Caricare il PDF definitivo della determinazione"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Il sistema verifica la corrispondenza del documento e acquisisce automaticamente numero e data della determinazione quando presenti e coerenti."
+        "text": "Salvare gli estremi della determinazione acquisiti dal documento.",
+        "label": "Salvare gli estremi della determinazione"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Salvare. Dal numero di determinazione il sistema deriva il numero dell’Atto di accertamento nel formato previsto."
-      },
-      {
-        "type": "step",
-        "number": 5,
-        "text": "Usare Prepara e-mail al Direttore per predisporre la trasmissione secondo la Rubrica configurata."
+        "text": "Usare Prepara e-mail al Direttore per predisporre la trasmissione secondo la Rubrica configurata. Per la gestione dei destinatari vedere Cap. 22.1.",
+        "label": "Preparare l’e-mail al Direttore amministrativo"
       },
       {
         "type": "callout",
         "title": "Cosa accade dopo",
-        "text": "La determinazione viene quindi adottata secondo il procedimento previsto e costituisce la base per l’Atto di accertamento."
+        "text": "La determinazione viene quindi adottata secondo il procedimento previsto e costituisce la base per l’Atto di accertamento. La preparazione dell’Atto è descritta nel Cap. 14."
       },
       {
         "type": "callout",
@@ -1559,6 +1686,10 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "text": "Determinazione nello stato che consente l’avvio dell’Atto."
       },
       {
+        "type": "paragraph",
+        "text": "La predisposizione del piano di pagamento e degli eventuali avvisi pagoPA è descritta nel Cap. 15; la registrazione dell’esito della notifica, successiva al protocollo dell’Atto, nel Cap. 16.1."
+      },
+      {
         "type": "heading3",
         "id": "cap-14-atto-di-accertamento-ia-preparare-e-trasmettere-la-bozza-dell-atto",
         "text": "Istruttore amministrativo — preparare e trasmettere la bozza dell’Atto"
@@ -1566,32 +1697,38 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire la sezione Notifica e completare, nell’ordine consentito dall’interfaccia, Modalità di pagamento, Tipo di notifica e Spese di notifica."
+        "text": "Aprire la sezione Notifica e completare, nell’ordine consentito dall’interfaccia, Modalità di pagamento, Tipo di notifica e Spese di notifica.",
+        "label": "Compilare i dati per l’Atto e la notifica"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Salvare i dati richiesti."
+        "text": "Salvare i dati richiesti.",
+        "label": "Salvare i dati"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Usare Genera bozza Word dell’Atto."
+        "text": "Usare Genera bozza Word dell’Atto.",
+        "label": "Generare la bozza Word dell’Atto"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Aprire il Word esternamente, convertirlo in PDF e usare Carica la bozza PDF dell’Atto di accertamento."
+        "text": "Aprire il Word esternamente, convertirlo in PDF e usare Carica la bozza PDF dell’Atto di accertamento.",
+        "label": "Caricare la bozza PDF dell’Atto"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Controllare la versione caricata e l’Anteprima fascicolo."
+        "text": "Controllare la versione caricata e l’Anteprima fascicolo.",
+        "label": "Verificare la bozza e il fascicolo"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Usare Trasmetti Atto per la verifica."
+        "text": "Usare Trasmetti Atto per la verifica.",
+        "label": "Trasmettere l’Atto per la verifica"
       },
       {
         "type": "callout",
@@ -1611,27 +1748,32 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire l’allarme e usare Prendi in carico."
+        "text": "Prendere in carico l’Atto da verificare.",
+        "label": "Prendere in carico l’Atto"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Controllare la bozza dell’Atto rispetto alla pratica e alla determinazione approvata."
+        "text": "Controllare la bozza dell’Atto rispetto alla pratica e alla determinazione approvata.",
+        "label": "Verificare la bozza dell’Atto"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Aprire Gestisci istruttoria."
+        "text": "Scegliere l’esito della verifica dell’Atto.",
+        "label": "Scegliere l’esito della verifica"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Se conforme, approvare l’Atto: la pratica torna all’Istruttore amministrativo e viene registrato “Atto di accertamento approvato”."
+        "text": "Se conforme, approvare l’Atto: la pratica torna all’Istruttore amministrativo e viene registrato “Atto di accertamento approvato”.",
+        "label": "Approvare l’Atto"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Se non conforme, rimandare l’Atto all’Istruttore amministrativo per integrazione amministrativa indicando la motivazione."
+        "text": "Se non conforme, rimandare l’Atto all’Istruttore amministrativo per integrazione amministrativa indicando la motivazione.",
+        "label": "Rimandare l’Atto per correzione"
       },
       {
         "type": "callout",
@@ -1651,42 +1793,44 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Dopo l’approvazione del Responsabile dell’istruttoria amministrativa usare Genera Atto senza filigrana; se necessario usare Rigenera Atto senza filigrana."
+        "text": "Dopo l’approvazione del Responsabile dell’istruttoria amministrativa usare Genera Atto senza filigrana; se necessario usare Rigenera Atto senza filigrana.",
+        "label": "Generare l’Atto senza filigrana"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Convertire il Word in PDF e caricare il PDF senza filigrana. Il sistema verifica che corrisponda ai contenuti approvati dal Responsabile dell’istruttoria amministrativa e lo identifica come versione da firmare."
+        "text": "Convertire il Word in PDF e caricare il PDF senza filigrana. Il sistema verifica che corrisponda ai contenuti approvati dal Responsabile dell’istruttoria amministrativa e lo identifica come versione da firmare.",
+        "label": "Caricare il PDF senza filigrana"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Usare Prepara e-mail dell’Atto di accertamento al Direttore."
+        "text": "Usare Prepara e-mail dell’Atto di accertamento al Direttore.",
+        "label": "Preparare l’e-mail al Direttore amministrativo"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Dopo la firma digitale esterna, usare Carica il PDF firmato digitalmente dal Direttore."
+        "text": "Dopo la firma digitale esterna, usare Carica il PDF firmato digitalmente dal Direttore.",
+        "label": "Caricare l’Atto firmato digitalmente"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Il sistema verifica l’integrità del contenuto, la presenza di una firma digitale e che l’identità del firmatario sia presente nella Rubrica dei firmatari. L’Amministratore del sistema può superare il solo disallineamento di identità, non l’assenza della firma o l’integrità del documento."
+        "text": "Usare Trasmetti l’Atto firmato al protocollo.",
+        "label": "Trasmettere l’Atto al protocollo"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Usare Trasmetti l’Atto firmato al protocollo."
+        "text": "Quando sono disponibili i documenti protocollati, caricare insieme i PDF richiesti.",
+        "label": "Caricare i documenti protocollati"
       },
       {
         "type": "step",
         "number": 7,
-        "text": "Al ritorno dal protocollo caricare insieme i PDF richiesti. Il gestionale controlla che siano presenti i documenti richiesti, gli estremi di protocollo e la firma dell’Atto."
-      },
-      {
-        "type": "step",
-        "number": 8,
-        "text": "Salvare gli estremi acquisiti. Solo dopo il completamento del protocollo dell’Atto si attivano le operazioni definitive di notifica."
+        "text": "Salvare gli estremi di protocollo acquisiti per l’Atto.",
+        "label": "Salvare gli estremi di protocollo"
       },
       {
         "type": "callout",
@@ -1731,32 +1875,38 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Indicare Numero rate concesse: 0 significa sola unica soluzione; il valore 1 non costituisce un piano rateale valido; da 2 in su il sistema crea l’unica soluzione e le rate numerate."
+        "text": "Indicare Numero rate concesse: 0 significa sola unica soluzione; il valore 1 non costituisce un piano rateale valido; da 2 in su il sistema crea l’unica soluzione e le rate numerate.",
+        "label": "Impostare il numero di rate"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Usare Imposta piano; se esistono già posizioni modificabili, usare Aggiorna piano."
+        "text": "Usare Imposta piano; se esistono già posizioni modificabili, usare Aggiorna piano.",
+        "label": "Creare o aggiornare il piano"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Per ciascuna posizione compilare Modalità, Importo dovuto e Scadenza. Se richiesto dalla modalità, aggiungere i riferimenti di pagamento disponibili."
+        "text": "Per ciascuna posizione compilare Modalità, Importo dovuto e Scadenza. Se richiesto dalla modalità, aggiungere i riferimenti di pagamento disponibili.",
+        "label": "Compilare le posizioni di pagamento"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Usare Aggiorna sulla posizione dopo le modifiche."
+        "text": "Usare Aggiorna sulla posizione dopo le modifiche.",
+        "label": "Aggiornare una posizione"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Caricare l’eventuale documento collegato alla posizione, ad esempio avviso pagoPA o bollettino, quando l’interfaccia lo richiede."
+        "text": "Caricare l’eventuale documento collegato alla posizione, ad esempio avviso pagoPA o bollettino, quando l’interfaccia lo richiede.",
+        "label": "Allegare il documento di pagamento"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Verificare che il riepilogo segnali le posizioni come complete e coerenti con il totale da pagare, quindi salvare la pratica."
+        "text": "Verificare che il riepilogo segnali le posizioni come complete e coerenti con il totale da pagare, quindi salvare la pratica.",
+        "label": "Verificare e salvare il piano"
       },
       {
         "type": "callout",
@@ -1766,7 +1916,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "heading2",
         "id": "cap-15-modalita-di-pagamento-e-avvisi-pagopa-15-3-caricamento-batch-degli-avvisi-pagopa",
-        "text": "15.3 Caricamento batch degli avvisi pagoPA"
+        "text": "15.3 Caricamento degli avvisi pagoPA"
       },
       {
         "type": "heading3",
@@ -1776,32 +1926,26 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Selezionare la modalità pagoPA e usare Carica avvisi pagoPA."
+        "text": "Selezionare la modalità pagoPA e usare Carica avvisi pagoPA.",
+        "label": "Caricare gli avvisi pagoPA"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Selezionare insieme tutti i PDF prodotti: l’avviso per l’unica soluzione e, se previste, tutte le rate."
+        "text": "Selezionare insieme tutti i PDF prodotti: l’avviso per l’unica soluzione e, se previste, tutte le rate.",
+        "label": "Selezionare tutti gli avvisi"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Il gestionale legge il QR code e ricava importo, codice avviso/IUV ed Ente Creditore; dal PDF ricava la scadenza."
+        "text": "Controllare il piano pagoPA ricostruito automaticamente dal gestionale.",
+        "label": "Verificare il piano pagoPA"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Il sistema verifica che il codice fiscale dell’Ente Creditore sia quello atteso, che i codici siano validi e univoci, che l’unica soluzione corrisponda al totale dovuto e che le rate, se presenti, siano almeno due e sommino al totale con l’eventuale arrotondamento centesimale."
-      },
-      {
-        "type": "step",
-        "number": 5,
-        "text": "Controllare il piano ricostruito automaticamente."
-      },
-      {
-        "type": "step",
-        "number": 6,
-        "text": "Salvare la pratica: la sostituzione/caricamento batch è predisposta prima del salvataggio e diventa definitiva con Salva."
+        "text": "Salvare il piano pagoPA nella pratica.",
+        "label": "Salvare il piano pagoPA"
       },
       {
         "type": "callout",
@@ -1821,32 +1965,41 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Usare nuovamente Carica avvisi pagoPA e selezionare il nuovo set completo."
+        "text": "Usare nuovamente Carica avvisi pagoPA e selezionare il nuovo set completo.",
+        "label": "Caricare il nuovo set di avvisi"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Leggere il riepilogo di sostituzione: il sistema indica se sostituirà la posizione attuale oppure più posizioni e i relativi documenti."
+        "text": "Leggere il riepilogo di sostituzione: il sistema indica se sostituirà la posizione attuale oppure più posizioni e i relativi documenti.",
+        "label": "Verificare cosa verrà sostituito"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Confermare Sostituisci avvisi."
+        "text": "Confermare Sostituisci avvisi.",
+        "label": "Confermare la sostituzione"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Controllare il nuovo piano ricostruito."
+        "text": "Controllare il nuovo piano ricostruito.",
+        "label": "Verificare il nuovo piano"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Premere Salva. Se si annulla prima del salvataggio, il piano precedente viene ripristinato."
+        "text": "Salvare il nuovo piano pagoPA.",
+        "label": "Salvare il nuovo piano"
       },
       {
         "type": "callout",
         "title": "Attenzione",
         "text": "La sostituzione non è consentita quando sulle posizioni risultano già dati di pagamento che non possono essere persi."
+      },
+      {
+        "type": "paragraph",
+        "text": "Dopo il perfezionamento della notifica, l’aggiornamento dello stato del pagamento è descritto nel Cap. 16.2; la registrazione dell’incasso e la definizione finale della pratica nel Cap. 17.4."
       }
     ]
   },
@@ -1881,32 +2034,31 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Verificare che gli estremi di protocollo dell’Atto siano presenti e in sola lettura."
+        "text": "Verificare che gli estremi di protocollo dell’Atto siano presenti e in sola lettura.",
+        "label": "Verificare gli estremi di protocollo"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Selezionare l’esito della notifica tra quelli disponibili."
+        "text": "Selezionare l’esito della notifica tra quelli disponibili.",
+        "label": "Selezionare l’esito della notifica"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Usare Carica documentazione esito notifica e caricare il PDF protocollato che prova l’esito: ad esempio relata, ricevute PEC, avviso di ricevimento postale o altra prova prevista."
+        "text": "Usare Carica documentazione esito notifica e caricare il PDF protocollato che prova l’esito: ad esempio relata, ricevute PEC, avviso di ricevimento postale o altra prova prevista.",
+        "label": "Caricare la documentazione della notifica"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Il sistema estrae, quando leggibili, numero e data del protocollo dell’esito di notifica e archivia il documento tra gli Allegati."
-      },
-      {
-        "type": "step",
-        "number": 5,
-        "text": "Premere Salva."
+        "text": "Salvare l’esito della notifica e i relativi estremi acquisiti.",
+        "label": "Salvare l’esito della notifica"
       },
       {
         "type": "callout",
         "title": "Cosa accade dopo",
-        "text": "Con gli esiti “Notificata” o “Compiuta giacenza” diventano disponibili le successive attività relative a pagamento, ricorso e definizione della pratica. Con “Non notificata” o “Irreperibile” tali attività non sono ancora disponibili. Se viene scelto “Altro”, occorre descrivere l’esito e registrare successivamente un esito conclusivo."
+        "text": "Con gli esiti “Notificata” o “Compiuta giacenza” diventano disponibili le successive attività relative a pagamento, ricorso e definizione della pratica. Con “Non notificata” o “Irreperibile” tali attività non sono ancora disponibili. Se viene scelto “Altro”, occorre descrivere l’esito e registrare successivamente un esito conclusivo. Le attività successive alla notifica sono illustrate nel Cap. 17."
       },
       {
         "type": "heading2",
@@ -1953,7 +2105,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "Gli allarmi di scadenza vengono segnalati con 5 giorni di preavviso."
+        "text": "Gli allarmi di scadenza vengono segnalati con 5 giorni di preavviso. Per la gestione e il significato generale degli allarmi vedere Cap. 25.1."
       }
     ]
   },
@@ -1970,7 +2122,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
     "blocks": [
       {
         "type": "paragraph",
-        "text": "Nelle sezioni Ricorso, CdA e Definizione la compilazione è svolta dall’Istruttore amministrativo. Il Responsabile dell’istruttoria amministrativa e il Direttore Area AA.GG. e P.F. accedono a tali informazioni in consultazione. La Riapertura segue invece una regola specifica, descritta nel § 17.3."
+        "text": "Nelle sezioni Ricorso, CdA e Definizione la compilazione è svolta dall’Istruttore amministrativo. Il Responsabile dell’istruttoria amministrativa e il Direttore amministrativo accedono a tali informazioni in consultazione. La Riapertura segue invece una regola specifica, descritta nel § 17.3."
       },
       {
         "type": "heading2",
@@ -1985,22 +2137,26 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire la scheda Ricorso dopo il perfezionamento della notifica."
+        "text": "Aprire la scheda Ricorso dopo il perfezionamento della notifica.",
+        "label": "Aprire la sezione Ricorso"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Indicare se il ricorso/istanza è stato presentato e completare, quando applicabili, data di presentazione, protocollo, presentatore, codice fiscale/P. IVA, eventuale sospensione del pagamento, oggetto/motivazione e note."
+        "text": "Indicare se il ricorso/istanza è stato presentato e completare, quando applicabili, data di presentazione, protocollo, presentatore, codice fiscale/P. IVA, eventuale sospensione del pagamento, oggetto/motivazione e note.",
+        "label": "Compilare i dati del ricorso"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Verificare l’indicazione del termine e l’eventuale segnalazione di presentazione tardiva."
+        "text": "Verificare l’indicazione del termine e l’eventuale segnalazione di presentazione tardiva.",
+        "label": "Verificare i termini"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Premere Salva."
+        "text": "Salvare i dati del ricorso.",
+        "label": "Salvare il ricorso"
       },
       {
         "type": "heading2",
@@ -2015,27 +2171,32 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire la scheda CdA."
+        "text": "Aprire la scheda CdA.",
+        "label": "Aprire la sezione CdA"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Registrare l’esito e gli estremi della decisione/atto."
+        "text": "Registrare l’esito e gli estremi della decisione/atto.",
+        "label": "Registrare l’esito del CdA"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Se l’esito ridetermina l’importo o la scadenza, compilare i nuovi valori e le note pertinenti."
+        "text": "Se l’esito ridetermina l’importo o la scadenza, compilare i nuovi valori e le note pertinenti.",
+        "label": "Aggiornare importo o scadenza"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Registrare l’operatore/data di definizione dell’esito quando previsto e salvare."
+        "text": "Registrare l’operatore/data di definizione dell’esito quando previsto e salvare.",
+        "label": "Completare e salvare l’esito"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Se la decisione del CdA richiede una nuova istruttoria amministrativa, passare alla sezione Riapertura."
+        "text": "Se la decisione del CdA richiede una nuova istruttoria amministrativa, passare alla sezione Riapertura.",
+        "label": "Avviare la riapertura, se richiesta"
       },
       {
         "type": "heading2",
@@ -2044,7 +2205,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "La Riapertura è consultabile nella fase amministrativa, mentre la compilazione è riservata al Responsabile dell’istruttoria amministrativa. Registra il fatto che una nuova istruttoria amministrativa deve essere avviata su indicazione del Direttore Area AA.GG. e P.F. dopo l’esito del CdA, conservando lo storico precedente."
+        "text": "La Riapertura è consultabile nella fase amministrativa, mentre la compilazione è riservata al Responsabile dell’istruttoria amministrativa. Registra il fatto che una nuova istruttoria amministrativa deve essere avviata su indicazione del Direttore amministrativo dopo l’esito del CdA, conservando lo storico precedente."
       },
       {
         "type": "heading3",
@@ -2054,7 +2215,8 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire la scheda Riapertura e registrare l’ordine di riapertura, la causa, la data, il soggetto che l’ha disposto, gli estremi autorizzativi e la motivazione."
+        "text": "Aprire la scheda Riapertura e registrare l’ordine di riapertura, la causa, la data, il soggetto che l’ha disposto, gli estremi autorizzativi e la motivazione.",
+        "label": "Registrare l’ordine di riapertura"
       },
       {
         "type": "step",
@@ -2064,22 +2226,25 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 3,
-        "text": "Tornare a Gestisci istruttoria e usare Avvia nuova istruttoria amministrativa."
+        "text": "Tornare a Gestisci istruttoria e usare Avvia nuova istruttoria amministrativa.",
+        "label": "Avviare una nuova istruttoria amministrativa"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Selezionare l’Istruttore amministrativo che svolgerà la nuova istruttoria e confermare."
+        "text": "Selezionare l’Istruttore amministrativo che svolgerà la nuova istruttoria e confermare.",
+        "label": "Assegnare il nuovo Istruttore amministrativo"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Verificare che la pratica risulti da prendere in carico per l’Istruttore amministrativo incaricato della nuova istruttoria."
+        "text": "Verificare che la pratica risulti da prendere in carico per l’Istruttore amministrativo incaricato della nuova istruttoria.",
+        "label": "Verificare la nuova assegnazione"
       },
       {
         "type": "callout",
         "title": "Cosa accade dopo",
-        "text": "I dati che devono ripartire per la nuova istruttoria vengono riaperti, mentre la storia di ricorso, CdA e riapertura resta disponibile nell’Iter e nelle relative sezioni."
+        "text": "I dati che devono ripartire per la nuova istruttoria vengono riaperti, mentre la storia di ricorso, CdA e riapertura resta disponibile nell’Iter e nelle relative sezioni. Per la consultazione dello storico nell’Iter vedere Cap. 24.3."
       },
       {
         "type": "heading2",
@@ -2094,27 +2259,32 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Definizione."
+        "text": "Aprire Definizione.",
+        "label": "Aprire la sezione Definizione"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Nella sezione Incasso compilare insieme importo incassato, data e dettagli/riferimenti. Il sistema richiede coerenza: non lasciare uno dei tre elementi isolato."
+        "text": "Nella sezione Incasso compilare insieme importo incassato, data e dettagli/riferimenti. Il sistema richiede coerenza: non lasciare uno dei tre elementi isolato.",
+        "label": "Registrare l’incasso"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Controllare lo stato di pagamento proposto: importo pari o superiore al totale porta a Pagato; un importo positivo ma inferiore porta a Parziale. Eventuali eccedenze vengono segnalate."
+        "text": "Controllare lo stato di pagamento proposto: importo pari o superiore al totale porta a Pagato; un importo positivo ma inferiore porta a Parziale. Eventuali eccedenze vengono segnalate.",
+        "label": "Verificare lo stato del pagamento"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Selezionare la modalità di definizione coerente con l’esito reale: ad esempio Pagata, Archiviata, Annullata, Avviata a riscossione o Definita dopo ricorso."
+        "text": "Selezionare la modalità di definizione coerente con l’esito reale: ad esempio Pagata, Archiviata, Annullata, Avviata a riscossione o Definita dopo ricorso.",
+        "label": "Selezionare la modalità di definizione"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Completare le note e salvare."
+        "text": "Completare le note e salvare.",
+        "label": "Salvare la definizione"
       }
     ]
   },
@@ -2145,37 +2315,43 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire la pratica tecnica e la sezione Nota spese."
+        "text": "Aprire la pratica tecnica e la sezione Nota spese.",
+        "label": "Aprire la Nota spese"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Selezionare la violazione/casistica cui associare la spesa. Per l’Art. 30, selezionare anche l’attrezzatura interessata quando richiesto."
+        "text": "Selezionare la violazione/casistica cui associare la spesa. Per l’Art. 30, selezionare anche l’attrezzatura interessata quando richiesto.",
+        "label": "Selezionare la casistica"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Usare Sfoglia prezzario. Il comando è disponibile dopo il primo salvataggio della pratica e soltanto quando esiste una casistica pertinente; non è utilizzabile in sola lettura."
+        "text": "Usare Sfoglia prezzario. Il comando è disponibile dopo il primo salvataggio della pratica e soltanto quando esiste una casistica pertinente; non è utilizzabile in sola lettura.",
+        "label": "Aprire il prezzario"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Nel Browser nota spese cercare le voci, aggiungerle al carrello e confermare la selezione."
+        "text": "Nel Browser nota spese cercare le voci, aggiungerle al carrello e confermare la selezione.",
+        "label": "Selezionare le voci di prezzario"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Al rientro nella pratica impostare le quantità delle voci selezionate e completare gli eventuali dati specifici."
+        "text": "Dopo aver confermato le voci nel Browser nota spese, impostare nella Nota spese le quantità e completare gli eventuali dati specifici richiesti.",
+        "label": "Compilare quantità e dati specifici"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Controllare il riepilogo per categoria, le spese generali e il totale."
+        "text": "Controllare il riepilogo per categoria, le spese generali e il totale.",
+        "label": "Verificare il riepilogo"
       },
       {
         "type": "step",
         "number": 7,
-        "text": "Premere Salva per rendere definitive le variazioni."
+        "text": "Salvare la Nota spese."
       },
       {
         "type": "callout",
@@ -2263,27 +2439,32 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Scegliere il prezzario/sorgente disponibile e cercare per codice, descrizione o struttura gerarchica."
+        "text": "Scegliere il prezzario/sorgente disponibile e cercare per codice, descrizione o struttura gerarchica.",
+        "label": "Scegliere il prezzario"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Selezionare una voce e usare Aggiungi. La stessa voce non può essere aggiunta due volte al carrello."
+        "text": "Selezionare una voce e usare Aggiungi. La stessa voce non può essere aggiunta due volte al carrello.",
+        "label": "Aggiungere una voce"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Controllare il badge/contatore delle voci aggiunte."
+        "text": "Controllare il numero delle voci aggiunte.",
+        "label": "Controllare il carrello"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Per rimuovere una singola voce usare il comando di eliminazione nel carrello; per azzerare tutto usare Svuota e confermare."
+        "text": "Per rimuovere una singola voce usare il comando di eliminazione nel carrello; per azzerare tutto usare Svuota e confermare.",
+        "label": "Rimuovere o svuotare le voci"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Usare Conferma (#) per riportare le voci nella Nota spese; usare Annulla per uscire senza applicare la selezione."
+        "text": "Usare Conferma (#) per riportare le voci nella Nota spese; usare Annulla per uscire senza applicare la selezione.",
+        "label": "Confermare la selezione"
       }
     ]
   },
@@ -2299,7 +2480,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
     "blocks": [
       {
         "type": "lead",
-        "text": "La Gestione Prezzari è di competenza del Responsabile dell’istruttoria tecnica. La gestione dei Parametri sanzionatori è invece di competenza del Responsabile dell’istruttoria amministrativa. Il capitolo riunisce le due funzioni perché entrambe concorrono alla determinazione degli importi utilizzati dal procedimento. Le sezioni 19.1-19.3 e 19.5 riguardano la Gestione Prezzari; la sezione 19.4 distingue i parametri gestiti dai diversi ruoli."
+        "text": "La Gestione prezzari è di competenza del Responsabile dell’istruttoria tecnica. La gestione dei Parametri sanzionatori è invece di competenza del Responsabile dell’istruttoria amministrativa. Il capitolo riunisce le due funzioni perché entrambe concorrono alla determinazione degli importi utilizzati dal procedimento. Le sezioni 19.1-19.3 e 19.5 riguardano la Gestione prezzari; la sezione 19.4 distingue i parametri gestiti dai diversi ruoli."
       },
       {
         "type": "heading2",
@@ -2314,42 +2495,50 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Gestione Prezzari → Prezzari."
+        "text": "Aprire Gestione prezzari e selezionare Prezzari.",
+        "label": "Aprire la gestione dei prezzari"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Selezionare il file ZIP del prezzario regionale. Il pacchetto deve contenere i CSV attesi per anagrafica articoli e analisi del prezzario."
+        "text": "Selezionare il file ZIP del prezzario regionale. Il pacchetto deve contenere i CSV attesi per anagrafica articoli e analisi del prezzario.",
+        "label": "Selezionare il file ZIP"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Controllare/compilare Anno e Descrizione; il sistema può proporli in base al file. L’anno deve essere nel formato valido previsto."
+        "text": "Controllare/compilare Anno e Descrizione; il sistema può proporli in base al file. L’anno deve essere nel formato valido previsto.",
+        "label": "Verificare Anno e Descrizione"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Scegliere se attivare subito il prezzario dopo l’import."
+        "text": "Scegliere se attivare subito il prezzario dopo l’import.",
+        "label": "Scegliere se attivare il prezzario"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Avviare l’importazione. Se esiste già lo stesso anno regionale, confermare la sostituzione: i dati precedenti di quell’import vengono rimossi prima di caricare il nuovo pacchetto."
+        "text": "Avviare l’importazione. Se esiste già lo stesso anno regionale, confermare la sostituzione: i dati precedenti di quell’import vengono rimossi prima di caricare il nuovo pacchetto.",
+        "label": "Importare il prezzario"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Al termine controllare nella tabella anno, tipo, descrizione, stato, nome file e conteggi di articoli/analisi."
+        "text": "Al termine controllare nella tabella anno, tipo, descrizione, stato, nome file e conteggi di articoli/analisi.",
+        "label": "Verificare l’importazione"
       },
       {
         "type": "step",
         "number": 7,
-        "text": "Usare il comando di attivazione per rendere attivo il prezzario desiderato. Il sistema mantiene una sola importazione attiva per tipo."
+        "text": "Usare il comando di attivazione per rendere attivo il prezzario desiderato. Il sistema mantiene una sola importazione attiva per tipo.",
+        "label": "Attivare il prezzario"
       },
       {
         "type": "step",
         "number": 8,
-        "text": "Per eliminare un import, disattivarlo e quindi confermare l’eliminazione."
+        "text": "Per eliminare un import, disattivarlo e quindi confermare l’eliminazione.",
+        "label": "Eliminare un import"
       },
       {
         "type": "heading2",
@@ -2368,37 +2557,44 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Gestione Prezzari → Analisi prezzi."
+        "text": "Aprire Gestione prezzari e selezionare Analisi prezzi.",
+        "label": "Aprire Analisi prezzi"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Creare un nuovo prezzo e scegliere Tipologia = ELEMENTARE."
+        "text": "Creare un nuovo prezzo e scegliere Tipologia = ELEMENTARE.",
+        "label": "Creare un prezzo elementare"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Indicare Anno listino."
+        "text": "Indicare Anno listino.",
+        "label": "Indicare l’anno del listino"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Selezionare Super capitolo, Capitolo e Sub capitolo tra i valori configurati. Il sistema genera il Codice del nuovo prezzo e lo mantiene in sola lettura."
+        "text": "Selezionare Super capitolo, Capitolo e Sub capitolo tra i valori configurati. Il sistema genera il Codice del nuovo prezzo e lo mantiene in sola lettura.",
+        "label": "Definire la classificazione"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Compilare Descrizione, Unità di misura e Prezzo unitario; aggiungere eventuali Note."
+        "text": "Compilare Descrizione, Unità di misura e Prezzo unitario; aggiungere eventuali Note.",
+        "label": "Compilare i dati del prezzo"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Lasciare Attivo se la voce deve essere immediatamente utilizzabile come componente."
+        "text": "Lasciare Attivo se la voce deve essere immediatamente utilizzabile come componente.",
+        "label": "Impostare lo stato Attivo"
       },
       {
         "type": "step",
         "number": 7,
-        "text": "Salvare."
+        "text": "Salvare il nuovo prezzo elementare.",
+        "label": "Salvare il prezzo elementare"
       },
       {
         "type": "callout",
@@ -2413,52 +2609,62 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Gestione Prezzari → Analisi prezzi e creare un nuovo prezzo."
+        "text": "Aprire Gestione prezzari, selezionare Analisi prezzi e creare un nuovo prezzo.",
+        "label": "Creare un nuovo prezzo"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Scegliere Tipologia = ANALIZZATA."
+        "text": "Scegliere Tipologia = ANALIZZATA.",
+        "label": "Scegliere la tipologia Analizzata"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Compilare Anno listino, gerarchia, Descrizione, Unità di misura e Note. Il Prezzo unitario non si digita manualmente: è calcolato dalla somma delle righe dell’analisi."
+        "text": "Compilare Anno listino, gerarchia, Descrizione, Unità di misura e Note. Il Prezzo unitario non si digita manualmente: è calcolato dalla somma delle righe dell’analisi.",
+        "label": "Compilare i dati generali"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Salvare l’intestazione per ottenere il nuovo prezzo."
+        "text": "Salvare l’intestazione per ottenere il nuovo prezzo.",
+        "label": "Salvare l’intestazione"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Usare Nuova riga nell’analisi."
+        "text": "Usare Nuova riga nell’analisi.",
+        "label": "Aggiungere una riga di analisi"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Scegliere l’Origine della componente: REGIONALE, INTERNO oppure NUOVO PREZZO."
+        "text": "Scegliere l’Origine della componente: REGIONALE, INTERNO oppure NUOVO PREZZO.",
+        "label": "Scegliere l’origine della componente"
       },
       {
         "type": "step",
         "number": 7,
-        "text": "Cercare la voce sorgente digitando almeno i caratteri richiesti, selezionarla e verificare codice, descrizione, UM e prezzo unitario proposti."
+        "text": "Cercare la voce sorgente digitando almeno i caratteri richiesti, selezionarla e verificare codice, descrizione, UM e prezzo unitario proposti.",
+        "label": "Selezionare la voce sorgente"
       },
       {
         "type": "step",
         "number": 8,
-        "text": "Inserire Quantità maggiore di zero e, se utile, Note. Salvare la riga; l’importo della riga viene calcolato come Quantità × Prezzo unitario."
+        "text": "Inserire Quantità maggiore di zero e, se utile, Note. Salvare la riga; l’importo della riga viene calcolato come Quantità × Prezzo unitario.",
+        "label": "Compilare e salvare la riga"
       },
       {
         "type": "step",
         "number": 9,
-        "text": "Ripetere per tutte le componenti. È possibile modificare/eliminare le righe e spostarle su/giù per cambiarne l’ordine."
+        "text": "Ripetere per tutte le componenti. È possibile modificare/eliminare le righe e spostarle su/giù per cambiarne l’ordine.",
+        "label": "Completare le componenti"
       },
       {
         "type": "step",
         "number": 10,
-        "text": "Controllare il Prezzo unitario complessivo del nuovo prezzo, ricalcolato come somma degli importi delle righe."
+        "text": "Controllare il Prezzo unitario complessivo del nuovo prezzo, ricalcolato come somma degli importi delle righe.",
+        "label": "Verificare il prezzo complessivo"
       },
       {
         "type": "callout",
@@ -2478,17 +2684,20 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Gestione Prezzari → Voci interne."
+        "text": "Aprire Gestione prezzari e selezionare Voci interne.",
+        "label": "Aprire Voci interne"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Cercare/selezionare il nuovo prezzo da modificare."
+        "text": "Cercare/selezionare il nuovo prezzo da modificare.",
+        "label": "Selezionare il prezzo da modificare"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Modificare Descrizione, Unità di misura, stato Attivo e Note. Per i prezzi ELEMENTARI è modificabile anche il prezzo; per gli ANALIZZATI il prezzo resta derivato dall’analisi."
+        "text": "Modificare Descrizione, Unità di misura, stato Attivo e Note. Per i prezzi ELEMENTARI è modificabile anche il prezzo; per gli ANALIZZATI il prezzo resta derivato dall’analisi.",
+        "label": "Modificare i dati del prezzo"
       },
       {
         "type": "step",
@@ -2498,7 +2707,8 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 5,
-        "text": "Per eliminare la voce usare Elimina; se la voce è già utilizzata come componente di altre analisi, il sistema blocca l’eliminazione."
+        "text": "Per eliminare la voce usare Elimina; se la voce è già utilizzata come componente di altre analisi, il sistema blocca l’eliminazione.",
+        "label": "Eliminare il prezzo"
       },
       {
         "type": "heading2",
@@ -2517,32 +2727,38 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Gestione Prezzari/Parametri o Parametri sanzionatori secondo il ruolo."
+        "text": "Il Responsabile dell’istruttoria tecnica apre Gestione prezzari e seleziona Parametri; il Responsabile dell’istruttoria amministrativa apre Parametri sanzionatori.",
+        "label": "Aprire la gestione dei parametri"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Selezionare l’archivio da consultare."
+        "text": "Selezionare l’archivio da consultare.",
+        "label": "Selezionare l’archivio"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Usare Nuovo per creare un parametro oppure Modifica su una riga esistente."
+        "text": "Usare Nuovo per creare un parametro oppure Modifica su una riga esistente.",
+        "label": "Creare o modificare un parametro"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Compilare descrizione, anno di riferimento, valore numerico o testuale secondo il tipo, stato Attivo, periodo di validità e note."
+        "text": "Compilare descrizione, anno di riferimento, valore numerico o testuale secondo il tipo, stato Attivo, periodo di validità e note.",
+        "label": "Compilare i dati del parametro"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Per i Prezzi attrezzature selezionare il tipo di attrezzatura e indicare il Valore unitario (€)."
+        "text": "Per i Prezzi attrezzature selezionare il tipo di attrezzatura e indicare il Valore unitario (€).",
+        "label": "Compilare i prezzi delle attrezzature"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Salvare. Se necessario usare Esporta CSV per estrarre l’elenco corrente."
+        "text": "Salvare il parametro ed eventualmente esportare l’elenco.",
+        "label": "Salvare il parametro"
       },
       {
         "type": "heading2",
@@ -2562,27 +2778,32 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 2,
-        "text": "Selezionare la sorgente disponibile: Prezzario regionale, Prezzario interno se presente nei dati, Nuovi prezzi oppure Attrezzature (risarcimento Art. 30)."
+        "text": "Selezionare la sorgente disponibile: Prezzario regionale, Prezzario interno se presente nei dati, Nuovi prezzi oppure Attrezzature (risarcimento Art. 30).",
+        "label": "Scegliere la sorgente"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Usare Cerca per codice, descrizione, famiglia, capitolo o sottocapitolo, oppure navigare l’albero dei livelli."
+        "text": "Cercare una voce di prezzario.",
+        "label": "Cercare una voce"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Selezionare famiglia/capitolo/sottocapitolo per restringere l’elenco; usare Tutte le voci per tornare all’insieme completo."
+        "text": "Selezionare famiglia/capitolo/sottocapitolo per restringere l’elenco; usare Tutte le voci per tornare all’insieme completo.",
+        "label": "Filtrare per classificazione"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Ordinare l’elenco per codice, descrizione, unità di misura o prezzo, se utile."
+        "text": "Ordinare l’elenco per codice, descrizione, unità di misura o prezzo, se utile.",
+        "label": "Ordinare l’elenco"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Selezionare una voce per aprirne il dettaglio. Quando la sorgente dispone dell’analisi, consultare le componenti e gli importi associati."
+        "text": "Selezionare una voce per aprirne il dettaglio. Quando la sorgente dispone dell’analisi, consultare le componenti e gli importi associati.",
+        "label": "Aprire il dettaglio della voce"
       }
     ]
   },
@@ -2611,27 +2832,31 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Mappa e selezionare Dati catastali."
+        "text": "Aprire Mappa e selezionare Dati catastali.",
+        "label": "Aprire Dati catastali"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Selezionare Comune, che è obbligatorio."
+        "text": "Selezionare Comune, che è obbligatorio.",
+        "label": "Selezionare il Comune"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Restringere progressivamente con Sezione, Foglio e Mappale. Le liste sono a cascata: le scelte precedenti condizionano quelle successive."
+        "text": "Restringere progressivamente con Sezione, Foglio e Mappale. Le liste sono a cascata: le scelte precedenti condizionano quelle successive.",
+        "label": "Impostare Sezione, Foglio e Mappale"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Usare Cerca."
+        "text": "Eseguire la ricerca catastale."
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Consultare i risultati e la geometria evidenziata sulla mappa; azzerare i criteri per una nuova ricerca."
+        "text": "Consultare i risultati e la geometria evidenziata sulla mappa; azzerare i criteri per una nuova ricerca.",
+        "label": "Consultare i risultati"
       },
       {
         "type": "heading2",
@@ -2646,17 +2871,19 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Selezionare Opere CBSM."
+        "text": "Selezionare Opere CBSM.",
+        "label": "Aprire Opere CBSM"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Impostare uno o più criteri tra Stato, Tipo e Nome; anche in questo caso le liste possono filtrarsi a cascata."
+        "text": "Impostare uno o più criteri tra Stato, Tipo e Nome; anche in questo caso le liste possono filtrarsi a cascata.",
+        "label": "Impostare i criteri di ricerca"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Usare Cerca e consultare i risultati evidenziati sulla mappa."
+        "text": "Eseguire la ricerca delle opere."
       },
       {
         "type": "heading2",
@@ -2671,32 +2898,37 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Selezionare Infrazioni."
+        "text": "Selezionare Infrazioni.",
+        "label": "Aprire Infrazioni"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Impostare almeno un criterio tra Articolo violato, Tipo pratica, Numero pratica, Nominativo/Ragione sociale e CF/P. IVA."
+        "text": "Impostare almeno un criterio tra Articolo violato, Tipo pratica, Numero pratica, Nominativo/Ragione sociale e CF/P. IVA.",
+        "label": "Impostare i criteri di ricerca"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Se si utilizza Numero pratica, selezionare il Tipo pratica tra Rilevazione, Rapporto tecnico e Atto di accertamento."
+        "text": "Se si utilizza Numero pratica, selezionare il Tipo pratica tra Rilevazione, Rapporto tecnico e Atto di accertamento.",
+        "label": "Scegliere il tipo di pratica"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Usare Cerca. I risultati comprendono soltanto le pratiche che l’utente è autorizzato a vedere."
+        "text": "Eseguire la ricerca delle pratiche."
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Consultare il conteggio e le pratiche visualizzate; quando i risultati sono molti il sistema può indicare che sta mostrando solo i primi elementi."
+        "text": "Consultare il conteggio e le pratiche visualizzate; quando i risultati sono molti il sistema può indicare che sta mostrando solo i primi elementi.",
+        "label": "Consultare i risultati"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Azzerare la ricerca prima di una nuova interrogazione se i criteri precedenti non devono essere mantenuti."
+        "text": "Azzerare la ricerca prima di una nuova interrogazione se i criteri precedenti non devono essere mantenuti.",
+        "label": "Azzerare la ricerca"
       },
       {
         "type": "callout",
@@ -2742,27 +2974,32 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Dashboard e restare su Quadro operativo per verificare il carico corrente."
+        "text": "Aprire Dashboard e restare su Quadro operativo per verificare il carico corrente.",
+        "label": "Aprire il Quadro operativo"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Controllare In attesa mia e le pratiche ferme oltre 15 giorni per individuare le priorità operative."
+        "text": "Controllare In attesa mia e le pratiche ferme oltre 15 giorni per individuare le priorità operative.",
+        "label": "Individuare le priorità operative"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Usare Statistiche quando serve leggere il fenomeno per periodo, ufficio o tipologia di infrazione."
+        "text": "Usare Statistiche quando serve leggere il fenomeno per periodo, ufficio o tipologia di infrazione.",
+        "label": "Aprire le Statistiche"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Selezionare i filtri interattivi di Ufficio/Infrazione per restringere l’analisi e usare Azzera filtri per tornare all’insieme completo dei dati disponibili."
+        "text": "Selezionare i filtri interattivi di Ufficio/Infrazione per restringere l’analisi e usare Azzera filtri per tornare all’insieme completo dei dati disponibili.",
+        "label": "Filtrare le statistiche"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Usare Aggiorna quando è necessario ricaricare i dati dopo lavorazioni recenti."
+        "text": "Usare Aggiorna quando è necessario ricaricare i dati dopo lavorazioni recenti.",
+        "label": "Aggiornare i dati"
       },
       {
         "type": "heading2",
@@ -2777,37 +3014,44 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Report."
+        "text": "Aprire Report.",
+        "label": "Aprire il Report"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Impostare uno o più filtri: Cerca n. rapporto, Area, Settore, Dal/Al, Situazione, Fase procedimentale e Competenza attuale."
+        "text": "Impostare uno o più filtri: Cerca n. rapporto, Area, Settore, Dal/Al, Situazione, Fase procedimentale e Competenza attuale.",
+        "label": "Impostare i filtri"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Per Situazione scegliere, quando utile, In attesa mia, In attesa di altri, Ferme o Fase sanzionatoria."
+        "text": "Per Situazione scegliere, quando utile, In attesa mia, In attesa di altri, Ferme o Fase sanzionatoria.",
+        "label": "Scegliere la Situazione"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Consultare la Sintesi procedimentale. Le colonne comprendono N. rilevazione, N. rapporto, N. atto, Data rilevazione, Tecnico rilevatore, Istruttore tecnico, Area, Settore, Fase procedimentale, Competenza attuale, Ultimo aggiornamento e Giorni di fermo."
+        "text": "Consultare la Sintesi procedimentale. Le colonne comprendono N. rilevazione, N. rapporto, N. atto, Data rilevazione, Tecnico rilevatore, Istruttore tecnico, Area, Settore, Fase procedimentale, Competenza attuale, Ultimo aggiornamento e Giorni di fermo.",
+        "label": "Consultare la Sintesi procedimentale"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Ordinare le colonne secondo l’analisi desiderata oppure usare il reset dell’ordinamento."
+        "text": "Ordinare le colonne secondo l’analisi desiderata oppure usare il reset dell’ordinamento.",
+        "label": "Ordinare il Report"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Usare Esporta CSV per ottenere i dati filtrati. Il file usa il punto e virgola come separatore ed è predisposto per l’apertura nei comuni strumenti di foglio elettronico."
+        "text": "Usare Esporta CSV per ottenere i dati filtrati. Il file usa il punto e virgola come separatore ed è predisposto per l’apertura nei comuni strumenti di foglio elettronico.",
+        "label": "Esportare il CSV"
       },
       {
         "type": "step",
         "number": 7,
-        "text": "Usare Pulisci filtri per ripristinare l’insieme delle pratiche di competenza."
+        "text": "Usare Pulisci filtri per ripristinare l’insieme delle pratiche di competenza.",
+        "label": "Azzerare i filtri"
       }
     ]
   },
@@ -2836,27 +3080,32 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Rubrica → Destinatari e-mail e usare Aggiungi destinatario."
+        "text": "Aprire Rubrica → Destinatari e-mail e usare Aggiungi destinatario.",
+        "label": "Aggiungere un destinatario"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Scegliere Tipo: Persona fisica oppure Altro. Per Altro si usa Denominazione; per una persona si usano Nome e Cognome."
+        "text": "Scegliere Tipo: Persona fisica oppure Altro. Per Altro si usa Denominazione; per una persona si usano Nome e Cognome.",
+        "label": "Scegliere il tipo di destinatario"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Compilare E-mail e Utilizzo. Gli utilizzi predefiniti comprendono Destinatario determina, Copia conoscenza determina e Destinatario protocollo."
+        "text": "Compilare E-mail e Utilizzo. Gli utilizzi predefiniti comprendono Destinatario determina, Copia conoscenza determina e Destinatario protocollo.",
+        "label": "Compilare e-mail e utilizzo"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Quando il sistema rileva un omonimo, verificare se si tratta della stessa persona e riutilizzarla oppure confermare l’omonimo distinto; la data di nascita viene utilizzata come discriminante quando richiesta."
+        "text": "Quando il sistema rileva un omonimo, verificare se si tratta della stessa persona e riutilizzarla oppure confermare l’omonimo distinto; la data di nascita viene utilizzata come discriminante quando richiesta.",
+        "label": "Gestire un eventuale omonimo"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Salvare."
+        "text": "Salvare il destinatario e-mail.",
+        "label": "Salvare il destinatario"
       },
       {
         "type": "callout",
@@ -2871,22 +3120,25 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Rubrica → Firmatari e usare Aggiungi firmatario."
+        "text": "Aprire Rubrica → Firmatari e usare Aggiungi firmatario.",
+        "label": "Aggiungere un firmatario"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Selezionare il Titolo e compilare Nome e Cognome."
+        "text": "Selezionare il Titolo e compilare Nome e Cognome.",
+        "label": "Compilare titolo e nominativo"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Gestire la Data di nascita se necessaria per distinguere omonimi."
+        "text": "Gestire la Data di nascita se necessaria per distinguere omonimi.",
+        "label": "Gestire un eventuale omonimo"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Salvare. Il nominativo diventa parte dell’elenco usato dal controllo della firma digitale dell’Atto."
+        "text": "Salvare il firmatario."
       },
       {
         "type": "paragraph",
@@ -2905,37 +3157,44 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Regolamento irriguo."
+        "text": "Aprire Regolamento irriguo.",
+        "label": "Aprire il Regolamento irriguo"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Usare Cerca digitando una parola, un numero di articolo, un titolo o una sezione. Durante la ricerca l’indice mostra soltanto le sezioni/articoli corrispondenti."
+        "text": "Cercare nel Regolamento irriguo.",
+        "label": "Cercare nel Regolamento"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "In alternativa espandere/collassare le sezioni dell’Indice regolamento e selezionare l’articolo desiderato."
+        "text": "In alternativa espandere/collassare le sezioni dell’Indice regolamento e selezionare l’articolo desiderato.",
+        "label": "Navigare l’indice"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Leggere il Testo articolo nel pannello di destra. I riferimenti ad altri articoli riconosciuti nel testo possono essere usati per la navigazione interna."
+        "text": "Leggere il Testo articolo nel pannello di destra. I riferimenti ad altri articoli riconosciuti nel testo possono essere usati per la navigazione interna.",
+        "label": "Leggere l’articolo"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Usare Articolo precedente / Articolo successivo per scorrere la sequenza."
+        "text": "Usare Articolo precedente / Articolo successivo per scorrere la sequenza.",
+        "label": "Passare all’articolo precedente o successivo"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Usare Reimposta indice o Pulisci ricerca quando si vuole tornare alla vista completa."
+        "text": "Usare Reimposta indice o Pulisci ricerca quando si vuole tornare alla vista completa.",
+        "label": "Reimpostare indice o ricerca"
       },
       {
         "type": "step",
         "number": 7,
-        "text": "Se disponibile, usare Apri il testo integrale (PDF) per consultare il documento completo."
+        "text": "Se disponibile, usare Apri il testo integrale (PDF) per consultare il documento completo.",
+        "label": "Aprire il PDF completo"
       }
     ]
   },
@@ -2964,47 +3223,56 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Verificare che la persona sia già presente nell’organizzazione ArcGIS Online."
+        "text": "Verificare che la persona sia già presente nell’organizzazione ArcGIS Online.",
+        "label": "Verificare l’account ArcGIS Online"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Aprire Gestione Utenti e usare Nuovo utente."
+        "text": "Aprire Gestione utenti e usare Nuovo utente.",
+        "label": "Avviare la creazione dell’utente"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Cercare la persona per nome, cognome, nome utente o e-mail e scegliere Seleziona sul membro corretto. Le persone già registrate e gli account disabilitati sono segnalati e non possono essere selezionati come nuovo utente."
+        "text": "Cercare la persona per nome, cognome, nome utente o e-mail e scegliere Seleziona sul membro corretto. Le persone già registrate e gli account disabilitati sono segnalati e non possono essere selezionati come nuovo utente.",
+        "label": "Selezionare la persona"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Controllare i dati identificativi proposti."
+        "text": "Controllare i dati identificativi proposti.",
+        "label": "Verificare i dati identificativi"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Nella sezione Assegnazione gestionale selezionare Ruolo."
+        "text": "Nella sezione Assegnazione gestionale selezionare Ruolo.",
+        "label": "Assegnare il ruolo"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Compilare Area, Settore e Ufficio quando richiesti. Alcune combinazioni sono automatiche/fisse in base al ruolo."
+        "text": "Compilare Area, Settore e Ufficio quando richiesti. Alcune combinazioni sono automatiche/fisse in base al ruolo.",
+        "label": "Definire l’ambito di competenza"
       },
       {
         "type": "step",
         "number": 7,
-        "text": "Controllare il Gruppo calcolato dal sistema."
+        "text": "Controllare il Gruppo calcolato dal sistema.",
+        "label": "Verificare il gruppo calcolato"
       },
       {
         "type": "step",
         "number": 8,
-        "text": "Salvare l’utente. Se per il ruolo è previsto un gruppo ArcGIS Online, il sistema aggiorna automaticamente anche la relativa appartenenza."
+        "text": "Salvare l’utente. Se per il ruolo è previsto un gruppo ArcGIS Online, il sistema aggiorna automaticamente anche la relativa appartenenza.",
+        "label": "Salvare l’utente"
       },
       {
         "type": "step",
         "number": 9,
-        "text": "Verificare il messaggio Utente aggiunto e la comparsa della riga nell’elenco."
+        "text": "Verificare il messaggio Utente aggiunto e la comparsa della riga nell’elenco.",
+        "label": "Verificare la creazione dell’utente"
       },
       {
         "type": "callout",
@@ -3040,11 +3308,11 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
             "Area Amministrativa, con il contesto amministrativo previsto per il ruolo."
           ],
           [
-            "Direttore Aree Agraria e Tecnica",
+            "Direttore tecnico",
             "Area Agraria oppure Area Tecnica; nessun settore operativo da selezionare quando non previsto."
           ],
           [
-            "Direttore Area AA.GG. e P.F.",
+            "Direttore amministrativo",
             "Area Amministrativa."
           ],
           [
@@ -3056,7 +3324,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "callout",
         "title": "Ruoli apicali con titolare unico",
-        "text": "Per alcuni ruoli apicali il gestionale applica un vincolo di titolarità esclusiva. Può essere presente un solo Capo Settore nello stesso ambito di Area e Settore, un solo Responsabile dell’istruttoria tecnica per ciascuna Area Agraria o Area Tecnica, un solo Responsabile dell’istruttoria amministrativa per l’Area Amministrativa, un solo Direttore Aree Agraria e Tecnica per ciascuna Area Agraria o Area Tecnica e un solo Direttore Area AA.GG. e P.F. nell’intero gestionale. Prima di attribuire a un altro utente uno di questi incarichi occorre revocarlo al titolare corrente."
+        "text": "Per alcuni ruoli apicali il gestionale applica un vincolo di titolarità esclusiva. Può essere presente un solo Capo Settore nello stesso ambito di Area e Settore, un solo Responsabile dell’istruttoria tecnica per ciascuna Area Agraria o Area Tecnica, un solo Responsabile dell’istruttoria amministrativa per l’Area Amministrativa, un solo Direttore tecnico per ciascuna Area Agraria o Area Tecnica e un solo Direttore amministrativo nell’intero gestionale. Prima di attribuire a un altro utente uno di questi incarichi occorre revocarlo al titolare corrente."
       },
       {
         "type": "heading2",
@@ -3071,22 +3339,26 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Selezionare la riga e usare Modifica utente, oppure fare doppio clic sulla riga."
+        "text": "Selezionare la riga e usare Modifica utente, oppure fare doppio clic sulla riga.",
+        "label": "Aprire la modifica dell’utente"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Cambiare l’assegnazione consentita e usare Aggiorna."
+        "text": "Cambiare l’assegnazione consentita e usare Aggiorna.",
+        "label": "Modificare l’assegnazione"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Se nome, cognome o e-mail sono cambiati in ArcGIS Online, usare Sincronizza. Prima della conferma il gestionale mostra le differenze rilevate; l’aggiornamento viene applicato a tutte le assegnazioni dello stesso utente."
+        "text": "Se nome, cognome o e-mail sono cambiati in ArcGIS Online, usare Sincronizza. Prima della conferma il gestionale mostra le differenze rilevate; l’aggiornamento viene applicato a tutte le assegnazioni dello stesso utente.",
+        "label": "Sincronizzare i dati da ArcGIS Online"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Confermare la sincronizzazione soltanto dopo aver verificato le differenze."
+        "text": "Confermare la sincronizzazione soltanto dopo aver verificato le differenze.",
+        "label": "Confermare la sincronizzazione"
       },
       {
         "type": "heading2",
@@ -3101,22 +3373,25 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Sulla riga dell’utente usare Nuova assegnazione."
+        "text": "Sulla riga dell’utente usare Nuova assegnazione.",
+        "label": "Aggiungere una nuova assegnazione"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Scegliere il nuovo ruolo e il relativo ambito organizzativo."
+        "text": "Scegliere il nuovo ruolo e il relativo ambito organizzativo.",
+        "label": "Scegliere ruolo e ambito"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Compilare i dati della nuova assegnazione."
+        "text": "Compilare i dati della nuova assegnazione.",
+        "label": "Compilare la nuova assegnazione"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Salvare. Una duplicazione identica di assegnazione viene bloccata."
+        "text": "Salvare la nuova assegnazione."
       },
       {
         "type": "heading2",
@@ -3131,22 +3406,19 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Usare Elimina utente sulla riga da rimuovere."
+        "text": "Usare Elimina utente sulla riga da rimuovere.",
+        "label": "Eliminare l’assegnazione"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Leggere il messaggio di conferma e scegliere Elimina."
+        "text": "Leggere il messaggio di conferma e scegliere Elimina.",
+        "label": "Confermare l’eliminazione"
       },
       {
-        "type": "step",
-        "number": 3,
-        "text": "L’assegnazione selezionata viene rimossa dal gestionale. Se non esistono altre assegnazioni dello stesso utente che richiedono il medesimo gruppo ArcGIS Online, il sistema aggiorna automaticamente anche la relativa appartenenza."
-      },
-      {
-        "type": "step",
-        "number": 4,
-        "text": "Il nominativo non viene eliminato dalla Rubrica se è ancora usato come destinatario e-mail o firmatario."
+        "type": "callout",
+        "title": "Cosa accade dopo",
+        "text": "L’assegnazione selezionata viene rimossa dal gestionale. Se non esistono altre assegnazioni dello stesso utente che richiedono il medesimo gruppo ArcGIS Online, il sistema aggiorna automaticamente anche la relativa appartenenza. Il nominativo resta comunque nella Rubrica quando è ancora utilizzato come destinatario e-mail o firmatario."
       }
     ]
   },
@@ -3175,32 +3447,37 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire la scheda Allegati della pratica in lavorazione."
+        "text": "Aprire la scheda Allegati della pratica in lavorazione.",
+        "label": "Aprire gli Allegati"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Usare il comando di aggiunta per selezionare il file oppure il comando di sostituzione/eliminazione sulla riga esistente."
+        "text": "Usare il comando di aggiunta per selezionare il file oppure il comando di sostituzione/eliminazione sulla riga esistente.",
+        "label": "Aggiungere, sostituire o eliminare un allegato"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Aprire il viewer per controllare il documento. Se si tratta di un’immagine e serve correggere l’orientamento, usare i pulsanti di rotazione disponibili nel viewer."
+        "text": "Aprire il visualizzatore per controllare il documento. Se si tratta di un’immagine e serve correggere l’orientamento, usare i pulsanti di rotazione disponibili nel visualizzatore.",
+        "label": "Verificare il documento"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Continuare le altre modifiche della pratica se necessario."
+        "text": "Continuare le altre modifiche della pratica se necessario.",
+        "label": "Proseguire la lavorazione"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Nella lavorazione tecnica premere Salva per rendere definitive le operazioni predisposte sugli allegati. Nella lavorazione amministrativa Salva registra le eventuali rotazioni preparate nel viewer e le altre modifiche pendenti della pratica; aggiunta, sostituzione ed eliminazione degli allegati amministrativi ordinari sono già applicate dal relativo comando."
+        "text": "Salvare le modifiche agli allegati."
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Verificare il nuovo elenco degli allegati e, se utile, l’Iter per il tracciamento della modifica."
+        "text": "Verificare il nuovo elenco degli allegati e, se utile, l’Iter per il tracciamento della modifica.",
+        "label": "Verificare gli allegati aggiornati"
       },
       {
         "type": "heading2",
@@ -3244,32 +3521,38 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Dettaglio pratica → Iter."
+        "text": "Aprire Dettaglio pratica → Iter.",
+        "label": "Aprire l’Iter"
       },
       {
         "type": "step",
         "number": 2,
-        "text": "Scorrere gli eventi fino al periodo o al ruolo che si vuole verificare."
+        "text": "Scorrere gli eventi fino al periodo o al ruolo che si vuole verificare.",
+        "label": "Individuare il periodo o il ruolo"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Leggere Avviato da e Trasmesso a per capire il passaggio di responsabilità."
+        "text": "Leggere Avviato da e Trasmesso a per capire il passaggio di responsabilità.",
+        "label": "Ricostruire il passaggio di responsabilità"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Controllare Campi modificati per vedere quali dati sostanziali sono stati valorizzati o cambiati."
+        "text": "Controllare Campi modificati per vedere quali dati sostanziali sono stati valorizzati o cambiati.",
+        "label": "Verificare i campi modificati"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Controllare le modifiche agli allegati."
+        "text": "Controllare le modifiche agli allegati.",
+        "label": "Verificare le modifiche agli allegati"
       },
       {
         "type": "step",
         "number": 6,
-        "text": "Se si tratta di una richiesta di integrazione, leggere la motivazione e seguire i successivi eventi “Esito integrazione trasmesso” fino al ruolo che aveva richiesto la correzione."
+        "text": "Se si tratta di una richiesta di integrazione, leggere la motivazione e seguire i successivi eventi “Esito integrazione trasmesso” fino al ruolo che aveva richiesto la correzione.",
+        "label": "Seguire un ciclo di integrazione"
       }
     ]
   },
@@ -3361,11 +3644,11 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           ],
           [
             "Istruttoria validata",
-            "Il Responsabile dell’istruttoria tecnica ha espresso esito positivo e ha trasmesso al Direttore Aree Agraria e Tecnica; in fase amministrativa indica la validazione del Responsabile dell’istruttoria amministrativa."
+            "Il Responsabile dell’istruttoria tecnica ha espresso esito positivo e ha trasmesso al Direttore tecnico; in fase amministrativa indica la validazione del Responsabile dell’istruttoria amministrativa."
           ],
           [
             "Istruttoria approvata",
-            "Il Direttore Aree Agraria e Tecnica ha approvato la fase tecnica e ha trasmesso al Responsabile dell’istruttoria amministrativa."
+            "Il Direttore tecnico ha approvato la fase tecnica e ha trasmesso al Responsabile dell’istruttoria amministrativa."
           ],
           [
             "Istruttoria rimandata per integrazione",
@@ -3510,7 +3793,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           ],
           [
             "Come carico gli avvisi pagoPA?",
-            "Cap. 15.3 — caricamento batch e controlli automatici."
+            "Cap. 15.3 — caricamento degli avvisi pagoPA e controlli automatici."
           ],
           [
             "Come sostituisco gli avvisi pagoPA?",
@@ -3581,7 +3864,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "rows": [
           [
             "Tecnico rilevatore",
-            "Effettua la rilevazione in Survey123; la rilevazione confluisce nel gestionale e viene successivamente gestita dal Capo Settore."
+            "Effettua la rilevazione sul territorio tramite l’applicazione Esri Survey123, utilizzando il rilevamento Infrazioni; la rilevazione confluisce nel gestionale e viene successivamente gestita dal Capo Settore."
           ],
           [
             "Istruttore tecnico",
@@ -3593,10 +3876,10 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           ],
           [
             "Responsabile dell’istruttoria tecnica",
-            "Prende in carico; consulta; può modificare Occorrenza e Grado; valida verso il Direttore Aree Agraria e Tecnica; può richiedere integrazioni all’Istruttore tecnico; gestisce i rientri e le integrazioni tecniche richieste dal Responsabile dell’istruttoria amministrativa."
+            "Prende in carico; consulta; può modificare Occorrenza e Grado; valida verso il Direttore tecnico; può richiedere integrazioni all’Istruttore tecnico; gestisce i rientri e le integrazioni tecniche richieste dal Responsabile dell’istruttoria amministrativa."
           ],
           [
-            "Direttore Aree Agraria e Tecnica",
+            "Direttore tecnico",
             "Prende in carico; approva verso il Responsabile dell’istruttoria amministrativa; può chiedere un’integrazione all’Istruttore tecnico o al Responsabile dell’istruttoria tecnica, secondo gli aspetti da correggere; può respingere."
           ],
           [
@@ -3608,8 +3891,8 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
             "Prende in carico le pratiche assegnate; svolge l’istruttoria amministrativa; può richiedere integrazioni; esprime l’esito e, in caso di conformità, il gestionale genera o aggiorna la Proposta di contestazione mentre l’Istruttore amministrativo predispone la bozza di determinazione; cura gli adempimenti successivi relativi ad Atto di accertamento, pagoPA, protocollo, notifica, pagamento, ricorso, CdA e definizione."
           ],
           [
-            "Direttore Area AA.GG. e P.F.",
-            "Definisce il procedimento amministrativo mediante l’adozione del provvedimento dirigenziale; sottoscrive la notifica dell’Atto di accertamento; può richiedere integrazioni nei passaggi previsti; le indicazioni di riapertura vengono registrate dal Responsabile dell’istruttoria amministrativa."
+            "Direttore amministrativo",
+            "Definisce il procedimento amministrativo mediante l’adozione del provvedimento dirigenziale; sottoscrive la notifica dell’Atto di accertamento; le indicazioni di riapertura vengono registrate dal Responsabile dell’istruttoria amministrativa."
           ],
           [
             "Amministratore del sistema",
@@ -3653,7 +3936,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           [
             "Modificare dati amministrativi",
             "Lavorazione amministrativa",
-            "Operativa per l’Istruttore amministrativo nelle sezioni abilitate; il Responsabile dell’istruttoria amministrativa usa le proprie azioni dell’iter e la sezione Riapertura secondo la procedura prevista, mentre il Direttore Area AA.GG. e P.F. accede in consultazione."
+            "Operativa per l’Istruttore amministrativo nelle sezioni abilitate; il Responsabile dell’istruttoria amministrativa usa le proprie azioni dell’iter e la sezione Riapertura secondo la procedura prevista, mentre il Direttore amministrativo accede in consultazione."
           ],
           [
             "Far avanzare o rimandare la pratica",
@@ -3752,7 +4035,7 @@ export const GUIDE_QUICK_LINKS: GuideQuickLink[] = [
   },
   {
     "label": "Come carico gli avvisi pagoPA?",
-    "description": "Cap. 15.3 — caricamento batch e controlli automatici.",
+    "description": "Cap. 15.3 — caricamento degli avvisi pagoPA e controlli automatici.",
     "targetChapterId": "cap-15-modalita-di-pagamento-e-avvisi-pagopa"
   },
   {

@@ -1057,7 +1057,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       {openSec==='footer' && <div>
         <Check value={cfg.showFooter} onChange={v=>set('showFooter',v)} label='Mostra footer'/>
         {cfg.showFooter && <>
-          <label style={P.lbl}>Testo sinistro</label><Inp value={cfg.footerLeft} onChange={v=>set('footerLeft',v)} placeholder="usa {year} per l'anno"/>
+          <label style={P.lbl}>Testo sinistro</label><Inp value={cfg.footerLeft} onChange={v=>set('footerLeft',v)} placeholder="usa {year} per l'anno e {build} per la build"/>
           <label style={P.lbl}>Testo destro</label><Inp value={cfg.footerRight} onChange={v=>set('footerRight',v)}/>
           <TextStyleControls cfg={cfg} set={set} title='Footer' fontKey='footerFont' sizeKey='footerSize' colorKey='footerColor' weightKey='footerWeight' italicKey='footerItalic' minSize={8} maxSize={18}/>
         </>}

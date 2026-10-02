@@ -124,7 +124,7 @@ export const defaultConfig: Config = {
   cardCtaColor: 'rgba(255,255,255,0.25)', cardCtaHoverColor: '',
 
   showFooter: true,
-  footerLeft: 'GII v1.0 · CBSM © {year}', footerRight: 'ArcGIS Experience Builder 1.19',
+  footerLeft: 'GII v1.0 · {build} · CBSM © {year}', footerRight: 'ArcGIS Experience Builder 1.19',
   footerColor: 'rgba(255,255,255,0.20)', footerSize: 11,
   footerFont: "'Source Sans 3', 'Segoe UI', sans-serif", footerWeight: 400, footerItalic: false,
 

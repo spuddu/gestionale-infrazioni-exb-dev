@@ -13,7 +13,7 @@ const exactHelp: Record<string, GuideStepHelp> = {
   'Consultare le violazioni contestate.': {
     paragraphs: [
       'Con la pratica selezionata nell’Elenco pratiche, aprire la scheda Violazione nel pannello Dettaglio pratica selezionata. Sono riepilogate le violazioni registrate, con i dati specifici delle fattispecie selezionate e i relativi riferimenti al Regolamento irriguo.',
-      'Quando è disponibile il collegamento al riferimento regolamentare, utilizzarlo per leggere l’articolo.'
+      'Quando è disponibile il collegamento al riferimento regolamentare, utilizzarlo per leggere l’articolo. Per la consultazione completa del Regolamento irriguo vedere Cap. 22.2.'
     ]
   },
   'Consultare i luoghi e i dati della rilevazione.': {
@@ -24,23 +24,23 @@ const exactHelp: Record<string, GuideStepHelp> = {
   'Visualizzare la pratica sulla mappa.': {
     paragraphs: [
       'Con la pratica selezionata nell’Elenco pratiche, aprire la scheda Mappa nel pannello Dettaglio pratica selezionata. Se nella pratica è stato registrato un punto, la mappa lo visualizza nella relativa posizione; in assenza di localizzazione viene mostrata la relativa segnalazione.',
-      'Per effettuare ricerche cartografiche su particelle, opere o infrazioni utilizzare invece la vista Mappa dalla Home o dal navigatore laterale.'
+      'Per effettuare ricerche cartografiche su particelle, opere o infrazioni utilizzare invece la vista Mappa dalla Home o dal navigatore laterale. Le funzioni della vista Mappa sono descritte nel Cap. 20.'
     ]
   },
   'Consultare la Nota spese.': {
     paragraphs: [
-      'Con la pratica selezionata nell’Elenco pratiche, aprire la scheda Nota spese nel pannello Dettaglio pratica selezionata. Vengono mostrati i costi già registrati, il riepilogo delle categorie e, quando presenti, le informazioni specifiche delle casistiche collegate all’art. 30.'
+      'Con la pratica selezionata nell’Elenco pratiche, aprire la scheda Nota spese nel pannello Dettaglio pratica selezionata. Vengono mostrati i costi già registrati, il riepilogo delle categorie e, quando presenti, le informazioni specifiche delle casistiche collegate all’art. 30. Per la compilazione della Nota spese vedere Cap. 18.'
     ]
   },
   'Consultare e aprire gli allegati.': {
     paragraphs: [
-      'Con la pratica selezionata nell’Elenco pratiche, aprire la scheda Allegati nel pannello Dettaglio pratica selezionata. La documentazione è distinta, quando presente, tra allegati tecnici e allegati amministrativi. Selezionare il file che interessa per aprirlo nel visualizzatore.'
+      'Con la pratica selezionata nell’Elenco pratiche, aprire la scheda Allegati nel pannello Dettaglio pratica selezionata. La documentazione è distinta, quando presente, tra allegati tecnici e allegati amministrativi. Selezionare il file che interessa per aprirlo nel visualizzatore. Per la gestione degli Allegati vedere Cap. 24.1.'
     ]
   },
   'Ricostruire l’iter della pratica.': {
     paragraphs: [
       'Con la pratica selezionata nell’Elenco pratiche, aprire la scheda Iter nel pannello Dettaglio pratica selezionata. Ogni blocco mostra il passaggio della pratica, il ruolo che l’ha lavorata, il destinatario, le date e, quando presenti, le modifiche ai dati, agli allegati e le motivazioni dei rimandi. La scheda consente quindi di verificare i passaggi già compiuti e individuare la fase corrente della pratica.',
-      'Se la scheda Iter è già selezionata, selezionarla nuovamente per invertire l’ordine cronologico degli eventi. In questo modo è possibile passare rapidamente dagli eventi più recenti ai più risalenti e viceversa.'
+      'Se la scheda Iter è già selezionata, selezionarla nuovamente per invertire l’ordine cronologico degli eventi. In questo modo è possibile passare rapidamente dagli eventi più recenti ai meno recenti e viceversa. Per la lettura dettagliata dell’Iter vedere Cap. 24.3.'
     ]
   },
   'Aprire Elenco pratiche e scegliere anzitutto la scheda coerente con lo scopo: In attesa mia, In attesa di altri o Tutte le pratiche.': {
@@ -84,7 +84,7 @@ const exactHelp: Record<string, GuideStepHelp> = {
   'Archiviare un allarme quando il comando è disponibile.': {
     paragraphs: [
       'Nel pannello Allarmi e scadenze individuare l’allarme interessato e premere Archivia sulla stessa riga.',
-      'L’archiviazione rimuove la voce dal pannello degli allarmi attivi; non modifica lo stato della pratica né cancella gli eventi già registrati nell’Iter.'
+      'L’archiviazione rimuove la voce dal pannello degli allarmi attivi; non modifica lo stato della pratica né cancella gli eventi già registrati nell’Iter. Per il quadro completo degli allarmi vedere Cap. 25.1.'
     ]
   },
   'Aprire la pratica interessata dall’allarme o dalla scadenza.': {
@@ -116,7 +116,7 @@ const exactHelp: Record<string, GuideStepHelp> = {
   'Usare Statistiche quando serve leggere il fenomeno per periodo, ufficio o tipologia di infrazione.': {
     paragraphs: [
       'Nella parte superiore della Dashboard selezionare Statistiche. La vista mostra il quadro dinamico delle pratiche e mette a disposizione i periodi predefiniti e i filtri interattivi per ufficio e tipologia di infrazione.',
-      'Selezionando una voce nei riquadri di analisi, gli altri indicatori vengono aggiornati sul perimetro filtrato.'
+      'Selezionando una voce nei riquadri di analisi, gli altri indicatori vengono aggiornati in base alla selezione.'
     ],
     figure: 'Figura – Dashboard statistiche'
   },
@@ -143,8 +143,8 @@ const exactHelp: Record<string, GuideStepHelp> = {
   },
   'Controllare l’Anteprima fascicolo e la completezza della documentazione.': {
     paragraphs: [
-      'Aprire Anteprima fascicolo dalla barra delle schede della pratica. Il viewer ricompone i documenti selezionati nel fascicolo e permette di verificarne visivamente la presenza e l’ordine prima della trasmissione.',
-      'Nel pannello laterale del viewer è possibile vedere quali documenti tecnici e amministrativi sono inclusi.'
+      'Aprire Anteprima fascicolo dalla barra delle schede della pratica. L’anteprima ricompone i documenti selezionati nel fascicolo e permette di verificarne visivamente la presenza e l’ordine prima della trasmissione.',
+      'Nel pannello laterale è possibile vedere quali documenti tecnici e amministrativi sono inclusi.'
     ],
     figure: 'Figura – Anteprima fascicolo'
   },
@@ -164,12 +164,487 @@ const exactHelp: Record<string, GuideStepHelp> = {
   }
 }
 
+
+function getReviewedStepHelp(text: string, sectionTitle = '', chapterTitle = ''): GuideStepHelp | null {
+  const lower = text.toLowerCase()
+  const section = sectionTitle.toLowerCase()
+  const chapter = chapterTitle.toLowerCase()
+
+  // Revisione qualitativa 210: casi che non devono ricadere nei fallback generici.
+  if (chapter.startsWith('6. verifica del capo settore') && lower.startsWith('se la pratica è corretta, scegliere conforme')) {
+    return { paragraphs: [
+      'Nel pannello Gestisci istruttoria selezionare Conforme e controllare che il destinatario indicato sia il Responsabile dell’istruttoria tecnica.',
+      'Confermare la verifica. Il gestionale registra nell’Iter l’esito del Capo Settore e trasmette la pratica al Responsabile dell’istruttoria tecnica, che la troverà tra le pratiche da prendere in carico.'
+    ] }
+  }
+  if (chapter.startsWith('7. validazione del responsabile') && lower.startsWith('se l’istruttoria è corretta, scegliere conforme')) {
+    return { paragraphs: [
+      'Nel pannello Gestisci istruttoria selezionare Conforme e controllare che il destinatario indicato sia il Direttore tecnico.',
+      'Confermare la validazione. Il gestionale registra nell’Iter l’esito del Responsabile dell’istruttoria tecnica e trasmette la pratica al Direttore tecnico per l’approvazione.'
+    ] }
+  }
+  if (chapter.startsWith('7. validazione del responsabile') && lower.startsWith('se servono integrazioni, rimandare la pratica all’istruttore tecnico')) {
+    return { paragraphs: [
+      'Nel pannello Gestisci istruttoria scegliere l’esito di integrazione, indicare con precisione la motivazione e verificare che il destinatario sia l’Istruttore tecnico.',
+      'Confermare il rimando. La pratica torna all’Istruttore tecnico con la motivazione registrata nell’Iter; il Responsabile dell’istruttoria tecnica non dispone, in questa fase, del respingimento finale previsto per il Direttore tecnico.'
+    ] }
+  }
+  if (chapter.startsWith('8. approvazione del direttore') && lower.startsWith('per l’esito positivo selezionare conforme')) {
+    return { paragraphs: [
+      'Nel pannello Gestisci istruttoria selezionare Conforme e controllare che il destinatario indicato sia il Responsabile dell’istruttoria amministrativa.',
+      'Confermare l’approvazione. Il gestionale registra nell’Iter l’esito del Direttore tecnico, conclude la fase tecnica e trasmette la pratica al Responsabile dell’istruttoria amministrativa.'
+    ] }
+  }
+  if (chapter.startsWith('8. approvazione del direttore') && lower.startsWith('per una richiesta di integrazione selezionare')) {
+    return { paragraphs: [
+      'Nel pannello Gestisci istruttoria scegliere l’esito di integrazione e selezionare gli aspetti che devono essere corretti.',
+      'Se la richiesta riguarda esclusivamente Occorrenza e/o Grado di gravità, verificare che il destinatario sia il Responsabile dell’istruttoria tecnica; negli altri casi tecnici il destinatario deve essere l’Istruttore tecnico. Confermare soltanto dopo avere controllato il riepilogo del rimando.'
+    ] }
+  }
+  if (chapter.startsWith('9. integrazioni tecniche') && lower === 'aprire la pratica rimandata per integrazione.') {
+    return { paragraphs: [
+      'Aprire l’allarme relativo alla richiesta di integrazione e utilizzare Apri pratica; in alternativa entrare in Elenco pratiche, scheda In attesa mia, e selezionare la pratica rimandata.',
+      'Prima di intervenire aprire Iter e leggere la motivazione del rimando, così da verificare chi ha richiesto l’integrazione e quali aspetti devono essere corretti.'
+    ] }
+  }
+  if (chapter.startsWith('17. ricorso') && lower.startsWith('se la decisione del cda richiede una nuova istruttoria amministrativa')) {
+    return { paragraphs: [
+      'Se dall’esito del CdA risulta necessaria una nuova istruttoria amministrativa, completare e salvare anzitutto i dati della decisione nella scheda CdA.',
+      'Passare quindi alla scheda Riapertura. La registrazione dell’ordine di riapertura e l’avvio del nuovo ciclo amministrativo sono descritti nei passaggi immediatamente successivi della sezione dedicata al Responsabile dell’istruttoria amministrativa.'
+    ] }
+  }
+  if (chapter.startsWith('19. prezzari') && lower === 'aprire gestione prezzari e selezionare prezzari.') {
+    return { paragraphs: [
+      'Aprire Gestione prezzari dalla Home oppure dal navigatore laterale e selezionare la sezione Prezzari.',
+      'La sezione mostra gli import già presenti e i comandi per caricare, attivare, disattivare o eliminare un prezzario regionale.'
+    ] }
+  }
+  if (chapter.startsWith('19. prezzari') && lower === 'aprire gestione prezzari e selezionare analisi prezzi.') {
+    return { paragraphs: [
+      'Aprire Gestione prezzari dalla Home oppure dal navigatore laterale e selezionare Analisi prezzi.',
+      'Utilizzare Nuovo prezzo per aprire il modulo di creazione; nel passaggio successivo verrà scelta la tipologia ELEMENTARE.'
+    ] }
+  }
+  if (chapter.startsWith('19. prezzari') && lower === 'aprire gestione prezzari, selezionare analisi prezzi e creare un nuovo prezzo.') {
+    return { paragraphs: [
+      'Aprire Gestione prezzari dalla Home oppure dal navigatore laterale, selezionare Analisi prezzi e utilizzare Nuovo prezzo.',
+      'Nel modulo che si apre scegliere ANALIZZATA nel campo Tipologia; i dati dell’intestazione vanno salvati prima di inserire le righe dell’analisi.'
+    ] }
+  }
+  if (chapter.startsWith('19. prezzari') && lower === 'aprire gestione prezzari e selezionare voci interne.') {
+    return { paragraphs: [
+      'Aprire Gestione prezzari dalla Home oppure dal navigatore laterale e selezionare Voci interne.',
+      'Utilizzare la ricerca per individuare il nuovo prezzo già esistente che deve essere modificato, quindi selezionare la relativa riga.'
+    ] }
+  }
+  if (chapter.startsWith('19. prezzari') && lower.startsWith('il responsabile dell’istruttoria tecnica apre gestione prezzari')) {
+    return { paragraphs: [
+      'Il Responsabile dell’istruttoria tecnica apre Gestione prezzari dalla Home o dal navigatore laterale e seleziona Parametri; da qui può gestire Parametri Nota spese e Prezzi attrezzature.',
+      'Il Responsabile dell’istruttoria amministrativa apre invece Parametri sanzionatori, dove sono disponibili Sanzioni, riduzioni e cauzione. In entrambi i casi selezionare quindi l’archivio da consultare o modificare.'
+    ] }
+  }
+  if (chapter.startsWith('21. dashboard') && lower === 'aprire report.') {
+    return { paragraphs: [
+      'Aprire Report dalla Home oppure dal navigatore laterale. La vista mostra la tabella delle pratiche accessibili al proprio ruolo con i filtri disponibili nella parte superiore.',
+      'Prima di esportare, applicare i filtri necessari e controllare che l’insieme visualizzato corrisponda alle pratiche che si intendono includere.'
+    ] }
+  }
+  if (chapter.startsWith('23. gestione utenti') && lower === 'aprire gestione utenti e usare nuovo utente.') {
+    return { paragraphs: [
+      'Aprire Gestione utenti dalla Home oppure dal navigatore laterale e utilizzare Nuovo utente.',
+      'Si apre il pannello di ricerca dei membri dell’organizzazione ArcGIS Online: cercare e selezionare la persona prima di compilare la relativa assegnazione gestionale.'
+    ] }
+  }
+  if (chapter.startsWith('24. allegati') && lower.startsWith('se si tratta di una richiesta di integrazione, leggere la motivazione')) {
+    return { paragraphs: [
+      'Nell’Iter individuare l’evento con cui è stata richiesta l’integrazione e leggere la motivazione e il ruolo che ha aperto il rimando.',
+      'Proseguire negli eventi successivi cercando Esito integrazione trasmesso. Seguire questi passaggi fino al ritorno dell’esito al ruolo che aveva richiesto la correzione: da quel punto riprende la normale verifica, validazione o approvazione.'
+    ] }
+  }
+
+  if (chapter.startsWith('4. nuova rilevazione') && lower === 'aprire la nuova rilevazione ricevuta.') {
+    return { paragraphs: [
+      'Aprire la campanella e utilizzare Apri pratica sull’allarme Nuova rilevazione ricevuta; in alternativa entrare in Elenco pratiche, scheda In attesa mia, e selezionare la rilevazione.',
+      'Prima di procedere all’assegnazione, verificare che la riga selezionata corrisponda alla rilevazione appena ricevuta e che nel Dettaglio siano disponibili i dati acquisiti dal Tecnico rilevatore.'
+    ] }
+  }
+  if (chapter.startsWith('10. ingresso nella fase amministrativa') && lower === 'aprire la nuova istruttoria amministrativa.') {
+    return { paragraphs: [
+      'Aprire dalla campanella l’allarme relativo al nuovo fascicolo oppure entrare in Elenco pratiche, scheda In attesa mia, e selezionare la pratica appena entrata nella fase amministrativa.',
+      'Controllare che la fase tecnica risulti approvata e che la pratica sia destinata al Responsabile dell’istruttoria amministrativa prima di prenderla in carico.'
+    ] }
+  }
+  if (chapter.startsWith('10. ingresso nella fase amministrativa') && lower === 'confermare l’istruttore amministrativo selezionato.') {
+    return { paragraphs: [
+      'Nel pannello di assegnazione controllare il nominativo dell’Istruttore amministrativo scelto e verificare che corrisponda alla pratica da affidare.',
+      'Confermare l’assegnazione. Il gestionale registra Istruttoria assegnata e la pratica passa nella In attesa mia dell’Istruttore amministrativo selezionato.'
+    ] }
+  }
+
+  if (chapter.startsWith('11. istruttoria amministrativa') && lower === 'valutare l’istruttoria amministrativa.') {
+    return { paragraphs: [
+      'Nella scheda Iter approvativo utilizzare Gestisci istruttoria per esprimere l’esito della verifica svolta dall’Istruttore amministrativo.',
+      'Scegliere Conforme quando il fascicolo può proseguire alla predisposizione dei documenti amministrativi. Scegliere Non conforme quando occorre chiedere un’integrazione tramite il Responsabile dell’istruttoria amministrativa; in questo caso compilare la motivazione prima della conferma.'
+    ] }
+  }
+
+  if (chapter.startsWith('6. verifica del capo settore') && (lower === 'aprire gestisci istruttoria.' || lower === 'scegliere l’esito della verifica.')) {
+    return { paragraphs: [
+      'Con la pratica già presa in carico, utilizzare Gestisci istruttoria nell’area Azioni. Il pannello propone gli esiti previsti per la verifica del Capo Settore.',
+      'Scegliere Conforme per trasmettere la pratica al Responsabile dell’istruttoria tecnica. Se sono necessarie correzioni, scegliere il rimando all’Istruttore tecnico e compilare la motivazione; quando ricorrono i casi previsti è disponibile anche il respingimento. Prima di confermare controllare esito e destinatario.'
+    ] }
+  }
+  if (chapter.startsWith('7. validazione del responsabile') && (lower === 'aprire gestisci istruttoria.' || lower === 'scegliere l’esito della validazione tecnica.')) {
+    return { paragraphs: [
+      'Con la pratica in carico, utilizzare Gestisci istruttoria nell’area Azioni. Il pannello consente di concludere la validazione oppure di richiedere un’integrazione.',
+      'Selezionare Conforme per trasmettere al Direttore tecnico. Se occorrono correzioni, indicare il rimando all’Istruttore tecnico e la motivazione. Il Responsabile dell’istruttoria tecnica non dispone del respingimento finale previsto per il Direttore tecnico.'
+    ] }
+  }
+  if (chapter.startsWith('8. approvazione del direttore') && (lower === 'aprire gestisci istruttoria.' || lower === 'scegliere l’esito dell’approvazione tecnica.')) {
+    return { paragraphs: [
+      'Con la pratica in carico, utilizzare Gestisci istruttoria nell’area Azioni e scegliere l’esito dell’approvazione tecnica.',
+      'Conforme trasmette la pratica al Responsabile dell’istruttoria amministrativa. Per una richiesta di integrazione indicare gli aspetti da correggere: se riguardano soltanto Occorrenza e/o Grado di gravità la pratica viene trasmessa al Responsabile dell’istruttoria tecnica, negli altri casi tecnici all’Istruttore tecnico. Il respingimento, quando previsto, interrompe l’avanzamento verso la fase amministrativa.'
+    ] }
+  }
+  if (chapter.startsWith('10. ingresso nella fase amministrativa') && (lower.startsWith('aprire gestisci istruttoria') || lower.startsWith('assegnare la pratica a un istruttore amministrativo'))) {
+    return { paragraphs: [
+      'Dopo la presa in carico e il controllo del fascicolo tecnico, utilizzare Gestisci istruttoria e scegliere l’azione di assegnazione.',
+      'Selezionare l’Istruttore amministrativo tra quelli disponibili, verificare il nominativo nel riepilogo e confermare. La pratica viene registrata come Istruttoria assegnata e passa nella In attesa mia dell’Istruttore scelto.'
+    ] }
+  }
+  if (chapter.startsWith('12. verifica del responsabile') && (lower === 'aprire gestisci istruttoria.' || lower === 'scegliere l’esito della verifica amministrativa.')) {
+    return { paragraphs: [
+      'Dopo avere controllato Iter approvativo, fascicolo e allegati, utilizzare Gestisci istruttoria per esprimere l’esito della verifica amministrativa.',
+      'Conforme valida il fascicolo e lo restituisce all’Istruttore amministrativo assegnato per gli adempimenti successivi. Con Non conforme indicare gli aspetti da integrare: quelli amministrativi riportano la pratica all’Istruttore amministrativo, quelli tecnici al Responsabile dell’istruttoria tecnica.'
+    ] }
+  }
+  if (chapter.startsWith('14. atto di accertamento') && section.includes('responsabile dell’istruttoria amministrativa') && (lower === 'aprire gestisci istruttoria.' || lower === 'scegliere l’esito della verifica dell’atto.')) {
+    return { paragraphs: [
+      'Dopo avere confrontato la bozza dell’Atto con la pratica e con la determinazione approvata, utilizzare Gestisci istruttoria.',
+      'Se l’Atto è conforme, approvarlo: la pratica torna all’Istruttore amministrativo e viene registrato Atto di accertamento approvato. Se non è conforme, indicare la motivazione del rimando all’Istruttore amministrativo; in questa fase non si apre una nuova integrazione tecnica.'
+    ] }
+  }
+
+  if (chapter.startsWith('13. determinazione') && section.includes('inviare e riacquisire il fascicolo protocollato')) {
+    if (lower.startsWith('quando sono disponibili i pdf protocollati')) {
+      return { paragraphs: [
+        'Selezionare insieme tutti i PDF restituiti dal protocollo, senza caricarli uno alla volta. Il gestionale li confronta con la composizione del fascicolo trasmesso: controlla numero dei file, documenti attesi ed estremi di protocollo e verifica che i documenti che devono condividere lo stesso protocollo riportino dati coerenti.',
+        'Se il controllo è superato, le copie protocollate sostituiscono quelle precedenti e gli estremi vengono acquisiti nella pratica. Se compare un’incongruenza, correggere il set di documenti prima di proseguire.'
+      ] }
+    }
+    if (lower.startsWith('salvare i dati di protocollo')) {
+      return { paragraphs: [
+        'Dopo l’acquisizione dei PDF protocollati, controllare che numero e data di protocollo siano presenti e che i documenti mostrati siano quelli appena verificati.',
+        'Utilizzare Salva per registrare definitivamente questi estremi nella pratica. Solo dopo il salvataggio proseguire con la determinazione definitiva.'
+      ] }
+    }
+  }
+  if (chapter.startsWith('13. determinazione') && section.includes('completare la determinazione dopo il protocollo')) {
+    if (lower.startsWith('convertire esternamente il word in pdf')) {
+      return { paragraphs: [
+        'Aprire il Word prodotto da Genera/Aggiorna determinazione, convertirlo in PDF con l’applicazione utilizzata per i documenti d’ufficio e tornare nella pratica.',
+        'Utilizzare l’azione di caricamento del PDF definitivo. Il gestionale confronta il documento con quello atteso e, quando il contenuto è coerente, acquisisce automaticamente numero e data della determinazione presenti nel PDF.'
+      ] }
+    }
+    if (lower.startsWith('salvare gli estremi della determinazione')) {
+      return { paragraphs: [
+        'Prima di salvare, controllare il numero e la data della determinazione acquisiti dal PDF definitivo. Se non corrispondono al documento, non proseguire e verificare il file caricato.',
+        'Utilizzare Salva per registrare gli estremi. Dal numero della determinazione il gestionale ricava il numero dell’Atto di accertamento nel formato previsto.'
+      ] }
+    }
+  }
+
+  if (chapter.startsWith('14. atto di accertamento') && section.includes('preparare e trasmettere la bozza')) {
+    if (lower === 'salvare i dati richiesti.') {
+      return { paragraphs: [
+        'Dopo avere completato Modalità di pagamento, Tipo di notifica e Spese di notifica, controllare il riepilogo economico e utilizzare Salva.',
+        'Il salvataggio rende disponibili i dati necessari alla generazione della bozza dell’Atto. Se manca un dato obbligatorio, completarlo prima di usare Genera bozza Word dell’Atto.'
+      ] }
+    }
+  }
+  if (chapter.startsWith('14. atto di accertamento') && section.includes('completare l’atto approvato')) {
+    if (lower.startsWith('convertire il word in pdf e caricare il pdf senza filigrana')) {
+      return { paragraphs: [
+        'Aprire il Word dell’Atto senza filigrana generato dal gestionale, convertirlo in PDF e caricare quel PDF nella stessa sezione.',
+        'Il gestionale verifica che il contenuto corrisponda alla versione approvata dal Responsabile dell’istruttoria amministrativa. Solo il PDF che supera il controllo viene identificato come versione da sottoporre alla firma digitale.'
+      ] }
+    }
+    if (lower.startsWith('quando sono disponibili i documenti protocollati')) {
+      return { paragraphs: [
+        'Selezionare insieme i documenti restituiti dal protocollo. Il gestionale controlla che siano presenti tutti i PDF richiesti, che l’Atto mantenga la firma digitale e che gli estremi di protocollo siano leggibili e coerenti.',
+        'Se il controllo non è superato, sostituire il set con i documenti corretti prima di salvare gli estremi.'
+      ] }
+    }
+    if (lower.startsWith('salvare gli estremi di protocollo acquisiti')) {
+      return { paragraphs: [
+        'Controllare numero e data di protocollo acquisiti e verificare che l’Atto protocollato sia quello firmato digitalmente già validato dal sistema.',
+        'Utilizzare Salva. Il completamento di questo passaggio rende operative le funzioni definitive di notifica descritte nel Cap. 16.'
+      ] }
+    }
+    if (lower.startsWith('dopo la firma digitale esterna')) {
+      return { paragraphs: [
+        'Dopo avere ricevuto il PDF firmato digitalmente dal Direttore amministrativo, utilizzare Carica il PDF firmato digitalmente dal Direttore e selezionare il documento ricevuto.',
+        'Il gestionale controlla l’integrità del contenuto, la presenza della firma digitale e l’identità del firmatario rispetto alla Rubrica. Per la gestione dei firmatari vedere Cap. 22.1. L’Amministratore del sistema può superare soltanto un disallineamento dell’identità, non l’assenza della firma né una modifica del contenuto.'
+      ] }
+    }
+  }
+
+  if (chapter.startsWith('15. modalità di pagamento')) {
+    if (section.includes('impostare un piano di pagamento manuale') && lower.startsWith('caricare l’eventuale documento collegato')) {
+      return { paragraphs: [
+        'Nella riga della posizione interessata utilizzare il comando di caricamento del documento e selezionare il PDF riferito proprio a quella posizione, ad esempio l’avviso o il bollettino corrispondente.',
+        'Dopo il caricamento controllare che il documento risulti associato alla posizione corretta e usare Aggiorna sulla posizione prima del salvataggio complessivo della pratica.'
+      ] }
+    }
+    if (section.includes('caricare gli avvisi pagopa')) {
+      if (lower.startsWith('selezionare insieme tutti i pdf prodotti')) {
+        return { paragraphs: [
+          'Selezionare in un’unica operazione l’avviso per l’unica soluzione e, quando previste, tutte le rate. Non caricare una parte del piano separatamente.',
+          'Il gestionale legge i QR code e i PDF per ricavare importo, codice avviso/IUV, Ente Creditore e scadenza; controlla inoltre che i codici siano validi e univoci, che l’Ente Creditore sia quello atteso e che unica soluzione e rate siano coerenti con il totale dovuto.'
+        ] }
+      }
+      if (lower.startsWith('controllare il piano pagopa')) {
+        return { paragraphs: [
+          'Nel piano ricostruito verificare l’unica soluzione e, se presenti, tutte le rate: controllare importi, scadenze, codici avviso/IUV e documenti associati.',
+          'Il totale delle rate deve corrispondere al totale dovuto, salvo l’eventuale arrotondamento centesimale gestito dal sistema. Se il piano è incompleto o incoerente, correggere i PDF selezionati prima di salvare.'
+        ] }
+      }
+      if (lower.startsWith('salvare il piano pagopa')) {
+        return { paragraphs: [
+          'Quando il piano ricostruito è corretto, utilizzare Salva nella pratica. Solo con il salvataggio il nuovo set di avvisi, o la sostituzione di quello precedente, diventa definitivo.',
+          'Dopo il salvataggio controllare lo stato del pagamento: quando tutte le posizioni sono complete deve risultare Generato; in caso contrario resta da completare.'
+        ] }
+      }
+    }
+    if (section.includes('sostituire un piano pagopa') && (lower.startsWith('premere salva') || lower.startsWith('salvare il nuovo piano pagopa'))) {
+      return { paragraphs: [
+        'Dopo avere confermato Sostituisci avvisi e controllato il nuovo piano, utilizzare Salva per rendere definitiva la sostituzione.',
+        'Finché non viene eseguito il salvataggio, l’operazione resta reversibile: uscendo o annullando prima di Salva viene ripristinato il piano precedente.'
+      ] }
+    }
+  }
+
+  if (chapter.startsWith('16. protocollo, notifica') && section.includes('registrare la notifica')) {
+    if (lower.startsWith('usare carica documentazione esito notifica')) {
+      return { paragraphs: [
+        'Dopo avere scelto l’esito, utilizzare Carica documentazione esito notifica e selezionare il PDF protocollato che prova quell’esito, ad esempio relata, ricevuta PEC o avviso di ricevimento.',
+        'Quando il documento contiene estremi leggibili, il gestionale acquisisce numero e data del protocollo e archivia il PDF tra gli Allegati. Controllare gli estremi acquisiti prima del salvataggio.'
+      ] }
+    }
+    if (lower.startsWith('salvare l’esito della notifica')) {
+      return { paragraphs: [
+        'Verificare l’esito selezionato, il documento caricato e gli eventuali estremi di protocollo acquisiti, quindi utilizzare Salva.',
+        'Con Notificata o Compiuta giacenza si rendono disponibili le attività successive su pagamento, ricorso e definizione; con Non notificata o Irreperibile tali attività restano bloccate. Se è stato scelto Altro, completare anche la descrizione richiesta.'
+      ] }
+    }
+  }
+
+  if (chapter.startsWith('17. ricorso')) {
+    if (section.includes('registrare un ricorso') && (lower === 'premere salva.' || lower === 'salvare i dati del ricorso.')) {
+      return { paragraphs: [
+        'Dopo avere compilato i dati del ricorso, controllare in particolare data di presentazione, protocollo, presentatore, eventuale sospensione del pagamento e motivazione, quindi utilizzare Salva.',
+        'Dopo il salvataggio verificare che la scheda riporti i dati inseriti e l’eventuale indicazione di presentazione tardiva.'
+      ] }
+    }
+    if (section.includes('riaprire e avviare una nuova istruttoria amministrativa')) {
+      if (lower.startsWith('salvare la riapertura')) {
+        return { paragraphs: [
+          'Dopo avere compilato ordine di riapertura, causa, data, soggetto che l’ha disposto, estremi autorizzativi e motivazione, utilizzare Salva nella scheda Riapertura.',
+          'Il salvataggio registra lo storico della riapertura; soltanto dopo questo passaggio utilizzare Gestisci istruttoria per avviare la nuova istruttoria amministrativa.'
+        ] }
+      }
+      if (lower.startsWith('tornare a gestisci istruttoria')) {
+        return { paragraphs: [
+          'Dopo avere salvato la Riapertura, tornare all’Elenco pratiche mantenendo selezionata la pratica e utilizzare Gestisci istruttoria.',
+          'Scegliere Avvia nuova istruttoria amministrativa: il pannello richiede l’Istruttore amministrativo cui assegnare il nuovo ciclo, mantenendo consultabile lo storico precedente.'
+        ] }
+      }
+      if (lower.startsWith('selezionare l’istruttore amministrativo che svolgerà')) {
+        return { paragraphs: [
+          'Nel pannello di avvio della nuova istruttoria selezionare l’Istruttore amministrativo incaricato tra quelli disponibili e controllare il nominativo prima della conferma.',
+          'Confermando, la pratica viene assegnata al nuovo ciclo amministrativo e deve risultare da prendere in carico per l’Istruttore scelto; lo storico di ricorso, CdA e riapertura resta invariato.'
+        ] }
+      }
+    }
+    if (section.includes('registrare l’incasso e definire la pratica') && lower === 'aprire definizione.') {
+      return { paragraphs: [
+        'Nella lavorazione amministrativa aprire Definizione quando il procedimento è arrivato alla fase conclusiva. La sezione contiene Incasso e modalità di definizione della pratica.',
+        'Compilare insieme importo incassato, data e riferimenti: il sistema non accetta uno di questi elementi isolato. Dopo il controllo dello stato di pagamento proposto, scegliere la modalità di definizione coerente con l’esito reale e salvare.'
+      ] }
+    }
+  }
+
+  if (chapter.startsWith('18. nota spese') && (lower.startsWith('premere salva per rendere definitive') || lower === 'salvare la nota spese.')) {
+    return { paragraphs: [
+      'Dopo avere confermato le voci dal Browser, impostato le quantità e controllato il riepilogo per categoria, le spese generali e il totale, utilizzare Salva nella pratica tecnica.',
+      'Il salvataggio rende definitive le voci e le quantità della Nota spese. Riaprire la sezione per un controllo finale del totale e verificare che non siano rimaste segnalazioni di dati mancanti.'
+    ] }
+  }
+
+  if (chapter.startsWith('19. prezzari')) {
+    if (section.includes('creare un nuovo prezzo elementare')) {
+      if (lower.startsWith('creare un nuovo prezzo e scegliere tipologia')) {
+        return { paragraphs: [
+          'Nella vista Analisi prezzi utilizzare Nuovo prezzo. Nel campo Tipologia scegliere ELEMENTARE: in questa modalità il prezzo viene inserito manualmente e le righe di analisi non sono disponibili.',
+          'Impostare quindi Anno listino e la gerarchia Super capitolo, Capitolo e Sub capitolo. Il Codice voce viene generato dal sistema e resta in sola lettura.'
+        ] }
+      }
+      if (lower === 'salvare.' || lower === 'salvare il nuovo prezzo elementare.') {
+        return { paragraphs: [
+          'Prima di salvare controllare Descrizione, Unità di misura, Prezzo unitario, stato Attivo ed eventuali Note. Per un prezzo ELEMENTARE il Prezzo unitario è obbligatorio e viene inserito manualmente.',
+          'Utilizzare Salva. Il nuovo prezzo viene registrato con il codice generato dal sistema e, se Attivo, diventa disponibile come componente di altri prezzi analizzati.'
+        ] }
+      }
+    }
+    if (section.includes('creare un nuovo prezzo analizzato') && lower.startsWith('salvare l’intestazione')) {
+      return { paragraphs: [
+        'Dopo avere impostato Tipologia ANALIZZATA e compilato Anno listino, gerarchia, Descrizione, Unità di misura e Note, utilizzare Salva per creare la testata del nuovo prezzo.',
+        'Il Prezzo unitario non va inserito manualmente: dopo il salvataggio si abilita la sezione delle righe di analisi e il prezzo complessivo viene calcolato dalla somma degli importi delle componenti.'
+      ] }
+    }
+    if (section.includes('modificare un nuovo prezzo esistente')) {
+      if (lower.startsWith('cercare/selezionare')) {
+        return { paragraphs: [
+          'Nella vista Voci interne utilizzare il campo di ricerca per restringere l’elenco dei Nuovi Prezzi e selezionare la riga da modificare.',
+          'Controllare codice e tipologia prima di intervenire: per un prezzo ELEMENTARE è modificabile anche il prezzo unitario; per un prezzo ANALIZZATO il prezzo resta calcolato dall’analisi.'
+        ] }
+      }
+      if (lower.startsWith('salvare le modifiche')) {
+        return { paragraphs: [
+          'Dopo avere aggiornato Descrizione, Unità di misura, stato Attivo, Note e, per i soli ELEMENTARI, il prezzo, utilizzare Salva.',
+          'Controllare che la riga mostri i nuovi valori. L’eliminazione è un’operazione separata e viene bloccata se il prezzo è già utilizzato come componente di altre analisi.'
+        ] }
+      }
+    }
+    if (section.includes('creare o modificare un parametro') && (lower.startsWith('salvare.') || lower.startsWith('salvare il parametro'))) {
+      return { paragraphs: [
+        'Dopo avere compilato i campi previsti per il tipo di parametro, controllare anno, valore, stato Attivo, periodo di validità ed eventuali Note e utilizzare Salva.',
+        'Per i Prezzi attrezzature verificare anche Tipo di attrezzatura e Valore unitario. Se serve un’estrazione dell’archivio corrente, utilizzare Esporta CSV dopo il salvataggio.'
+      ] }
+    }
+    if (section.includes('consultare una voce di prezzario')) {
+      if (lower.startsWith('usare cerca per codice') || lower === 'cercare una voce di prezzario.') {
+        return { paragraphs: [
+          'Digitare nel campo Cerca il codice o una parte della descrizione; in alternativa utilizzare Famiglia, Capitolo e Sottocapitolo oppure l’albero gerarchico della sorgente selezionata.',
+          'I criteri restringono l’elenco corrente. Per tornare a tutte le voci utilizzare Tutte le voci o azzerare i criteri applicati.'
+        ] }
+      }
+      if (lower.startsWith('ordinare l’elenco')) {
+        return { paragraphs: [
+          'Fare clic sull’intestazione Codice, Descrizione, Unità di misura o Prezzo per cambiare l’ordinamento dell’elenco.',
+          'Usare l’ordinamento insieme ai filtri per individuare più rapidamente la voce da consultare; la selezione della riga apre il relativo dettaglio e, quando disponibile, l’analisi delle componenti.'
+        ] }
+      }
+    }
+  }
+
+  if (chapter.startsWith('20. mappa')) {
+    if (section.includes('cercare una particella catastale') && (lower === 'usare cerca.' || lower === 'eseguire la ricerca catastale.')) {
+      return { paragraphs: [
+        'Dopo avere scelto almeno il Comune e gli eventuali livelli successivi Sezione, Foglio e Mappale, utilizzare Cerca.',
+        'I risultati vengono elencati e la geometria corrispondente viene evidenziata sulla mappa. Prima di una nuova interrogazione azzerare i criteri che non devono essere mantenuti.'
+      ] }
+    }
+    if (section.includes('cercare un’opera') && (lower.startsWith('usare cerca') || lower === 'eseguire la ricerca delle opere.')) {
+      return { paragraphs: [
+        'Dopo avere impostato Stato, Tipo e/o Nome, utilizzare Cerca. Le opere che soddisfano i criteri vengono mostrate nell’elenco dei risultati e localizzate sulla mappa.',
+        'Se i criteri non producono il risultato atteso, ridurli o azzerarli e ripetere la ricerca.'
+      ] }
+    }
+    if (section.includes('cercare una pratica sulla mappa') && (lower.startsWith('usare cerca.') || lower === 'eseguire la ricerca delle pratiche.')) {
+      return { paragraphs: [
+        'Dopo avere impostato almeno un criterio, utilizzare Cerca. Se si usa Numero pratica, verificare di avere selezionato anche il Tipo pratica corretto: Rilevazione, Rapporto tecnico oppure Atto di accertamento.',
+        'L’elenco e la mappa mostrano soltanto le pratiche che il profilo corrente è autorizzato a vedere. Controllare il conteggio dei risultati e l’eventuale avviso che segnala la visualizzazione dei soli primi elementi.'
+      ] }
+    }
+  }
+
+  if (chapter.startsWith('21. dashboard')) {
+    if (section.includes('usare la dashboard') && lower.startsWith('selezionare i filtri interattivi')) {
+      return { paragraphs: [
+        'Nella sezione Statistiche selezionare un Ufficio o una tipologia di Infrazione dai filtri interattivi. Gli indicatori e i grafici della pagina si aggiornano in base alla selezione corrente.',
+        'È possibile combinare le selezioni disponibili; utilizzare Azzera filtri per ripristinare l’intero insieme di dati visibile al proprio profilo.'
+      ] }
+    }
+    if (section.includes('consultare ed esportare il report') && lower.startsWith('ordinare le colonne')) {
+      return { paragraphs: [
+        'Fare clic sull’intestazione della colonna che si vuole usare per l’ordinamento. Ripetere il clic per cambiare direzione; se la vista consente più criteri, l’ordine di priorità viene mostrato accanto alle intestazioni.',
+        'Utilizzare il comando di reset dell’ordinamento per tornare alla disposizione predefinita senza modificare i filtri già impostati.'
+      ] }
+    }
+  }
+
+  if (chapter.startsWith('22. rubrica')) {
+    if (section.includes('aggiungere un destinatario e-mail') && (lower === 'salvare.' || lower === 'salvare il destinatario e-mail.')) {
+      return { paragraphs: [
+        'Prima di salvare controllare Tipo, nominativo o Denominazione, E-mail e Utilizzo. Se il sistema segnala un omonimo, completare prima la verifica richiesta per riutilizzare la persona esistente o registrare un soggetto distinto.',
+        'Utilizzare Salva e verificare che il destinatario compaia nell’elenco. Per gli utilizzi che ammettono un solo destinatario attivo, risolvere l’eventuale duplicazione segnalata dal sistema.'
+      ] }
+    }
+    if (section.includes('aggiungere un firmatario') && (lower.startsWith('salvare.') || lower === 'salvare il firmatario.')) {
+      return { paragraphs: [
+        'Controllare Titolo, Nome, Cognome e, quando necessaria per distinguere omonimi, Data di nascita; quindi utilizzare Salva.',
+        'Dopo il salvataggio il nominativo entra nell’elenco dei firmatari autorizzati usato dal controllo della firma digitale dell’Atto di accertamento.'
+      ] }
+    }
+    if (section.includes('cercare e consultare il regolamento') && (lower.startsWith('usare cerca digitando') || lower === 'cercare nel regolamento irriguo.')) {
+      return { paragraphs: [
+        'Digitare nel campo Cerca una parola, il numero di un articolo, parte del titolo o il nome di una sezione. Durante la digitazione l’Indice regolamento si restringe alle sole sezioni e agli articoli corrispondenti.',
+        'Selezionare il risultato desiderato per leggere il Testo articolo nel pannello di destra. Utilizzare Pulisci ricerca o Reimposta indice per tornare all’indice completo.'
+      ] }
+    }
+  }
+
+  if (chapter.startsWith('23. gestione utenti')) {
+    if (section.includes('aggiungere un utente') && lower.startsWith('salvare l’utente')) {
+      return { paragraphs: [
+        'Prima di salvare controllare il membro ArcGIS Online selezionato, il Ruolo, l’ambito organizzativo richiesto e il Gruppo calcolato dal gestionale.',
+        'Utilizzare Salva. Se il ruolo prevede un gruppo ArcGIS Online, il gestionale aggiorna automaticamente anche l’appartenenza al gruppo; attendere il messaggio Utente aggiunto e verificare la nuova riga nell’elenco.'
+      ] }
+    }
+    if (section.includes('aggiungere un nuovo ruolo allo stesso utente') && (lower.startsWith('salvare.') || lower === 'salvare la nuova assegnazione.')) {
+      return { paragraphs: [
+        'Dopo avere scelto il nuovo Ruolo e compilato l’ambito organizzativo richiesto, controllare il Gruppo calcolato e utilizzare Salva.',
+        'Il gestionale impedisce di creare una seconda assegnazione identica a una già presente. Se la nuova assegnazione richiede un gruppo ArcGIS Online, viene aggiornata anche la relativa appartenenza.'
+      ] }
+    }
+  }
+
+  if (chapter.startsWith('24. allegati')) {
+    if (section.includes('gestire un allegato ordinario') && (lower.startsWith('nella lavorazione tecnica premere salva') || lower === 'salvare le modifiche agli allegati.')) {
+      return { paragraphs: [
+        'Nella lavorazione tecnica, dopo aggiunte, sostituzioni, eliminazioni o rotazioni predisposte sugli allegati, utilizzare Salva per rendere definitive le operazioni insieme alle altre modifiche della pratica.',
+        'Nella lavorazione amministrativa aggiunta, sostituzione ed eliminazione degli allegati amministrativi ordinari sono già applicate dal relativo comando; Salva registra invece le eventuali rotazioni preparate nel visualizzatore e le altre modifiche pendenti. Dopo il salvataggio controllare nuovamente l’elenco degli Allegati.'
+      ] }
+    }
+    if (section.includes('ricostruire una modifica con l’iter')) {
+      if (lower.startsWith('aprire dettaglio pratica')) {
+        return { paragraphs: [
+          'Nell’Elenco pratiche selezionare la pratica interessata e aprire la scheda Iter nel pannello Dettaglio pratica selezionata.',
+          'La scheda mostra gli eventi della pratica con stato, date, Avviato da, Trasmesso a, note, campi modificati e variazioni degli allegati. Selezionando nuovamente Iter è possibile invertire l’ordine cronologico.'
+        ] }
+      }
+      if (lower.startsWith('scorrere gli eventi fino al periodo')) {
+        return { paragraphs: [
+          'Scorrere i blocchi dell’Iter e usare insieme data, ruolo, stato dell’evento e descrizione per individuare il passaggio che interessa.',
+          'Una volta trovato, leggere Avviato da e Trasmesso a per ricostruire il trasferimento di responsabilità; quindi controllare Campi modificati, variazioni degli Allegati ed eventuali motivazioni di rimando.'
+        ] }
+      }
+    }
+  }
+
+  return null
+}
+
 function includesAny(text: string, values: string[]): boolean {
   const t = text.toLowerCase()
   return values.some(v => t.includes(v.toLowerCase()))
 }
 
 export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle = ''): GuideStepHelp | null {
+  const reviewed = getReviewedStepHelp(text, sectionTitle, chapterTitle)
+  if (reviewed) return reviewed
+
   const exact = exactHelp[text]
   if (exact) return exact
 
@@ -181,6 +656,14 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
 
   // Nuova pratica e lavorazione tecnica
   if (chapter.startsWith('4. nuova rilevazione')) {
+    if (lower.startsWith('avviare una nuova pratica')) {
+      return {
+        paragraphs: [
+          'Aprire Nuova pratica dalla Home oppure dal navigatore laterale. Se l’Istruttore tecnico opera in più ambiti, selezionare prima l’ambito cui appartiene la pratica da creare.',
+          'Dopo la scelta dell’ambito si apre la nuova pratica con i Dati generali compilati automaticamente dal sistema.'
+        ]
+      }
+    }
     if (lower.startsWith('controllare nel dettaglio')) {
       return {
         paragraphs: [
@@ -197,27 +680,31 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
         ]
       }
     }
-    if (lower.startsWith('verificare i dati generali proposti')) {
+    if (lower.startsWith('verificare i dati generali')) {
       return {
         paragraphs: [
-          'Nella nuova pratica aprire Dati generali e controllare i valori proposti dal sistema per Area, Settore, Ufficio di zona, Istruttore tecnico e Data rilevazione.',
-          'Se l’utente dispone di più assegnazioni, l’ambito scelto all’apertura della nuova pratica determina i valori organizzativi proposti. Modificare soltanto i campi che risultano effettivamente abilitati.'
+          'Nella nuova pratica aprire Dati generali e controllare i valori compilati automaticamente dal sistema per Area, Settore, Ufficio di zona, Tecnico rilevatore, Istruttore tecnico e Data rilevazione. I campi sono in sola lettura.',
+          'Se l’Istruttore tecnico opera in più ambiti e, controllando i Dati generali, si accorge di aver selezionato quello errato, può utilizzare l’azione Elimina pratica e generarne una nuova nell’ambito corretto, purché non l’abbia ancora trasmessa al Capo Settore. Se si accorge dell’errore dopo la trasmissione, la pratica potrà essere eliminata dal Capo Settore.'
         ]
       }
     }
-    if (lower.startsWith('compilare il trasgressore')) {
+    if (lower.startsWith('compilare i dati del trasgressore')) {
       return {
         paragraphs: [
-          'Aprire la scheda Trasgressore e scegliere anzitutto il tipo di soggetto. Per una persona fisica compilare i dati anagrafici e fiscali pertinenti; per una persona giuridica utilizzare i campi dedicati a denominazione, partita IVA e rappresentante legale quando previsti.',
-          'Se il domicilio da utilizzare per le comunicazioni non coincide con quello già indicato, attivare la relativa opzione e compilare i dati del domicilio per le notifiche.'
+          'Nella scheda Trasgressore selezionare per prima cosa la Tipologia soggetto e indicare la qualifica o il rapporto con il fondo. La scelta tra persona fisica e persona giuridica determina i campi da compilare.',
+          'Per la persona fisica inserire nome, cognome e codice fiscale; per la persona giuridica indicare ragione sociale e partita IVA. Completare quindi residenza o sede legale e i recapiti disponibili.',
+          'Se il domicilio da utilizzare per le notifiche è diverso dalla residenza o dalla sede legale, indicarlo nella sezione Domicilio per le notifiche. Per una persona giuridica completare anche i dati del rappresentante legale e, quando necessario, il relativo domicilio per le notifiche.',
+          'Prima di proseguire controllare i dati identificativi inseriti. I controlli formali applicati al salvataggio sono riepilogati nel Cap. 5.2.'
         ]
       }
     }
-    if (lower.startsWith('compilare violazione')) {
+    if (lower.startsWith('compilare la violazione')) {
       return {
         paragraphs: [
-          'Aprire la scheda Violazione e selezionare soltanto le fattispecie effettivamente accertate. Per gli articoli che contengono più casistiche, espandere l’articolo e valorizzare i campi che diventano disponibili per la voce scelta.',
-          'Il riferimento al Regolamento consente di verificare numero e titolo dell’articolo mentre si compila la violazione. Completare anche descrizione dettagliata e altre circostanze quando richieste dalla fattispecie.'
+          'Nella scheda Violazione selezionare le fattispecie effettivamente accertate. Per l’Art. 15 indicare il tipo di abuso e le superfici richieste; per gli Artt. 16 e 17 scegliere il tipo di inosservanza e compilare i dati che il sistema rende disponibili in base alla fattispecie selezionata. Le altre violazioni si selezionano dalle relative voci dell’elenco.',
+          'Le colonne Punto mappa e Nota spese indicano se la violazione scelta richiede anche la localizzazione cartografica o la compilazione di una Nota spese. Occorrenza e Gravità appartengono invece alla successiva valutazione del Responsabile dell’istruttoria tecnica e non sono compilate dall’Istruttore tecnico.',
+          'Completare la Descrizione dettagliata della violazione, le eventuali Circostanze rilevanti e indicare se il trasgressore era presente quando il campo è richiesto.',
+          'Per verificare numero e titolo dell’articolo utilizzare il relativo riferimento al Regolamento. I controlli specifici applicati alle violazioni al momento del salvataggio sono descritti nel Cap. 5.2; per la consultazione completa del Regolamento irriguo vedere Cap. 22.2.'
         ],
         figure: 'Figura – Violazione nella lavorazione tecnica'
       }
@@ -225,24 +712,53 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('compilare luoghi e dati tecnici')) {
       return {
         paragraphs: [
-          'Aprire Luoghi e dati e compilare i riferimenti territoriali e tecnici disponibili per la rilevazione. Quando la violazione richiede una localizzazione cartografica, utilizzare la mappa della lavorazione per impostare il punto della pratica.',
-          'Prima di salvare verificare che i dati territoriali e il punto mappa siano coerenti con il luogo dell’accertamento.'
+          'Nella scheda Luoghi e dati tecnici descrivere il luogo dell’accertamento e compilare, quando disponibili, Distretto, Comizio, Idrante, Matricola contatore e Matricola tessera.',
+          'Se nella scheda Violazione la fattispecie selezionata richiede il Punto mappa, nella sezione Localizzazione utilizzare Imposta punto in mappa e fare clic sulla posizione esatta nella mappa. Dopo il clic il gestionale mostra il punto impostato e le relative coordinate.',
+          'Per correggere la posizione utilizzare Modifica punto e fare nuovamente clic sulla mappa. Prima del salvataggio controllare che il punto corrisponda effettivamente al luogo dell’accertamento.',
+          'Quando il Punto mappa è obbligatorio, la pratica non può essere salvata finché la localizzazione non è stata impostata.'
         ]
       }
     }
     if (lower.startsWith('compilare la nota spese')) {
       return {
         paragraphs: [
-          'Aprire Nota spese soltanto quando la violazione selezionata attiva una delle casistiche previste. Scegliere la casistica interessata e utilizzare Sfoglia prezzario per aggiungere le voci necessarie.',
-          'Dopo il rientro dal Browser nota spese indicare le quantità e gli eventuali dati specifici richiesti, quindi controllare il riepilogo economico prima del salvataggio.'
+          'Dopo il primo salvataggio, utilizzare la scheda Nota spese quando la violazione selezionata prevede una delle casistiche abilitate. Selezionare la violazione o la casistica cui associare la spesa e, quando richiesto, l’attrezzatura interessata.',
+          'Utilizzare Sfoglia prezzario, cercare e selezionare le voci necessarie e confermarle. Nella Nota spese indicare quindi le quantità e gli eventuali dati specifici richiesti e controllare il riepilogo economico.',
+          'La compilazione completa della Nota spese, comprese categorie di costo, attrezzature, regole delle voci e controlli finali, è descritta nel Cap. 18.'
         ]
       }
     }
-    if (lower.startsWith('aggiungere o modificare gli allegati')) {
+    if (lower.startsWith('salvare la nuova pratica')) {
       return {
         paragraphs: [
-          'Dopo il primo salvataggio aprire Allegati. Utilizzare il comando di aggiunta per caricare un nuovo file oppure i comandi presenti sulla riga di un allegato per sostituirlo o rimuoverlo.',
-          'Aprire il file nel visualizzatore per controllarlo prima di proseguire. Nella lavorazione tecnica le operazioni predisposte sugli allegati diventano definitive con il successivo Salva della pratica.'
+          'Dopo avere compilato Trasgressore, Violazione e Luoghi e dati tecnici utilizzare Salva. Il primo salvataggio crea la pratica e le assegna l’identificativo.',
+          'Se mancano dati obbligatori, il gestionale blocca il salvataggio e indica la sezione da completare. In particolare, quando la violazione richiede il Punto mappa, la localizzazione deve essere già stata impostata.',
+          'Dopo il primo salvataggio diventano utilizzabili le funzioni che richiedono una pratica già creata, tra cui Sfoglia prezzario nella Nota spese, Allegati e Anteprima fascicolo.'
+        ]
+      }
+    }
+    if (lower.startsWith('gestire gli allegati della pratica')) {
+      return {
+        paragraphs: [
+          'Dopo il primo salvataggio utilizzare la scheda Allegati per aggiungere la documentazione tecnica della pratica. Selezionare Aggiungi allegato, scegliere il file e completare le informazioni richieste; per un allegato già presente utilizzare i comandi della relativa riga per aprirlo, sostituirlo, ruotarlo o rimuoverlo quando l’azione è disponibile.',
+          'Controllare nel visualizzatore che il documento caricato sia quello corretto e sia leggibile. Nella lavorazione tecnica le variazioni predisposte sugli allegati diventano definitive con il successivo Salva della pratica.',
+          'Per la gestione completa degli Allegati e per il controllo dell’Anteprima fascicolo vedere Cap. 24.1 e Cap. 24.2.'
+        ]
+      }
+    }
+    if (lower.startsWith('salvare le modifiche')) {
+      return {
+        paragraphs: [
+          'Dopo avere completato la Nota spese e gestito gli eventuali allegati utilizzare nuovamente Salva. Questo salvataggio rende definitive le modifiche effettuate dopo la creazione iniziale della pratica.',
+          'Prima della trasmissione verificare che il gestionale confermi il salvataggio senza segnalare controlli bloccanti.'
+        ]
+      }
+    }
+    if (lower.startsWith('trasmettere la nuova rilevazione al capo settore')) {
+      return {
+        paragraphs: [
+          'Quando la compilazione è completa e la pratica è stata salvata, tornare all’Elenco pratiche lasciando selezionata la pratica interessata. Nell’area Azioni utilizzare il comando di trasmissione della nuova rilevazione al Capo Settore.',
+          'La trasmissione conclude la lavorazione iniziale dell’Istruttore tecnico e rende la pratica disponibile al Capo Settore per la verifica.'
         ]
       }
     }
@@ -298,7 +814,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
       return {
         paragraphs: [
           'Con la pratica selezionata utilizzare Dettaglio pratica per passare tra le schede e controllare dati, Nota spese, allegati e Iter senza modificarli.',
-          'Se il ruolo dispone di una lavorazione limitata, aprirla soltanto quando occorre intervenire sui campi espressamente abilitati; per il resto la verifica si svolge in consultazione.'
+          'Se il ruolo dispone di una lavorazione limitata, aprirla soltanto quando occorre intervenire sui campi espressamente abilitati; per il resto la verifica si svolge in consultazione. Per la Nota spese vedere Cap. 18; per Allegati, fascicolo e Iter vedere Cap. 24.'
         ]
       }
     }
@@ -314,7 +830,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
       return {
         paragraphs: [
           'Nel pannello Gestisci istruttoria scegliere l’esito che richiede un’integrazione e indicare con precisione la motivazione o gli aspetti da correggere.',
-          'Quando il pannello propone categorie o destinatari diversi, selezionare soltanto quelli pertinenti: il gestionale utilizza queste informazioni per instradare la pratica al ruolo competente.'
+          'Quando il pannello propone categorie o destinatari diversi, selezionare soltanto quelli pertinenti: il gestionale utilizza queste informazioni per trasmettere la pratica al ruolo competente.'
         ]
       }
     }
@@ -341,7 +857,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
       return {
         paragraphs: [
           'Nel Dettaglio pratica aprire Iter e individuare l’evento con cui è stata richiesta l’integrazione. Leggere la motivazione e verificare quale ruolo ha originato il rimando.',
-          'Seguire gli eventi successivi dello stesso ciclo per distinguere una normale verifica da una semplice risalita dell’esito di integrazione.'
+          'Seguire gli eventi successivi dello stesso ciclo per distinguere una normale verifica dai passaggi con cui l’esito dell’integrazione viene trasmesso fino al ruolo che l’aveva richiesta. Per la lettura dettagliata dello storico vedere Cap. 24.3.'
         ]
       }
     }
@@ -349,7 +865,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
       return {
         paragraphs: [
           'Dopo la presa in carico utilizzare la lavorazione disponibile per il proprio ruolo e intervenire solo sui dati richiamati dalla motivazione del rimando.',
-          'Salvare le correzioni prima di tornare all’Elenco pratiche. Se il ruolo è un intermediario della risalita e non deve modificare dati, limitarsi ai controlli previsti e proseguire con l’esito.'
+          'Salvare le correzioni prima di tornare all’Elenco pratiche. Se il ruolo deve soltanto trasmettere l’esito dell’integrazione al passaggio successivo e non deve modificare dati, limitarsi ai controlli previsti e proseguire con l’esito.'
         ]
       }
     }
@@ -357,7 +873,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
       return {
         paragraphs: [
           'Tornare all’area Azioni della pratica e aprire Gestisci istruttoria. Utilizzare il comando di trasmissione dell’esito dell’integrazione previsto per il ruolo corrente.',
-          'Durante la risalita il passaggio viene registrato come Esito integrazione trasmesso; la normale verifica, validazione o approvazione riprende soltanto quando l’esito raggiunge il ruolo che aveva richiesto l’integrazione.'
+          'Nei passaggi intermedi viene registrato Esito integrazione trasmesso; la normale verifica, validazione o approvazione riprende soltanto quando l’esito raggiunge il ruolo che aveva richiesto l’integrazione.'
         ]
       }
     }
@@ -461,12 +977,12 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('dopo la validazione del responsabile') && lower.includes('protocollo')) {
       return {
         paragraphs: [
-          'Dopo il rientro della pratica all’Istruttore amministrativo, utilizzare il comando Trasmetti fascicolo al protocollo nella sezione Determinazione. Il gestionale predispone la trasmissione e conserva l’elenco dei documenti inviati.',
-          'La protocollazione vera e propria viene completata con il sistema esterno previsto dall’Ente; al rientro occorre acquisire nel gestionale l’intero set di PDF richiesto.'
+          'Quando la pratica torna all’Istruttore amministrativo dopo la validazione, utilizzare Trasmetti fascicolo al protocollo nella sezione Determinazione. Il gestionale predispone la trasmissione e conserva l’elenco dei documenti inviati.',
+          'La protocollazione viene completata con il sistema esterno previsto dall’Ente. Quando i documenti protocollati sono disponibili, acquisire nel gestionale tutti i PDF richiesti.'
         ]
       }
     }
-    if (lower.startsWith('al ritorno, selezionare insieme tutti i pdf')) {
+    if (lower.startsWith('quando sono disponibili i pdf protocollati')) {
       return {
         paragraphs: [
           'Utilizzare il comando di acquisizione del fascicolo protocollato e selezionare in una sola operazione tutti i PDF restituiti dal protocollo. Non caricare i documenti uno alla volta quando il pannello richiede il fascicolo completo.',
@@ -478,7 +994,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
       return {
         paragraphs: [
           'Nella sezione Determinazione utilizzare Prepara e-mail al Direttore. Il gestionale utilizza i destinatari configurati nella Rubrica per predisporre la trasmissione della determinazione.',
-          'Prima di procedere verificare che il PDF definitivo e gli estremi della determinazione siano già acquisiti correttamente nella pratica.'
+          'Prima di procedere verificare che il PDF definitivo e gli estremi della determinazione siano già acquisiti correttamente nella pratica. Per la gestione dei destinatari della Rubrica vedere Cap. 22.1.'
         ]
       }
     }
@@ -518,7 +1034,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
         ]
       }
     }
-    if (lower.startsWith('al ritorno dal protocollo caricare insieme')) {
+    if (lower.startsWith('quando sono disponibili i documenti protocollati')) {
       return {
         paragraphs: [
           'Utilizzare il comando di acquisizione dei documenti protocollati e selezionare insieme tutti i PDF richiesti dal pannello. Il gestionale verifica la presenza dell’Atto firmato, dei documenti previsti e degli estremi di protocollo.',
@@ -647,7 +1163,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('usare sfoglia prezzario')) {
       return {
         paragraphs: [
-          'Dopo avere selezionato la casistica della Nota spese utilizzare Sfoglia prezzario. Il comando apre il Browser nota spese mantenendo il collegamento con la pratica e con la casistica corrente.',
+          'Dopo avere selezionato la casistica della Nota spese utilizzare Sfoglia prezzario. Il Browser nota spese si apre già riferito alla casistica selezionata.',
           'Se Sfoglia prezzario non è disponibile, verificare che la pratica sia già stata salvata almeno una volta e che la violazione selezionata preveda effettivamente una Nota spese.'
         ]
       }
@@ -656,14 +1172,14 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
       return {
         paragraphs: [
           'Nel Browser nota spese scegliere la sorgente o il prezzario e utilizzare la ricerca per codice o descrizione oppure la struttura gerarchica disponibile. Selezionare le voci necessarie e premere Aggiungi per inserirle nel carrello.',
-          'Controllare il contatore del carrello e, quando la selezione è completa, utilizzare Conferma per tornare alla pratica con le voci scelte.'
+          'Controllare il contatore del carrello e, quando la selezione è completa, utilizzare Conferma. Le voci selezionate vengono riportate nella Nota spese.'
         ]
       }
     }
-    if (lower.startsWith('al rientro nella pratica impostare le quantità')) {
+    if (lower.startsWith('dopo aver confermato le voci nel browser nota spese')) {
       return {
         paragraphs: [
-          'Tornati nella Nota spese, ogni voce scelta dal Browser compare nella relativa categoria. Compilare la quantità e gli eventuali dati richiesti dalla casistica; il gestionale calcola il relativo importo.',
+          'Dopo la conferma, ogni voce selezionata compare nella relativa categoria della Nota spese. Compilare la quantità e gli eventuali dati richiesti dalla casistica; il gestionale calcola il relativo importo.',
           'Controllare il riepilogo per categoria e il totale complessivo prima di utilizzare Salva.'
         ]
       }
@@ -752,7 +1268,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
       return {
         paragraphs: [
           'Nel pannello della Mappa selezionare Infrazioni. È possibile cercare per articolo, tipo e numero pratica oppure per dati del trasgressore.',
-          'Impostare almeno un criterio e utilizzare Cerca; l’elenco restituisce soltanto le pratiche comprese nel proprio perimetro di visibilità.'
+          'Impostare almeno un criterio e utilizzare Cerca; l’elenco restituisce soltanto le pratiche che il proprio ruolo può visualizzare.'
         ],
         figure: 'Figura – Mappa del gestionale'
       }
@@ -763,7 +1279,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('controllare in attesa mia')) {
       return {
         paragraphs: [
-          'Nella sezione Operativo della Dashboard utilizzare i riquadri In attesa mia e Ferme oltre 15 giorni per individuare il carico che richiede attenzione. I conteggi sono riferiti al perimetro visibile al ruolo corrente.',
+          'Nella sezione Operativo della Dashboard utilizzare i riquadri In attesa mia e Ferme oltre 15 giorni per individuare il carico che richiede attenzione. I conteggi riguardano le pratiche visibili al ruolo corrente.',
           'La Dashboard serve a individuare le priorità; per aprire e lavorare la singola pratica tornare poi all’Elenco pratiche.'
         ],
         figure: 'Figura – Dashboard operativa'
@@ -773,14 +1289,14 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
       return {
         paragraphs: [
           'Nel Report utilizzare la fascia dei filtri sopra la tabella. È possibile combinare Cerca n. rapporto, Area, Settore, intervallo di date, Situazione, Fase procedimentale e Competenza attuale.',
-          'La tabella e la Sintesi procedimentale vengono aggiornate sul perimetro filtrato; utilizzare Pulisci filtri per tornare all’insieme completo.'
+          'La tabella e la Sintesi procedimentale vengono aggiornate in base ai filtri impostati; utilizzare Pulisci filtri per tornare all’insieme completo.'
         ]
       }
     }
     if (lower.startsWith('usare esporta csv')) {
       return {
         paragraphs: [
-          'Dopo avere impostato i filtri desiderati utilizzare Esporta CSV. Il file contiene le righe attualmente comprese nel perimetro del Report, non l’intero archivio indistintamente.',
+          'Dopo avere impostato i filtri desiderati utilizzare Esporta CSV. Il file contiene le righe mostrate nel Report con i filtri correnti, non l’intero archivio indistintamente.',
           'Il separatore utilizzato è il punto e virgola, così il file può essere aperto nei comuni strumenti di foglio elettronico mantenendo separate le colonne.'
         ]
       }
@@ -874,10 +1390,10 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
         ]
       }
     }
-    if (lower.startsWith('aprire il viewer')) {
+    if (lower.startsWith('aprire il visualizzatore')) {
       return {
         paragraphs: [
-          'Selezionare l’allegato e aprirlo nel visualizzatore integrato. Utilizzare il viewer per verificare il contenuto prima di proseguire con altre operazioni.',
+          'Selezionare l’allegato e aprirlo nel visualizzatore integrato. Utilizzare i comandi disponibili per verificare il contenuto prima di proseguire con altre operazioni.',
           'Per le immagini sono disponibili i comandi di rotazione; nella lavorazione tecnica la rotazione viene resa definitiva con Salva, mentre nella lavorazione amministrativa seguire le regole indicate dalla sezione corrente.'
         ]
       }
@@ -901,6 +1417,33 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
   }
 
   // Approfondimenti delle procedure: ogni espansione aggiunge indicazioni operative reali.
+  if (chapter.startsWith('4. nuova rilevazione') && lower.startsWith('prendere in carico una pratica')) {
+    return {
+      paragraphs: [
+        'Con la rilevazione selezionata nell’Elenco pratiche, controllare l’area Azioni. Se la pratica è nello stato Da prendere in carico, utilizzare Prendi in carico e confermare.',
+        'Dopo la presa in carico la pratica risulta in carico al Capo Settore e sono disponibili le azioni successive previste per l’assegnazione.'
+      ]
+    }
+  }
+
+  if (chapter.startsWith('4. nuova rilevazione') && lower.startsWith('assegnare la pratica a un istruttore tecnico')) {
+    return {
+      paragraphs: [
+        'Con la pratica selezionata e presa in carico, utilizzare Gestisci istruttoria nell’area Azioni e scegliere l’azione di assegnazione all’Istruttore tecnico.',
+        'Selezionare l’Istruttore tecnico competente tra quelli disponibili per la pratica e confermare. L’assegnazione viene registrata nell’Iter e la pratica passa al destinatario.'
+      ]
+    }
+  }
+
+  if (chapter.startsWith('4. nuova rilevazione') && lower.startsWith('verificare che la pratica esca da in attesa mia e passi a in attesa di altri')) {
+    return {
+      paragraphs: [
+        'Dopo aver confermato l’assegnazione della pratica all’Istruttore tecnico, tornare all’Elenco pratiche. La pratica non deve più comparire nella scheda In attesa mia ma nella scheda In attesa di altri.',
+        'Selezionarla, se necessario, per controllare nel Dettaglio o nelle colonne dell’elenco il destinatario e lo stato aggiornato.'
+      ]
+    }
+  }
+
   if (lower.startsWith('verificare che la pratica esca da in attesa mia') || lower.startsWith('verificare il passaggio della pratica') || lower.startsWith('controllare che la pratica sia passata')) {
     return {
       paragraphs: [
@@ -1138,7 +1681,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     return {
       paragraphs: [
         'Aprire Notifica e controllare gli estremi dell’Atto nella sezione dedicata al protocollo. Numero e data devono essere già presenti e mostrati in sola lettura.',
-        'Se gli estremi non sono presenti, non procedere con l’esito di notifica: completare prima il rientro dell’Atto dal protocollo secondo il capitolo 14.'
+        'Se gli estremi non sono presenti, non procedere con l’esito di notifica: completare prima l’acquisizione dell’Atto protocollato secondo il Cap. 14.3.'
       ],
       figure: 'Figura – Notifica e dati di pagamento'
     }
@@ -1256,14 +1799,14 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
       return {
         paragraphs: [
           'Nell’elenco del Browser selezionare la voce desiderata e utilizzare Aggiungi. La voce viene inserita nel carrello e il relativo contatore viene aggiornato.',
-          'Se la stessa voce è già presente con la medesima chiave, il Browser non consente di aggiungerla una seconda volta.'
+          'Se la stessa voce è già presente nel carrello, il Browser non consente di aggiungerla una seconda volta.'
         ]
       }
     }
-    if (lower.startsWith('controllare il badge/contatore')) {
+    if (lower.startsWith('controllare il numero delle voci aggiunte')) {
       return {
         paragraphs: [
-          'Controllare il badge del carrello dopo ogni aggiunta: il numero indica quante voci sono state selezionate per il rientro nella Nota spese.',
+          'Controllare il badge del carrello dopo ogni aggiunta: il numero indica quante voci sono state selezionate e verranno inserite nella Nota spese dopo la conferma.',
           'Aprire il carrello se serve verificare o rimuovere una voce prima della conferma.'
         ]
       }
@@ -1370,7 +1913,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('scegliere tipologia = analizzata')) {
       return {
         paragraphs: [
-          'Nel nuovo record aprire Tipologia e scegliere ANALIZZATA. Con questa scelta il Prezzo unitario non viene inserito manualmente ma sarà calcolato dalle righe dell’analisi.',
+          'Nel nuovo prezzo aprire Tipologia e scegliere ANALIZZATA. Con questa scelta il Prezzo unitario non viene inserito manualmente ma sarà calcolato dalle righe dell’analisi.',
           'Compilare quindi i dati dell’intestazione e salvarla prima di aggiungere le componenti.'
         ]
       }
@@ -1545,7 +2088,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('cliccare i filtri interattivi')) {
       return {
         paragraphs: [
-          'Nella sezione Statistiche selezionare una voce nei riquadri Ufficio o Infrazione per applicarla come filtro. Gli altri indicatori della pagina vengono ricalcolati sul perimetro scelto.',
+          'Nella sezione Statistiche selezionare una voce nei riquadri Ufficio o Infrazione per applicarla come filtro. Gli altri indicatori della pagina vengono ricalcolati in base alla selezione.',
           'Utilizzare Azzera filtri per rimuovere tutte le selezioni interattive e tornare al quadro completo.'
         ],
         figure: 'Figura – Dashboard statistiche'
@@ -1579,7 +2122,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
       return {
         paragraphs: [
           'Premere Pulisci filtri nella fascia dei filtri del Report per rimuovere tutti i criteri impostati.',
-          'La tabella torna così all’insieme completo delle pratiche comprese nel perimetro del ruolo corrente.'
+          'La tabella torna così all’insieme completo delle pratiche visibili al ruolo corrente.'
         ]
       }
     }
@@ -1597,7 +2140,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('quando il sistema rileva un omonimo')) {
       return {
         paragraphs: [
-          'Se compare l’avviso di omonimia, confrontare i dati del contatto già presente con quelli che si stanno inserendo. Se è la stessa persona, riutilizzare il record esistente; se è un soggetto diverso, confermare la creazione distinta.',
+          'Se compare l’avviso di omonimia, confrontare i dati del contatto già presente con quelli che si stanno inserendo. Se è la stessa persona, riutilizzare il contatto esistente; se è un soggetto diverso, confermare la creazione distinta.',
           'Quando richiesto utilizzare la Data di nascita per distinguere correttamente i due nominativi.'
         ]
       }
@@ -1795,7 +2338,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     }
   }
 
-  if (lower.includes('prendi in carico')) {
+  if (lower.includes('prendi in carico') || lower.startsWith('prendere in carico')) {
     return {
       paragraphs: [
         'Selezionare la pratica nell’Elenco pratiche e guardare l’area Azioni sotto l’elenco. Quando la pratica è nello stato Da prendere in carico, utilizzare Prendi in carico e confermare.',
@@ -1826,8 +2369,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     const view = m ? m[1].replace(/\s+dalla Home.*$/i, '').replace(/\s+dal menu.*$/i, '') : 'la vista indicata'
     return {
       paragraphs: [
-        `Dalla Home selezionare la card ${view}; se ci si trova già in un’altra vista, utilizzare la corrispondente voce del navigatore laterale.`,
-        'Una volta aperta la vista, utilizzare le schede o i comandi indicati nel passaggio per raggiungere la funzione specifica.'
+        `Dalla Home selezionare la card ${view}; se ci si trova già in un’altra vista, utilizzare la corrispondente voce del navigatore laterale.`
       ]
     }
   }
@@ -2036,7 +2578,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
   if (lower.startsWith('restringere ') || lower.startsWith('azzerare ') || lower.startsWith('cliccare ')) {
     return {
       paragraphs: [
-        'Utilizzare i filtri o i controlli indicati nella vista corrente. Le selezioni aggiornano il perimetro visualizzato e possono essere combinate quando previsto.',
+        'Utilizzare i filtri o i controlli indicati nella vista corrente. Le selezioni aggiornano l’insieme visualizzato e possono essere combinate quando previsto.',
         'Per tornare alla situazione iniziale utilizzare il comando di azzeramento o pulizia disponibile nella stessa vista.'
       ]
     }
@@ -2062,7 +2604,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
   if (lower.startsWith('individuare ')) {
     return {
       paragraphs: [
-        'Utilizzare le informazioni visualizzate nella sezione per riconoscere l’elemento indicato nel passaggio. Quando sono presenti più cicli o record, confrontare ruolo, data e stato per individuare quello corretto.'
+        'Utilizzare le informazioni visualizzate nella sezione per riconoscere l’elemento indicato nel passaggio. Quando sono presenti più cicli o elementi, confrontare ruolo, data e stato per individuare quello corretto.'
       ]
     }
   }
@@ -2145,10 +2687,10 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     }
   }
 
-  if (lower.startsWith('aprire il viewer')) {
+  if (lower.startsWith('aprire il visualizzatore')) {
     return {
       paragraphs: [
-        'Selezionare il documento nell’elenco degli allegati e aprirlo nel viewer. Utilizzare i comandi disponibili nel visualizzatore per controllarne il contenuto.',
+        'Selezionare il documento nell’elenco degli allegati e aprirlo nel visualizzatore. Utilizzare i comandi disponibili per controllarne il contenuto.',
         'Per le immagini, i pulsanti di rotazione consentono di correggere l’orientamento prima di registrare la modifica secondo le regole della lavorazione corrente.'
       ]
     }
