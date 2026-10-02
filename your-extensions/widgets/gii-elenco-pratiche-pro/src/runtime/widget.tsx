@@ -1750,6 +1750,15 @@ function pickTextSearchExtra(
     getAreaCodeFromRecord(d, fallbackArea),
     getSettoreCodeFromRecord(d, fallbackSettore),
     pickField(d, "ufficio_zona"),
+    // Trasgressore: la ricerca generale deve consentire di individuare
+    // la pratica anche a partire dall'anagrafica del soggetto.
+    pickField(d, "nome"),
+    pickField(d, "cognome"),
+    pickField(d, "ragione_sociale"),
+    pickField(d, "codice_fiscale"),
+    pickField(d, "cf"),
+    pickField(d, "piva"),
+    pickField(d, "partita_iva"),
   ];
   return normalizeSearchText(parts.filter(Boolean).join(" "));
 }
@@ -6474,6 +6483,8 @@ export default function Widget(props: Props) {
   const listTitleIconSize = Math.max(16, num((cfg as any).listTitleIconSize, 22));
   const listTitleSubtitleColor = txt((cfg as any).listTitleSubtitleColor || '#475569');
   const listTitleSubtitleFontSize = Math.max(10, num((cfg as any).listTitleSubtitleFontSize, 12));
+  const listTitleSubtitleText = txt((cfg as any).listTitleSubtitleText || '').trim();
+  const listTitleContentGap = Math.max(0, num((cfg as any).listTitleContentGap, 0));
   const listLastUpdateColor = txt((cfg as any).listLastUpdateColor || 'rgba(0,0,0,0.58)');
   const listLastUpdateFontSize = Math.max(9, num((cfg as any).listLastUpdateFontSize, 12));
   const listLastUpdateFontWeight = Math.max(100, num((cfg as any).listLastUpdateFontWeight, 600));
@@ -6505,6 +6516,7 @@ export default function Widget(props: Props) {
           showSubtitle={(cfg as any).showTitleSubtitle !== false}
           showDivider={(cfg as any).showTitleDivider !== false}
           title={listTitleText}
+          subtitle={listTitleSubtitleText || undefined}
           fallbackIcon="elenco"
           titleColor={listTitleColor}
           titleFontSize={listTitleFontSize}
@@ -6515,7 +6527,7 @@ export default function Widget(props: Props) {
           dividerColor={listTitleDividerColor}
           dividerWidth={listTitleDividerWidth}
           dividerPaddingBottom={Math.max(4, listTitlePaddingBottom)}
-          style={{ minHeight: listTitleHeight, paddingLeft: listTitlePaddingLeft, flex: "0 0 auto" }}
+          style={{ minHeight: listTitleHeight, paddingLeft: listTitlePaddingLeft, marginBottom: listTitleContentGap, flex: "0 0 auto" }}
           rightContent={<div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flexWrap: "nowrap", justifyContent: "flex-end", whiteSpace: "nowrap" }}>
             <span style={{ fontSize: listLastUpdateFontSize, color: listLastUpdateColor, fontWeight: listLastUpdateFontWeight, whiteSpace: "nowrap", lineHeight: 1.1 }}>
               Ultimo aggiornamento: {lastListRefreshAt ? formatDateIt(lastListRefreshAt) : "—"}
@@ -6533,8 +6545,8 @@ export default function Widget(props: Props) {
               }}
               style={{
                 height: listTitleRowContentHeight, minHeight: 0, boxSizing: "border-box",
-                padding: "0 10px", borderRadius: 10, border: "1px solid #2f6fed",
-                background: "#fff", color: "#1d4ed8", fontSize: 12, lineHeight: 1, fontWeight: 700, cursor: "pointer",
+                padding: "0 10px", borderRadius: 10, border: "1px solid #d6a11d",
+                background: "#fff3cd", color: "#755200", fontSize: 12, lineHeight: 1, fontWeight: 700, cursor: "pointer",
                 display: "inline-flex", alignItems: "center", justifyContent: "center", whiteSpace: "nowrap", flex: "0 0 auto"
               }}
             >
@@ -6805,7 +6817,7 @@ export default function Widget(props: Props) {
                       onChange={(e: any) =>
                         setSearchFilter(e?.target?.value || "")
                       }
-                      placeholder="Cerca n. pratica…"
+                      placeholder="Cerca pratica, atto o trasgressore…"
                     />
                   </div>
                   <div>

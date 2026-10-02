@@ -11,6 +11,8 @@ export interface Config {
   clientSecret?: string
   /** Titolo principale del widget. */
   title?: string
+  /** Sottotitolo personalizzato. Vuoto = descrizione della card Home. */
+  subtitleText?: string
   titleColor?: string
   titleFontSize?: number
   titleIconSize?: number

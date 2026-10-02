@@ -9,6 +9,7 @@ import AnteprimaPanel, { clearGiiAnteprimaDocumentMemory } from '../../../_share
 import { NORMA3_REQ_POINT, parseNorma3Codes, computeReqPoint } from '../../../_shared/gii-anteprime/req-point'
 import GiiAttachmentViewer, { GII_ALLOWED_ATTACHMENT_UPLOAD_HINT, type GiiAttachmentViewerItem, filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 import { getGiiPracticeContextStamp, isGiiPracticeContextStampCurrent, isGiiPracticePayloadCurrent, isGiiPracticeSelectionContextCurrent, stampGiiPracticePayload, writeGiiPracticeSelectionContext, type GiiPracticeContextStamp } from '../../../_shared/gii-selection/practice-context'
+import { GiiPageTitle } from '../../../_shared/gii-ui/page-title'
 
 type SelState = {
   ds: any
@@ -7676,12 +7677,19 @@ ${e?.message || String(e)}`
   }, [mode, p.initialData, editOid])
 
   const toolbarTitleInfo = React.useMemo(() => {
+    const customTitle = String((cfg as any).titleText || '').trim()
     if (mode === 'edit') {
-      const titleParts = buildFascicoloDocumentaleTitleParts(p.initialData || {}, editOid)
-      return { baseTitle: titleParts.prefix, praticaCode: titleParts.code }
+      const rilevazione = buildPraticaCodeFromData(p.initialData || {}, editOid)
+      if (rilevazione) return { title: customTitle || `Istruttoria tecnica – Rilevazione n. ${rilevazione}`, subtitle: '', icon: 'modifica' }
+      return { title: customTitle || 'Istruttoria tecnica', subtitle: '', icon: 'modifica' }
     }
-    return { baseTitle: String(p.titleText || 'Nuova rilevazione'), praticaCode: '' }
-  }, [p.titleText, mode, editOid, p.initialData])
+    return { title: customTitle || 'Nuova pratica: Avvia una nuova istruttoria tecnica', subtitle: '', icon: 'nuova' }
+  }, [cfg, mode, editOid, p.initialData])
+
+  const toolbarSubtitleText = React.useMemo(() => {
+    const custom = String((cfg as any).subtitleText || '').trim()
+    return custom || toolbarTitleInfo.subtitle
+  }, [cfg, toolbarTitleInfo.subtitle])
 
   const numCfg = React.useCallback((key: string, fallback: number, min?: number, max?: number): number => {
     const n = Number((cfg as any)[key])
@@ -7744,7 +7752,20 @@ ${e?.message || String(e)}`
     violazioneSplitterColor: modernColor((cfg as any).violazioneSplitterColor, _defaultFormStyle.violazioneSplitterColor, ['#3d77c9']),
     violazioneDescrizioneRows: numCfg('violazioneDescrizioneRows', _defaultFormStyle.violazioneDescrizioneRows, 2, 12),
     violazioneCircostanzeRows: numCfg('violazioneCircostanzeRows', _defaultFormStyle.violazioneCircostanzeRows, 2, 12),
-    titleFontSize: numCfg('titleFontSize', 14, 9, 28),
+    showTitleSubtitle: (cfg as any).showTitleSubtitle !== false,
+    showTitleDivider: (cfg as any).showTitleDivider !== false,
+    titleColor: modernColor((cfg as any).titleColor, '#1F4E79', []),
+    titleFontSize: numCfg('titleFontSize', 18, 9, 36),
+    titleIconSize: numCfg('titleIconSize', 23, 16, 48),
+    subtitleColor: modernColor((cfg as any).subtitleColor, '#475569', []),
+    subtitleFontSize: numCfg('subtitleFontSize', 14, 9, 30),
+    titleDividerColor: modernColor((cfg as any).titleDividerColor, '#1F4E79', []),
+    titleDividerWidth: numCfg('titleDividerWidth', 2, 0, 8),
+    titleDividerPaddingBottom: numCfg('titleDividerPaddingBottom', 6, 0, 24),
+    titlePaddingTop: numCfg('titlePaddingTop', 0, 0, 60),
+    titlePaddingRight: numCfg('titlePaddingRight', 0, 0, 60),
+    titlePaddingBottom: numCfg('titlePaddingBottom', 0, 0, 60),
+    titlePaddingLeft: numCfg('titlePaddingLeft', 0, 0, 60),
     msgFontSize: numCfg('msgFontSize', 12, 9, 24)
   }), [cfg, numCfg])
 
@@ -9158,9 +9179,8 @@ ${e?.message || String(e)}`
     }
   }, [npTab, isReadOnly, readOnlyBannerMounted])
 
-  // Spazio autonomo sotto la riga titolo/pulsanti. Non dipende dal padding superiore
-  // della maschera, così la distanza dal separatore inferiore può essere regolata senza
-  // spostare anche il contenuto sul bordo superiore.
+  // Spazio autonomo sotto l'intestazione della vista. Non dipende dal padding superiore
+  // della maschera e separa titolo/sottotitolo dal contenuto della scheda.
   const toolbarBottomPad = Math.max(0, Number(formStyle.toolbarBottomGap || 0))
 
   return (
@@ -9186,7 +9206,6 @@ ${e?.message || String(e)}`
         flex: '0 0 auto',
         position: 'relative',
         padding: isReadOnly && readOnlyBannerMounted ? (readOnlyBannerOpen ? `48px 0 ${toolbarBottomPad}px` : `0 0 ${toolbarBottomPad}px`) : `0 0 ${toolbarBottomPad}px`,
-        borderBottom: '1px solid rgba(0,0,0,0.08)',
         transition: 'padding 280ms ease'
       }}>
         {isReadOnly && readOnlyBannerMounted && (
@@ -9236,13 +9255,21 @@ ${e?.message || String(e)}`
           justifyContent: 'space-between',
           flexWrap: 'wrap',
           gap: 8,
-          minHeight: isReadOnly && readOnlyBannerMounted ? 36 : undefined
+          minHeight: isReadOnly && readOnlyBannerMounted ? 36 : undefined,
+          padding: `${formStyle.titlePaddingTop}px ${formStyle.titlePaddingRight}px ${formStyle.titlePaddingBottom + (formStyle.showTitleDivider ? formStyle.titleDividerPaddingBottom : 0)}px ${formStyle.titlePaddingLeft}px`,
+          boxSizing: 'border-box'
         }}>
           <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, paddingLeft: isReadOnly && readOnlyBannerMounted ? 44 : 0, transition: 'padding-left 220ms ease', flex: '1 1 280px' }}>
-            <div style={{ fontWeight: 700, fontSize: formStyle.titleFontSize, lineHeight: 1.25 }}>
-              {toolbarTitleInfo.baseTitle}
-              {toolbarTitleInfo.praticaCode ? <> <span style={{ color: '#0b5fff' }}>{toolbarTitleInfo.praticaCode}</span></> : null}
-            </div>
+            <GiiPageTitle
+              title={toolbarTitleInfo.title}
+              icon={toolbarTitleInfo.icon}
+              showSubtitle={false}
+              showDivider={false}
+              titleFontSize={formStyle.titleFontSize}
+              titleFontWeight={800}
+              titleColor={formStyle.titleColor}
+              iconSize={formStyle.titleIconSize}
+            />
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flex: '0 0 auto', marginLeft: 'auto', flexWrap: 'nowrap' }}>
             {msg && msg.kind === 'ok' && <span style={{ fontSize: formStyle.msgFontSize, color: '#1a7f37' }}>{msg.text}</span>}
@@ -9351,6 +9378,28 @@ ${e?.message || String(e)}`
             )}
           </div>
         </div>
+        {formStyle.showTitleDivider && formStyle.titleDividerWidth > 0 && (
+          <div style={{
+            height: formStyle.titleDividerWidth,
+            background: formStyle.titleDividerColor,
+            marginLeft: formStyle.titlePaddingLeft,
+            marginRight: formStyle.titlePaddingRight,
+            borderRadius: 999
+          }} />
+        )}
+        {formStyle.showTitleSubtitle && toolbarSubtitleText && (
+          <div style={{
+            marginTop: 5,
+            paddingLeft: formStyle.titlePaddingLeft,
+            paddingRight: formStyle.titlePaddingRight,
+            color: formStyle.subtitleColor,
+            fontSize: formStyle.subtitleFontSize,
+            lineHeight: 1.4,
+            fontWeight: 600
+          }}>
+            {toolbarSubtitleText}
+          </div>
+        )}
       </div>
 
       {/* ── Splitter overlay Luoghi e dati tecnici ── */}
@@ -11611,7 +11660,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               editOid={editOid}
               editIdFieldName={editIdFieldName}
               editLayerUrl={!inCreateMode ? ensureLayerIndex(normalizeFeatureLayerUrl(effectiveIntent?.layerUrl || activeGate?.state?.layerUrl || readDynamicSelection().layerUrl || '')) : ''}
-              titleText={inCreateMode ? 'Nuova rilevazione' : 'Modifica rilevazione'}
+              titleText={inCreateMode ? 'Nuova pratica' : 'Modifica pratica'}
               saveText={'Salva'}
               readOnly={readOnlyEditMode}
               readOnlyMessage={readOnlyEditMessage}

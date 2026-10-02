@@ -5586,7 +5586,7 @@ return (
       showSubtitle={(ui as any).showTitleSubtitle !== false}
       showDivider={(ui as any).showTitleDivider !== false}
       title={String(ui.detailTitlePrefix ?? 'Dettaglio pratica selezionata')}
-      subtitle='Consulta i dati della pratica selezionata'
+      subtitle={String(ui.detailTitleSubtitleText ?? 'Consulta i dati della pratica selezionata')}
       icon='dettaglio'
       fallbackIcon='dettaglio'
       titleColor={ui.detailTitleColor}
@@ -5602,6 +5602,7 @@ return (
         paddingLeft: ui.detailTitlePaddingLeft,
         paddingRight: ui.detailTitlePaddingRight ?? 0,
         paddingBottom: Math.max(0, ui.detailTitlePaddingBottom),
+        marginBottom: Math.max(0, ui.detailTitleContentGap ?? 0),
         flex: '0 0 auto',
         boxSizing: 'border-box',
         background: (ui as any).detailTitleBg && (ui as any).detailTitleBg !== 'transparent'
@@ -5688,8 +5689,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     detailTitleFontWeight: Number.isFinite(Number(cfg.detailTitleFontWeight)) ? Number(cfg.detailTitleFontWeight) : defaultConfig.detailTitleFontWeight,
     detailTitleColor: String(cfg.detailTitleColor ?? defaultConfig.detailTitleColor),
     detailTitleIconSize: Math.max(12, Number.isFinite(Number((cfg as any).detailTitleIconSize)) ? Number((cfg as any).detailTitleIconSize) : Number((defaultConfig as any).detailTitleIconSize ?? 22)),
+    detailTitleSubtitleText: String((cfg as any).detailTitleSubtitleText ?? (defaultConfig as any).detailTitleSubtitleText ?? 'Consulta i dati della pratica selezionata'),
     detailTitleSubtitleFontSize: Math.max(8, Number.isFinite(Number((cfg as any).detailTitleSubtitleFontSize)) ? Number((cfg as any).detailTitleSubtitleFontSize) : Number((defaultConfig as any).detailTitleSubtitleFontSize ?? 12)),
     detailTitleSubtitleColor: String((cfg as any).detailTitleSubtitleColor ?? (defaultConfig as any).detailTitleSubtitleColor ?? '#475569'),
+    detailTitleContentGap: Math.max(0, Number.isFinite(Number((cfg as any).detailTitleContentGap)) ? Number((cfg as any).detailTitleContentGap) : Number((defaultConfig as any).detailTitleContentGap ?? 0)),
     detailTitleDividerColor: String((cfg as any).detailTitleDividerColor ?? (defaultConfig as any).detailTitleDividerColor ?? '#1F4E79'),
     detailTitleDividerWidth: Math.max(0, Number.isFinite(Number((cfg as any).detailTitleDividerWidth)) ? Number((cfg as any).detailTitleDividerWidth) : Number((defaultConfig as any).detailTitleDividerWidth ?? 2)),
     detailTitleBg: String((cfg as any).detailTitleBg ?? 'transparent')

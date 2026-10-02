@@ -35,6 +35,7 @@ export const GII_PAGE_ICONS: Record<string, string> = {
   ricerca:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
   dettaglio:   `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5,8.9V3.1c0-.9-.7-1.7-1.7-1.7H3.2c-.9,0-1.7.7-1.7,1.7v11.6c0,.9.7,1.7,1.7,1.7h5.8"/><path d="M10.8,12.2l3.7,3.7c.5.5,1.1.7,1.6.2.5-.6.3-1-.3-1.5l-3.7-3.7"/><circle cx="9" cy="8.9" r="3.7"/></svg>`,
   modifica:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>`,
+  editing:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`,
   verbale:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l5 5v15H6z"/><polyline points="15 2 15 7 20 7"/><line x1="9" y1="12" x2="17" y2="12"/><line x1="9" y1="16" x2="17" y2="16"/><path d="M4 6v16h12"/></svg>`,
   tabelle:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="9" y1="4" x2="9" y2="20"/><line x1="15" y1="4" x2="15" y2="20"/></svg>`,
   statistiche: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="20" x2="20" y2="20"/><rect x="6" y="11" width="3" height="7" rx="1"/><rect x="11" y="6" width="3" height="12" rx="1"/><rect x="16" y="3" width="3" height="15" rx="1"/></svg>`,
@@ -42,6 +43,42 @@ export const GII_PAGE_ICONS: Record<string, string> = {
 }
 
 export const GII_DEFAULT_PAGE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>`
+
+// Correzione ottica: icone con la stessa dimensione nominale possono avere un peso
+// visivo molto diverso. Questi fattori compensano il disegno interno senza cambiare
+// il valore configurato dall'utente.
+const GII_PAGE_ICON_OPTICAL_SCALE: Record<string, number> = {
+  home: 1.02,
+  elenco: 1.00,
+  regolamento: 1.00,
+  guida: 0.95,
+  mappa: 0.95,
+  nuova: 1.07,
+  dashboard: 0.95,
+  report: 0.98,
+  utenti: 1.18,
+  gruppo: 1.15,
+  prezzari: 1.12,
+  impostazioni: 0.95,
+  allegati: 1.00,
+  calendario: 1.02,
+  allarmi: 1.18,
+  archivio: 0.97,
+  ricerca: 1.18,
+  dettaglio: 0.95,
+  modifica: 1.18,
+  editing: 0.95,
+  verbale: 0.95,
+  tabelle: 0.95,
+  statistiche: 0.98,
+  documenti: 1.03
+}
+
+function normalizeInlineSvg(svg: string): string {
+  if (!svg) return svg
+  if (/\bwidth=/.test(svg) || /\bheight=/.test(svg)) return svg
+  return svg.replace('<svg ', '<svg width="100%" height="100%" style="display:block" ')
+}
 
 function toPlain<T = any>(value: any): T {
   if (value?.asMutable) return value.asMutable({ deep: true }) as T
@@ -155,7 +192,9 @@ export function GiiPageTitle(props: GiiPageTitleProps) {
   const title = String(props.title || meta.label || '')
   const subtitle = props.subtitle !== undefined ? String(props.subtitle || '') : String(meta.description || '')
   const iconKey = props.icon || meta.icon || props.fallbackIcon || 'nuova'
-  const icon = GII_PAGE_ICONS[iconKey] || GII_PAGE_ICONS[String(props.fallbackIcon || '')] || GII_DEFAULT_PAGE_ICON
+  const rawIcon = GII_PAGE_ICONS[iconKey] || GII_PAGE_ICONS[String(props.fallbackIcon || '')] || GII_DEFAULT_PAGE_ICON
+  const icon = normalizeInlineSvg(rawIcon)
+  const iconOpticalScale = Number(GII_PAGE_ICON_OPTICAL_SCALE[String(iconKey)] || 1)
   const titleColor = String(props.titleColor || '#1F4E79')
   const titleFontSize = Number(props.titleFontSize ?? 18)
   const titleFontWeight = Number(props.titleFontWeight ?? 800)
@@ -171,7 +210,9 @@ export function GiiPageTitle(props: GiiPageTitleProps) {
     <div style={{ ...props.style, minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, minWidth: 0, borderBottom: showDivider ? `${dividerWidth}px solid ${dividerColor}` : 'none', paddingBottom: showDivider ? dividerPaddingBottom : 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: iconGap, minWidth: 0, color: titleColor }}>
-          <span aria-hidden='true' style={{ width: iconSize, height: iconSize, flex: `0 0 ${iconSize}px`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: titleColor }} dangerouslySetInnerHTML={{ __html: icon }} />
+          <span aria-hidden='true' style={{ width: iconSize, height: iconSize, flex: `0 0 ${iconSize}px`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: titleColor, overflow: 'visible' }}>
+            <span style={{ width: '100%', height: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transform: `scale(${iconOpticalScale})`, transformOrigin: '50% 50%' }} dangerouslySetInnerHTML={{ __html: icon }} />
+          </span>
           <div style={{ fontSize: titleFontSize, lineHeight: 1.25, fontWeight: titleFontWeight, color: titleColor, minWidth: 0 }}>{title}</div>
         </div>
         {props.rightContent ? <div style={{ flex: '0 0 auto', minWidth: 0 }}>{props.rightContent}</div> : null}

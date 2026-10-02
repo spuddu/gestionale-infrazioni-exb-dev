@@ -9,6 +9,8 @@ export interface Config {
   internalTableUrl?: string
   generalDataUrl?: string
   title?: string
+  /** Sottotitolo personalizzato. Vuoto = descrizione della card Home. */
+  subtitleText?: string
   titleColor?: string
   titleFontSize?: number
   titleIconSize?: number

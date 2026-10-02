@@ -10,6 +10,8 @@ export interface Config {
   /** Vista editabile AGR/TEC filtrata su ATTREZZATURA. */
   serviceUrlAttrezzatureAgrTec?: string
   title?: string
+  /** Sottotitolo personalizzato. Vuoto = descrizione della card Home. */
+  subtitleText?: string
   titleColor?: string
   titleFontSize?: number
   titleIconSize?: number

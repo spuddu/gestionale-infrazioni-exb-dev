@@ -1528,6 +1528,7 @@ ${r.codice_riferimento} — ${r.descrizione}`,
           showSubtitle={(cfg as any).showTitleSubtitle !== false}
           showDivider={(cfg as any).showTitleDivider !== false}
           title={title}
+          subtitle={String((cfg as any).subtitleText || '').trim() || undefined}
           fallbackIcon='prezzari'
           titleColor={titleColor}
           titleFontSize={titleFontSize}

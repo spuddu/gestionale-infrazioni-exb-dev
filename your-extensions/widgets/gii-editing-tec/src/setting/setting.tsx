@@ -412,15 +412,45 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
           <Num k='widgetPaddingLeft' label='Sinistro' min={0} max={80}/>
         </div>
       </SectionBox>
-      <SectionBox title='Barra superiore e messaggi'>
+      <SectionBox title='Titolo vista'>
         <div style={P.grid2}>
-          <Num k='titleFontSize' label='Dimensione titolo barra' min={9} max={28}/>
+          <Toggle k='showTitleSubtitle' label='Mostra sottotitolo'/>
+          <Toggle k='showTitleDivider' label='Mostra separatore'/>
+        </div>
+        <Text k='titleText' label='Titolo personalizzato' placeholder='Vuoto = titolo automatico' hint='Se lasciato vuoto, il titolo resta Nuova pratica oppure Modifica pratica in base alla modalità.'/>
+        <Text k='subtitleText' label='Sottotitolo personalizzato' placeholder='Vuoto = sottotitolo automatico' hint='Se lasciato vuoto, in Nuova pratica viene mostrata la descrizione predefinita; in Modifica pratica il sottotitolo resta vuoto.'/>
+        <div style={P.grid2}>
+          <Color k='titleColor' label='Colore titolo e icona' fallback='#1F4E79'/>
+          <Num k='titleFontSize' label='Dimensione titolo' min={9} max={36}/>
+        </div>
+        <div style={P.grid2}>
+          <Num k='titleIconSize' label='Dimensione icona' min={16} max={48}/>
+          <Num k='subtitleFontSize' label='Dimensione sottotitolo' min={9} max={30}/>
+        </div>
+        <div style={P.grid2}>
+          <Color k='subtitleColor' label='Colore sottotitolo' fallback='#475569'/>
+          <Color k='titleDividerColor' label='Colore separatore' fallback='#1F4E79'/>
+        </div>
+        <div style={P.grid2}>
+          <Num k='titleDividerWidth' label='Spessore separatore' min={0} max={8}/>
+          <Num k='titleDividerPaddingBottom' label='Distanza titolo-separatore' min={0} max={24}/>
+        </div>
+        <div style={{...P.hint, marginTop: 8, marginBottom: 6}}>Padding del titolo</div>
+        <div style={P.grid2}>
+          <Num k='titlePaddingTop' label='Superiore' min={0} max={60}/>
+          <Num k='titlePaddingRight' label='Destro' min={0} max={60}/>
+        </div>
+        <div style={P.grid2}>
+          <Num k='titlePaddingBottom' label='Inferiore' min={0} max={60}/>
+          <Num k='titlePaddingLeft' label='Sinistro' min={0} max={60}/>
+        </div>
+      </SectionBox>
+      <SectionBox title='Barra comandi e messaggi'>
+        <div style={P.grid2}>
           <Num k='msgFontSize' label='Dimensione messaggi' min={9} max={24}/>
+          <Num k='toolbarBottomGap' label='Spazio sotto intestazione' min={0} max={80}/>
         </div>
-        <div style={P.grid2}>
-          <Num k='toolbarBottomGap' label='Spazio sotto pulsanti' min={0} max={80}/>
-        </div>
-        <div style={P.hint}>“Spazio sotto pulsanti” regola solo la distanza tra Salva/Annulla/Chiudi e il separatore inferiore, senza modificare il padding superiore della maschera.</div>
+        <div style={P.hint}>“Spazio sotto intestazione” regola la distanza tra titolo/sottotitolo e il contenuto della scheda.</div>
       </SectionBox>
     </>}
 

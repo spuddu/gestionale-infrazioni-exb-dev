@@ -157,10 +157,12 @@ export interface Config {
   showTitleSubtitle: boolean
   showTitleDivider: boolean
   detailTitlePrefix: string
+  detailTitleSubtitleText: string
   detailTitleHeight: number
   detailTitlePaddingBottom: number
   detailTitlePaddingLeft: number
   detailTitlePaddingRight: number
+  detailTitleContentGap: number
   detailTitleFontSize: number
   detailTitleFontWeight: number
   detailTitleColor: string
@@ -257,10 +259,12 @@ export const defaultConfig: Config = {
   showTitleSubtitle: true,
   showTitleDivider: true,
   detailTitlePrefix: 'Dettaglio pratica selezionata',
+  detailTitleSubtitleText: 'Consulta i dati della pratica selezionata',
   detailTitleHeight: 40,
   detailTitlePaddingBottom: 10,
   detailTitlePaddingLeft: 0,
   detailTitlePaddingRight: 0,
+  detailTitleContentGap: 0,
   detailTitleFontSize: 14,
   detailTitleFontWeight: 600,
   detailTitleColor: 'rgba(0,0,0,0.85)',

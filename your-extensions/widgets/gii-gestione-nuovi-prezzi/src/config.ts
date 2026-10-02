@@ -6,6 +6,8 @@ export interface Config {
   serviceUrl?: string
   detailTableUrl?: string
   title?: string
+  /** Sottotitolo personalizzato. Vuoto = descrizione della card Home. */
+  subtitleText?: string
   titleColor?: string
   titleFontSize?: number
   titleIconSize?: number

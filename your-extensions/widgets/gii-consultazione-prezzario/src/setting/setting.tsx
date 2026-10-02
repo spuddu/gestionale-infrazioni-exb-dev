@@ -38,6 +38,9 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <label style={lbl}>Titolo</label>
         <input style={inp} value={cfg.title || ''} onChange={(e) => set('title', e.target.value)} />
 
+        <label style={lbl}>Sottotitolo</label>
+        <input style={inp} value={String((cfg as any).subtitleText || '')} onChange={(e) => set('subtitleText', e.target.value)} placeholder='Vuoto = usa la descrizione della card Home' />
+
         <label style={lbl}>Colore titolo principale</label>
         <div style={colorRow}>
           <input style={colorInp} type='color' value={titleColor} onChange={(e) => set('titleColor', e.target.value)} aria-label='Colore titolo principale' />
@@ -57,7 +60,24 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
           <input style={inp} value={String(cfg.subtitleColor || '#475569')} onChange={(e) => set('subtitleColor', e.target.value)} />
         </div>
         <label style={lbl}>Dimensione descrizione sotto il separatore (px)</label>
-        <input style={inp} type='number' min={10} max={30} step={1} value={Number(cfg.subtitleFontSize || Math.max(12, titleFontSize - 2))} onChange={(e) => set('subtitleFontSize', Number(e.target.value || 13))} />
+        <input
+          style={inp}
+          type='number'
+          min={0}
+          max={60}
+          step={1}
+          value={Number.isFinite(Number(cfg.subtitleFontSize)) ? Number(cfg.subtitleFontSize) : Math.max(12, titleFontSize - 2)}
+          onChange={(e) => {
+            const raw = e.target.value
+            const fallback = Math.max(12, titleFontSize - 2)
+            const parsed = raw === '' ? fallback : Number(raw)
+            set('subtitleFontSize', Number.isFinite(parsed) ? Math.max(0, Math.min(60, parsed)) : fallback)
+          }}
+        />
+
+        <label style={lbl}>Spazio sotto intestazione (px)</label>
+        <input style={inp} type='number' min={0} max={80} step={1} value={Number(cfg.titleContentGap ?? 10)} onChange={(e) => set('titleContentGap', Math.max(0, Number(e.target.value || 0)))} />
+        <div style={hint}>Regola solo la distanza tra titolo/sottotitolo e il contenuto sottostante.</div>
 
         <label style={lbl}>Dimensione icona titolo (px)</label>
         <input style={inp} type='number' min={12} max={48} step={1} value={Number(cfg.titleIconSize || Math.max(22, titleFontSize + 6))} onChange={(e) => set('titleIconSize', Number(e.target.value || 22))} />

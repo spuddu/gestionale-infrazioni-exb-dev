@@ -766,6 +766,11 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const title = String(cfg.title || 'GII - Consultazione Prezzario')
   const titleColor = String(cfg.titleColor || '#1F4E79')
   const titleFontSize = Number(cfg.titleFontSize || 15)
+  const subtitleFontSizeDefault = Math.max(12, titleFontSize - 2)
+  const subtitleFontSizeRaw = Number(cfg.subtitleFontSize)
+  const subtitleFontSize = Number.isFinite(subtitleFontSizeRaw)
+    ? Math.max(0, Math.min(60, subtitleFontSizeRaw))
+    : subtitleFontSizeDefault
   const sectionTitleColor = String(cfg.sectionTitleColor || '#1F4E79')
   const sectionTitleFontSize = Number(cfg.sectionTitleFontSize || 12.5)
   const toolbarLabelColor = String(cfg.toolbarLabelColor || '#1F4E79')
@@ -1282,21 +1287,24 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     <Fragment>
       <style>{styles}</style>
       <div className='gcp' style={layoutVars}>
-        <GiiPageTitle
-          showSubtitle={(cfg as any).showTitleSubtitle !== false}
-          showDivider={(cfg as any).showTitleDivider !== false}
-          title={title}
-          fallbackIcon='prezzari'
-          titleColor={titleColor}
-          titleFontSize={titleFontSize}
-          titleFontWeight={800}
-          subtitleColor={String(cfg.subtitleColor || '#475569')}
-          subtitleFontSize={Number(cfg.subtitleFontSize || Math.max(12, titleFontSize - 2))}
-          iconSize={Number(cfg.titleIconSize || Math.max(22, titleFontSize + 6))}
-          dividerColor={String(cfg.titleDividerColor || titleColor)}
-          dividerWidth={Math.max(0, Number(cfg.titleDividerWidth ?? 2))}
-          style={{ marginBottom: 10 }}
-        />
+        <div className='gcp-page-title'>
+          <GiiPageTitle
+            showSubtitle={(cfg as any).showTitleSubtitle !== false}
+            showDivider={(cfg as any).showTitleDivider !== false}
+            title={title}
+            subtitle={String((cfg as any).subtitleText || '').trim() || undefined}
+            fallbackIcon='prezzari'
+            titleColor={titleColor}
+            titleFontSize={titleFontSize}
+            titleFontWeight={800}
+            subtitleColor={String(cfg.subtitleColor || '#475569')}
+            subtitleFontSize={subtitleFontSize}
+            iconSize={Number(cfg.titleIconSize || Math.max(22, titleFontSize + 6))}
+            dividerColor={String(cfg.titleDividerColor || titleColor)}
+            dividerWidth={Math.max(0, Number(cfg.titleDividerWidth ?? 2))}
+            style={{ marginBottom: Math.max(0, Number((cfg as any).titleContentGap ?? 10)) }}
+          />
+        </div>
         {!sources.length ? <div className='gcp-msg gcp-msg-err'>Configura gli URL delle tabelle nel setting del widget.</div> : null}
         {msg && <div className={`gcp-msg ${msg.ok ? 'gcp-msg-ok' : 'gcp-msg-err'}`}>{msg.text}</div>}
 

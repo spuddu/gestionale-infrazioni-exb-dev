@@ -21,9 +21,26 @@ export interface Config {
   panelPadding: number
   dividerColor: string
 
+  // Intestazione vista
+  showTitleSubtitle?: boolean
+  showTitleDivider?: boolean
+  /** Titolo personalizzato. Vuoto = titolo automatico della pratica. */
+  titleText?: string
+  titleColor?: string
   titleFontSize: number
   titleFontWeight: number
+  titleIconSize?: number
+  /** Colore del sottotitolo mostrato sotto il separatore. */
+  subtitleColor?: string
   subtitleFontSize: number
+  titleDividerColor?: string
+  titleDividerWidth?: number
+  titleDividerPaddingBottom?: number
+  titlePaddingTop?: number
+  titlePaddingRight?: number
+  titlePaddingBottom?: number
+  titlePaddingLeft?: number
+  headerBottomGap?: number
   labelFontSize: number
   valueFontSize: number
   msgFontSize: number
@@ -258,9 +275,23 @@ export const defaultConfig: Config = {
   panelPadding: 14,
   dividerColor: '#e5e7eb',
 
+  showTitleSubtitle: true,
+  showTitleDivider: true,
+  titleText: '',
+  titleColor: '#1F4E79',
   titleFontSize: 18,
   titleFontWeight: 700,
-  subtitleFontSize: 13,
+  titleIconSize: 23,
+  subtitleColor: '#475569',
+  subtitleFontSize: 14,
+  titleDividerColor: '#1F4E79',
+  titleDividerWidth: 2,
+  titleDividerPaddingBottom: 6,
+  titlePaddingTop: 0,
+  titlePaddingRight: 0,
+  titlePaddingBottom: 0,
+  titlePaddingLeft: 0,
+  headerBottomGap: 10,
   labelFontSize: 15,
   valueFontSize: 15,
   msgFontSize: 14,

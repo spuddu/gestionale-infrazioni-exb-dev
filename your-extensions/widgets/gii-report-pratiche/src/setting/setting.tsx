@@ -72,7 +72,7 @@ export default function Setting (props: AllWidgetSettingProps<IMConfig>) {
       <Inp value={cfg.subtitle} onChange={v => update('subtitle', v)} />
 
       <div style={P.sec}>Titolo pagina comune</div>
-      <div style={P.hint}>Titolo, icona e descrizione sono letti dalla card della Home associata alla pagina.</div>
+      <div style={P.hint}>Lascia vuoto il sottotitolo per usare la descrizione della card Home associata alla pagina.</div>
       <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={cfg.showTitleSubtitle !== false} onChange={e => update('showTitleSubtitle', e.target.checked)} /> Mostra sottotitolo / descrizione</label>
       <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={cfg.showTitleDivider !== false} onChange={e => update('showTitleDivider', e.target.checked)} /> Mostra separatore sotto il titolo</label>
       <div style={P.row2}>

@@ -356,13 +356,6 @@ export default function Widget(props: Props) {
   const visibleItems = [...effectiveItems]
     .sort((a, b) => a.order - b.order)
     .filter(isVisible)
-    // La pagina corrente non deve proporre un collegamento a se stessa.
-    // Es.: in Elenco pratiche la voce "Elenco pratiche" scompare dal nav.
-    .filter(item => {
-      if (!currentPageId) return true
-      const pid = resolvePageIdFromAppConfig(appConfig, item.hashPage)
-      return !pid || pid !== currentPageId
-    })
   const isHorizontal = cfg.direction === 'horizontal'
   const initialPadding = Number.isFinite(Number(cfg.initialPadding)) ? Number(cfg.initialPadding) : 8
 

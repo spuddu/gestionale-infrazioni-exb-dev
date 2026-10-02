@@ -19,6 +19,7 @@ import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from '../../../_shared/gii-
 import { isPracticeAssignedToCurrentIa } from '../../../_shared/gii-access/ia-assignment'
 import { getGiiPracticeContextStamp, isGiiPracticeContextStampCurrent, isGiiPracticePayloadCurrent, isGiiPracticeSelectionContextCurrent, stampGiiPracticePayload } from '../../../_shared/gii-selection/practice-context'
 import { ADMINISTRATIVE_RIMANDO_TARGET_OPTIONS, buildAdministrativeRimandoNote } from '../../../_shared/gii-workflow/administrative-rimando'
+import { GiiPageTitle } from '../../../_shared/gii-ui/page-title'
 import './pagopa-test-generator'
 
 const LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
@@ -5528,8 +5529,8 @@ function buildPracticeTitleParts (data: any, oid: number | null): { prefix: stri
   const d = data || {}
   const reportCode = getReportCode(d, oid)
   const prefix = reportCode
-    ? 'Fascicolo documentale della pratica relativa al Rapporto tecnico n. '
-    : 'Fascicolo documentale della pratica'
+    ? 'Istruttoria amministrativa – Rapporto tecnico n. '
+    : 'Istruttoria amministrativa'
   return { prefix, reportCode, full: reportCode ? `${prefix}${reportCode}` : prefix }
 }
 
@@ -17885,12 +17886,28 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       formFieldFontSize: adminFieldFontSize(merged),
       formInnerHeaderFontSize: adminInnerHeaderFontSize(merged),
       formCardHeaderFontSize: Math.max(14, Number(merged.formCardHeaderFontSize ?? 14) || 14),
-      titleFontSize: Math.max(18, Number(merged.titleFontSize ?? 18) || 18),
-      subtitleFontSize: Math.max(15, Number(merged.subtitleFontSize ?? 15) || 15),
+      titleFontSize: Math.max(9, Math.min(36, Number(merged.titleFontSize ?? 18) || 18)),
+      titleIconSize: Math.max(12, Math.min(48, Number(merged.titleIconSize ?? 23) || 23)),
+      subtitleFontSize: Math.max(9, Math.min(30, Number(merged.subtitleFontSize ?? 14) || 14)),
+      titlePaddingTop: Math.max(0, Math.min(60, Number(merged.titlePaddingTop ?? 0) || 0)),
+      titlePaddingRight: Math.max(0, Math.min(60, Number(merged.titlePaddingRight ?? 0) || 0)),
+      titlePaddingBottom: Math.max(0, Math.min(60, Number(merged.titlePaddingBottom ?? 0) || 0)),
+      titlePaddingLeft: Math.max(0, Math.min(60, Number(merged.titlePaddingLeft ?? 0) || 0)),
+      titleDividerWidth: Math.max(0, Math.min(8, Number(merged.titleDividerWidth ?? 2) || 0)),
+      titleDividerPaddingBottom: Math.max(0, Math.min(24, Number(merged.titleDividerPaddingBottom ?? 6) || 0)),
+      headerBottomGap: Math.max(0, Math.min(80, Number(merged.headerBottomGap ?? 10) || 0)),
       msgFontSize: Math.max(15, Number(merged.msgFontSize ?? 15) || 15),
       valueFontSize: adminFieldFontSize(merged)
     }
   }, [cfg])
+
+  const headerCustomTitle = String((cfg as any).titleText || '').trim()
+  const headerSubtitleText = String((cfg as any).subtitle ?? '').trim()
+  const showHeaderSubtitle = (cfg as any).showTitleSubtitle !== false
+  const showHeaderDivider = (cfg as any).showTitleDivider !== false && Number(adminStyle.titleDividerWidth || 0) > 0
+  const headerTitleColor = String((cfg as any).titleColor || '#1F4E79')
+  const headerSubtitleColor = String((cfg as any).subtitleColor || '#475569')
+  const headerDividerColor = String((cfg as any).titleDividerColor || headerTitleColor)
 
   const workflowHasSeparateActionPanel = hasSelection && (activeAmmSection === 'verifica_istruttoria' || activeAmmSection === 'notifica')
   const actionBarTopGap = Math.max(0, Math.min(80, Number(adminStyle.actionBarTopGap ?? 8) || 0))
@@ -18090,7 +18107,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   // Pareggia lo spazio sotto la riga titolo/pulsanti (padding-bottom toolbar + suo border-bottom 1px)
   // con quello sopra (border + padding del contenitore esterno), così il blocco non risulta
   // visivamente più vicino al bordo superiore della card che a quello inferiore.
-  const toolbarBottomPad = Math.max(0, Number(adminStyle.maskBorderWidth ?? 1) + Number(adminStyle.maskInnerPadding ?? 12) - 1)
 
   if (iaAccessRequired && !iaAccessAllowed) {
     const accessMessage = iaAccess.status === 'denied'
@@ -18205,8 +18221,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         <div style={{
           flex: '0 0 auto',
           position: 'relative',
-          padding: hasSelection && readOnlyBannerMessage && readOnlyBannerMounted ? (readOnlyBannerOpen ? `48px 0 ${toolbarBottomPad}px` : `0 0 ${toolbarBottomPad}px`) : `0 0 ${toolbarBottomPad}px`,
-          borderBottom: `1px solid ${cfg.dividerColor || '#cbd8e6'}`,
+          paddingTop: hasSelection && readOnlyBannerMessage && readOnlyBannerMounted && readOnlyBannerOpen ? 48 : 0,
+          paddingBottom: adminStyle.headerBottomGap,
           transition: 'padding 280ms ease'
         }}>
           {hasSelection && readOnlyBannerMessage && readOnlyBannerMounted && (
@@ -18257,12 +18273,24 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             justifyContent: 'space-between',
             flexWrap: 'wrap',
             gap: 8,
-            minHeight: hasSelection && readOnlyBannerMessage && readOnlyBannerMounted ? 36 : undefined
+            minHeight: hasSelection && readOnlyBannerMessage && readOnlyBannerMounted ? 36 : undefined,
+            paddingTop: adminStyle.titlePaddingTop,
+            paddingRight: adminStyle.titlePaddingRight,
+            paddingBottom: adminStyle.titlePaddingBottom + (showHeaderDivider ? adminStyle.titleDividerPaddingBottom : 0),
+            paddingLeft: adminStyle.titlePaddingLeft,
+            boxSizing: 'border-box'
           }}>
             <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, paddingLeft: hasSelection && readOnlyBannerMessage && readOnlyBannerMounted ? 44 : 0, transition: 'padding-left 220ms ease' }}>
-              <div style={{ fontSize: Number(adminStyle.titleFontSize || 18), fontWeight: Number(cfg.titleFontWeight || 700) as any, color: '#111827', lineHeight: 1.25 }}>
-                {hasSelection ? (<>{headerTitleParts.prefix}{headerTitleParts.reportCode ? <span style={{ color: '#2563eb', fontWeight: Number(cfg.titleFontWeight || 700) as any }}>{headerTitleParts.reportCode}</span> : null}</>) : 'Istruttoria amministrativa'}
-              </div>
+              <GiiPageTitle
+                title={headerCustomTitle || (hasSelection ? title : String((cfg as any).title || 'Istruttoria amministrativa'))}
+                icon='modifica'
+                showSubtitle={false}
+                showDivider={false}
+                titleFontSize={Number(adminStyle.titleFontSize || 18)}
+                titleFontWeight={Number(cfg.titleFontWeight || 700)}
+                titleColor={headerTitleColor}
+                iconSize={Number(adminStyle.titleIconSize || 23)}
+              />
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               {activeAmmSection === 'allegati' && hasSelection && oid != null && Number.isFinite(Number(oid)) && (
@@ -18335,6 +18363,28 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               </button>
             </div>
           </div>
+          {showHeaderDivider && (
+            <div style={{
+              height: adminStyle.titleDividerWidth,
+              background: headerDividerColor,
+              marginLeft: adminStyle.titlePaddingLeft,
+              marginRight: adminStyle.titlePaddingRight,
+              borderRadius: 999
+            }} />
+          )}
+          {showHeaderSubtitle && headerSubtitleText && (
+            <div style={{
+              marginTop: 5,
+              paddingLeft: adminStyle.titlePaddingLeft,
+              paddingRight: adminStyle.titlePaddingRight,
+              color: headerSubtitleColor,
+              fontSize: adminStyle.subtitleFontSize,
+              lineHeight: 1.4,
+              fontWeight: 600
+            }}>
+              {headerSubtitleText}
+            </div>
+          )}
         </div>
 
         <div style={activeContentStyle}>

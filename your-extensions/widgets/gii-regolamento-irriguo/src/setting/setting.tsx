@@ -73,6 +73,9 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <label style={lbl}>Titolo</label>
         <input style={inp} value={title} onChange={(e) => set('title', e.target.value)} />
 
+        <label style={lbl}>Sottotitolo</label>
+        <input style={inp} value={String((cfg as any).subtitleText || '')} onChange={(e) => set('subtitleText', e.target.value)} placeholder='Vuoto = usa la descrizione della card Home' />
+
         <label style={lbl}>Colore titolo</label>
         <div style={colorRow}>
           <input style={colorInp} type='color' value={titleColor} onChange={(e) => set('titleColor', e.target.value)} aria-label='Colore titolo' />

@@ -710,6 +710,8 @@ export default function Setting(props: Props) {
         <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={(cfgJs as any).showTitleDivider !== false} onChange={e=>patch({showTitleDivider:e.target.checked})}/> Mostra separatore sotto il titolo</label>
         <label style={P.lbl}>Testo prefisso</label>
         <Inp value={String(cfgJs.detailTitlePrefix || '')} onChange={v=>patch({detailTitlePrefix:v})} placeholder='Dettaglio pratica selezionata'/>
+        <label style={P.lbl}>Sottotitolo</label>
+        <Inp value={String(cfgJs.detailTitleSubtitleText || '')} onChange={v=>patch({detailTitleSubtitleText:v})} placeholder='Consulta i dati della pratica selezionata'/>
         <div style={P.titleRow3}>
           <div style={P.compactCell}><label style={P.lbl}>Altezza</label><NumInp compact value={parseNum(cfgJs.detailTitleHeight, 40)} onChange={n=>patch({detailTitleHeight:n})} min={0} unit='px'/></div>
           <div style={P.compactCell}><label style={P.lbl}>Font titolo</label><NumInp compact value={parseNum(cfgJs.detailTitleFontSize, 14)} onChange={n=>patch({detailTitleFontSize:n})} min={10} unit='px'/></div>
@@ -724,6 +726,7 @@ export default function Setting(props: Props) {
           <div style={P.compactCell}><label style={P.lbl}>Pad. bottom</label><NumInp compact value={parseNum(cfgJs.detailTitlePaddingBottom, 10)} onChange={n=>patch({detailTitlePaddingBottom:n})} min={0} unit='px'/></div>
           <div style={P.compactCell}><label style={P.lbl}>Pad. left</label><NumInp compact value={parseNum(cfgJs.detailTitlePaddingLeft, 0)} onChange={n=>patch({detailTitlePaddingLeft:n})} min={0} unit='px'/></div>
           <div style={P.compactCell}><label style={P.lbl}>Pad. right</label><NumInp compact value={parseNum(cfgJs.detailTitlePaddingRight, 0)} onChange={n=>patch({detailTitlePaddingRight:n})} min={0} unit='px'/></div>
+          <div style={P.compactCell}><label style={P.lbl}>Spazio sotto intestazione</label><NumInp compact value={parseNum(cfgJs.detailTitleContentGap, 0)} onChange={n=>patch({detailTitleContentGap:n})} min={0} max={80} unit='px'/></div>
         </div>
         <label style={P.lbl}>Colore titolo e icona</label>
         <ColInp value={String(cfgJs.detailTitleColor || 'rgba(0,0,0,0.85)')} onChange={v=>patch({detailTitleColor:v})}/>

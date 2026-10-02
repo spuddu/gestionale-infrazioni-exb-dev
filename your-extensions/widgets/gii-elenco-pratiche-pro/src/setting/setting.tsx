@@ -661,6 +661,8 @@ export default function Setting(props: Props) {
       {isOpen('titolo') && <div>
         <label style={P.lbl}>Testo</label>
         <Inp value={String(cfg.listTitleText||'')} onChange={v=>update('listTitleText',v)} placeholder='Elenco pratiche'/>
+        <label style={P.lbl}>Sottotitolo</label>
+        <Inp value={String((cfg as any).listTitleSubtitleText||'')} onChange={v=>update('listTitleSubtitleText',v)} placeholder='Vuoto = usa la descrizione della card Home'/>
         <div style={P.row3}>
           <div><label style={P.lbl}>Altezza</label><NumInp value={cfg.listTitleHeight} onChange={n=>update('listTitleHeight',n)} min={0} unit='px'/></div>
           <div><label style={P.lbl}>Font sz</label><NumInp value={cfg.listTitleFontSize} onChange={n=>update('listTitleFontSize',n)} min={10} unit='px'/></div>
@@ -669,6 +671,7 @@ export default function Setting(props: Props) {
         <div style={P.row2}>
           <div><label style={P.lbl}>Pad. bottom</label><NumInp value={cfg.listTitlePaddingBottom} onChange={n=>update('listTitlePaddingBottom',n)} min={0} unit='px'/></div>
           <div><label style={P.lbl}>Pad. left</label><NumInp value={cfg.listTitlePaddingLeft} onChange={n=>update('listTitlePaddingLeft',n)} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Spazio sotto intestazione</label><NumInp value={parseNum((cfg as any).listTitleContentGap,0)} onChange={n=>update('listTitleContentGap',n)} min={0} max={80} unit='px'/></div>
         </div>
         <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={(cfg as any).showTitleSubtitle !== false} onChange={e=>update('showTitleSubtitle',e.target.checked)}/> Mostra sottotitolo / descrizione</label>
         <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={(cfg as any).showTitleDivider !== false} onChange={e=>update('showTitleDivider',e.target.checked)}/> Mostra separatore sotto il titolo</label>

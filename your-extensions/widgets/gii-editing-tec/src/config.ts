@@ -115,11 +115,28 @@ export interface Config {
   widgetPaddingBottom?: number
   widgetPaddingLeft?: number
   dividerColor: string
-  // Spazio verticale tra la riga titolo/pulsanti e il separatore inferiore della toolbar.
+  // Spazio verticale tra l'intestazione della vista e il contenuto della scheda.
   toolbarBottomGap: number
 
-  // --- Tipografia
+  // --- Titolo vista e tipografia
+  showTitleSubtitle?: boolean
+  showTitleDivider?: boolean
+  /** Titolo personalizzato. Vuoto = titolo automatico della modalità corrente. */
+  titleText?: string
+  titleColor?: string
   titleFontSize: number
+  titleIconSize?: number
+  /** Sottotitolo personalizzato. Vuoto = sottotitolo automatico della modalità corrente. */
+  subtitleText?: string
+  subtitleColor?: string
+  subtitleFontSize?: number
+  titleDividerColor?: string
+  titleDividerWidth?: number
+  titleDividerPaddingBottom?: number
+  titlePaddingTop?: number
+  titlePaddingRight?: number
+  titlePaddingBottom?: number
+  titlePaddingLeft?: number
   statusFontSize: number
   msgFontSize: number
 
@@ -359,7 +376,22 @@ export const defaultConfig: Config = {
   dividerColor: '#cbd8e6',
   toolbarBottomGap: 15,
 
-  titleFontSize: 14,
+  showTitleSubtitle: true,
+  showTitleDivider: true,
+  titleText: '',
+  titleColor: '#1F4E79',
+  titleFontSize: 18,
+  titleIconSize: 23,
+  subtitleText: '',
+  subtitleColor: '#475569',
+  subtitleFontSize: 14,
+  titleDividerColor: '#1F4E79',
+  titleDividerWidth: 2,
+  titleDividerPaddingBottom: 6,
+  titlePaddingTop: 0,
+  titlePaddingRight: 0,
+  titlePaddingBottom: 0,
+  titlePaddingLeft: 0,
   statusFontSize: 13,
   msgFontSize: 15,
 

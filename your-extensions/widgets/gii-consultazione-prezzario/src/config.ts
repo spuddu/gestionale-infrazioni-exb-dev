@@ -12,6 +12,8 @@ export interface Config {
   datiGeneraliUrl?: string
   attrezzatureParametriUrl?: string
   title?: string
+  /** Sottotitolo personalizzato. Vuoto = descrizione della card Home. */
+  subtitleText?: string
   titleColor?: string
   titleFontSize?: number
   titleIconSize?: number
@@ -19,6 +21,8 @@ export interface Config {
   titleDividerWidth?: number
   subtitleColor?: string
   subtitleFontSize?: number
+  /** Distanza tra intestazione (titolo/sottotitolo) e contenuto sottostante. */
+  titleContentGap?: number
   sectionTitleColor?: string
   sectionTitleFontSize?: number
   toolbarLabelColor?: string

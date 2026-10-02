@@ -182,9 +182,55 @@ export default function Setting (props: Props) {
             <div><label style={P.lbl}>Sinistro</label><NumInp value={parseNum(cfgJs.tabPaddingLeft, defaultConfig.tabPaddingLeft)} onChange={n => patch({ tabPaddingLeft: n })} min={0} max={80} unit='px' /></div>
           </div>
         </SectionBox>
-        <SectionBox title='Titolo della pratica' hint='Dimensione del titolo principale visualizzato nella barra superiore del widget.'>
+        <SectionBox title='Titolo e sottotitolo' hint='Regola l’intestazione della vista amministrativa. Se il titolo personalizzato resta vuoto, viene mantenuto il titolo automatico della pratica.'>
           <div style={P.row2}>
-            <div><label style={P.lbl}>Dimensione titolo</label><NumInp value={parseNum(cfgJs.titleFontSize, defaultConfig.titleFontSize)} onChange={n => patch({ titleFontSize: n })} min={18} max={28} unit='px' /></div>
+            <div>
+              <label style={P.lbl}>Mostra sottotitolo</label>
+              <select value={cfgJs.showTitleSubtitle === false ? 'no' : 'si'} onChange={e => patch({ showTitleSubtitle: e.target.value === 'si' })} style={P.inp}>
+                <option value='si'>Sì</option><option value='no'>No</option>
+              </select>
+            </div>
+            <div>
+              <label style={P.lbl}>Mostra separatore</label>
+              <select value={cfgJs.showTitleDivider === false ? 'no' : 'si'} onChange={e => patch({ showTitleDivider: e.target.value === 'si' })} style={P.inp}>
+                <option value='si'>Sì</option><option value='no'>No</option>
+              </select>
+            </div>
+          </div>
+          <label style={P.lbl}>Titolo personalizzato</label>
+          <Inp value={cfgJs.titleText || ''} onChange={v => patch({ titleText: v })} placeholder='Vuoto = titolo automatico della pratica' />
+          <label style={P.lbl}>Sottotitolo</label>
+          <Inp value={cfgJs.subtitle ?? defaultConfig.subtitle} onChange={v => patch({ subtitle: v })} placeholder='Sottotitolo della vista' />
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Colore titolo</label><ColInp value={cfgJs.titleColor || defaultConfig.titleColor || '#1F4E79'} onChange={v => patch({ titleColor: v })} /></div>
+            <div><label style={P.lbl}>Dimensione titolo</label><NumInp value={parseNum(cfgJs.titleFontSize, defaultConfig.titleFontSize)} onChange={n => patch({ titleFontSize: n })} min={9} max={36} unit='px' /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Peso titolo</label><NumInp value={parseNum(cfgJs.titleFontWeight, defaultConfig.titleFontWeight)} onChange={n => patch({ titleFontWeight: n })} min={300} max={900} step={100} /></div>
+            <div><label style={P.lbl}>Dimensione icona</label><NumInp value={parseNum(cfgJs.titleIconSize, Number(defaultConfig.titleIconSize || 23))} onChange={n => patch({ titleIconSize: n })} min={12} max={48} unit='px' /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Dimensione sottotitolo</label><NumInp value={parseNum(cfgJs.subtitleFontSize, defaultConfig.subtitleFontSize)} onChange={n => patch({ subtitleFontSize: n })} min={9} max={30} unit='px' /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Colore sottotitolo</label><ColInp value={cfgJs.subtitleColor || defaultConfig.subtitleColor || '#475569'} onChange={v => patch({ subtitleColor: v })} /></div>
+            <div><label style={P.lbl}>Colore separatore</label><ColInp value={cfgJs.titleDividerColor || defaultConfig.titleDividerColor || '#1F4E79'} onChange={v => patch({ titleDividerColor: v })} /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Spessore separatore</label><NumInp value={parseNum(cfgJs.titleDividerWidth, Number(defaultConfig.titleDividerWidth || 2))} onChange={n => patch({ titleDividerWidth: n })} min={0} max={8} unit='px' /></div>
+            <div><label style={P.lbl}>Distanza titolo-separatore</label><NumInp value={parseNum(cfgJs.titleDividerPaddingBottom, Number(defaultConfig.titleDividerPaddingBottom || 6))} onChange={n => patch({ titleDividerPaddingBottom: n })} min={0} max={24} unit='px' /></div>
+          </div>
+          <div style={{ ...P.hint, marginTop: 10, marginBottom: 3 }}>Padding del titolo</div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Superiore</label><NumInp value={parseNum(cfgJs.titlePaddingTop, Number(defaultConfig.titlePaddingTop || 0))} onChange={n => patch({ titlePaddingTop: n })} min={0} max={60} unit='px' /></div>
+            <div><label style={P.lbl}>Destro</label><NumInp value={parseNum(cfgJs.titlePaddingRight, Number(defaultConfig.titlePaddingRight || 0))} onChange={n => patch({ titlePaddingRight: n })} min={0} max={60} unit='px' /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Inferiore</label><NumInp value={parseNum(cfgJs.titlePaddingBottom, Number(defaultConfig.titlePaddingBottom || 0))} onChange={n => patch({ titlePaddingBottom: n })} min={0} max={60} unit='px' /></div>
+            <div><label style={P.lbl}>Sinistro</label><NumInp value={parseNum(cfgJs.titlePaddingLeft, Number(defaultConfig.titlePaddingLeft || 0))} onChange={n => patch({ titlePaddingLeft: n })} min={0} max={60} unit='px' /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Spazio sotto intestazione</label><NumInp value={parseNum(cfgJs.headerBottomGap, Number(defaultConfig.headerBottomGap || 10))} onChange={n => patch({ headerBottomGap: n })} min={0} max={80} unit='px' /></div>
           </div>
         </SectionBox>
         <SectionBox title='Card principali con intestazione blu' hint='Aspetto condiviso delle sezioni principali presenti nelle schede amministrative: Iter approvativo, Dati generali, Pagamento, Notifica e fasi successive.'>

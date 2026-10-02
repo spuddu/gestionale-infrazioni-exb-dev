@@ -2144,6 +2144,7 @@ function RubricaWidget(props: AllWidgetProps<IMConfig>) {
           showSubtitle={(cfg as any).showTitleSubtitle !== false}
           showDivider={(cfg as any).showTitleDivider !== false}
           title={title}
+          subtitle={String((cfg as any).subtitleText || '').trim() || undefined}
           fallbackIcon='utenti'
           titleColor={titleColor}
           titleFontSize={titleFontSize}
@@ -3290,6 +3291,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
           showSubtitle={(cfg as any).showTitleSubtitle !== false}
           showDivider={(cfg as any).showTitleDivider !== false}
           title={title}
+          subtitle={String((cfg as any).subtitleText || '').trim() || undefined}
           fallbackIcon='utenti'
           titleColor={titleColor}
           titleFontSize={titleFontSize}

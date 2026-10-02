@@ -1371,6 +1371,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           showSubtitle={(cfg as any).showTitleSubtitle !== false}
           showDivider={(cfg as any).showTitleDivider !== false}
           title={cfg.title || undefined}
+          subtitle={cfg.subtitle || undefined}
           fallbackIcon='report'
           titleColor={cfg.textColor}
           titleFontSize={Number(cfg.pageTitleFontSize ?? 22)}

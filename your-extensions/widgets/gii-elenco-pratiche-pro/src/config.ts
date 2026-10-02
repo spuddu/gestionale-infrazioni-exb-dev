@@ -228,9 +228,11 @@ export interface Config {
   showTitleSubtitle: boolean
   showTitleDivider: boolean
   listTitleText: string
+  listTitleSubtitleText: string
   listTitleHeight: number
   listTitlePaddingBottom: number
   listTitlePaddingLeft: number
+  listTitleContentGap: number
   listTitleFontSize: number
   listTitleFontWeight: number
   listTitleColor: string
@@ -406,9 +408,11 @@ export const defaultConfig: IMConfig = {
   showTitleSubtitle: true,
   showTitleDivider: true,
   listTitleText: 'Elenco pratiche',
+  listTitleSubtitleText: '',
   listTitleHeight: 28,
   listTitlePaddingBottom: 10,
   listTitlePaddingLeft: 0,
+  listTitleContentGap: 0,
   listTitleFontSize: 14,
   listTitleFontWeight: 600,
   listTitleColor: 'rgba(0,0,0,0.85)',

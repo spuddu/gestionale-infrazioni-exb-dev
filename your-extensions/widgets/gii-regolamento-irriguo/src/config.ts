@@ -4,6 +4,8 @@ export interface Config {
   showTitleSubtitle?: boolean
   showTitleDivider?: boolean
   title?: string
+  /** Sottotitolo personalizzato. Vuoto = descrizione della card Home. */
+  subtitleText?: string
   titleColor?: string
   titleFontSize?: number
   mainTitleFontSize?: number
