@@ -50,7 +50,7 @@ function normalizeSectorCode(value: any, numericFallback: any): string {
   if (direct) return direct
 
   const legacy = numericFallback != null && numericFallback !== '' ? Number(numericFallback) : NaN
-  const legacyMap: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS' }
+  const legacyMap: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS', 10:'D7' }
   return Number.isFinite(legacy) ? (legacyMap[legacy] || '') : ''
 }
 
@@ -204,6 +204,15 @@ function NavButton(p: { item: NavItem; cfg: any; idx: number; currentPageId: str
   const itemPageId = item.hashPage ? resolvePageId(item.hashPage) : null
   const isActive = !!currentPageId && !!itemPageId && currentPageId === itemPageId
   const hot = hov || isActive
+  // Hover e Selezionata sono due stati indipendenti.
+  // Nessun fallback: se i colori Selezionata non sono impostati nella Home,
+  // lo stato selezionato resta trasparente finché l'utente non li definisce.
+  const stateBg = isActive
+    ? (String(item.colorBgSelected || '').trim() || 'transparent')
+    : (hov ? item.colorBgHover : item.colorBgRest)
+  const stateAccent = isActive
+    ? (String(item.colorAccentSelected || '').trim() || 'transparent')
+    : (hov ? item.colorAccent : 'rgba(255,255,255,0.10)')
   const itemText = `${item.id || ''} ${item.hashPage || ''} ${item.label || ''}`.toLowerCase()
   const iconKey =
     /guida\s+operativa|(^|[^a-z])guida([^a-z]|$)/.test(itemText) && (!item.icon || item.icon === 'nuova')
@@ -226,13 +235,13 @@ function NavButton(p: { item: NavItem; cfg: any; idx: number; currentPageId: str
       style={{
         cursor: 'pointer',
         borderRadius: cfg.itemBorderRadius,
-        border: `1.5px solid ${hot ? item.colorAccent : 'rgba(255,255,255,0.10)'}`,
-        background: hot ? (item.colorBgHover || item.colorBg) : (item.colorBgRest || 'rgba(255,255,255,0.05)'),
+        border: `1.5px solid ${stateAccent}`,
+        background: stateBg,
         backdropFilter: 'blur(12px)',
         padding: cfg.itemPadding,
         display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12,
         transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)',
-        boxShadow: hov ? `0 20px 40px rgba(0,0,0,0.3),0 0 0 1px ${colorWithAlpha(item.colorAccent, 0.27)}` : '0 4px 16px rgba(0,0,0,0.15)',
+        boxShadow: hot ? `0 20px 40px rgba(0,0,0,0.3),0 0 0 1px ${colorWithAlpha(stateAccent, 0.27)}` : '0 4px 16px rgba(0,0,0,0.15)',
         ...(animate ? {
           animationName: 'fadeInUp', animationDuration: '0.5s',
           animationDelay: `${p.idx * 80}ms`, animationFillMode: 'both',
@@ -241,9 +250,9 @@ function NavButton(p: { item: NavItem; cfg: any; idx: number; currentPageId: str
       }}>
       <div style={{
         width: iconBoxSize, height: iconBoxSize, borderRadius: 8, flexShrink: 0,
-        background: hov ? colorWithAlpha(item.colorAccent, 0.24) : 'rgba(255,255,255,0.11)',
+        background: hot ? colorWithAlpha(stateAccent, 0.24) : 'rgba(255,255,255,0.11)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: hov ? item.colorAccent : 'rgba(255,255,255,0.92)',
+        color: hot ? stateAccent : 'rgba(255,255,255,0.92)',
         transition: 'background 0.25s, color 0.25s', padding: iconGlyphPadding, boxSizing: 'border-box' as const
       }}>
         <div style={{ width: '100%', height: '100%' }} dangerouslySetInnerHTML={{ __html: icon }}/>

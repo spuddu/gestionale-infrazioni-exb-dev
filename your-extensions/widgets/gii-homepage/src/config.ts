@@ -5,6 +5,7 @@ export interface CardConfig {
   label: string; desc: string; hashPage: string
   colorBg: string; colorAccent: string
   colorBgRest: string; colorBgHover: string
+  colorBgSelected?: string; colorAccentSelected?: string
   roles: string[]
   icon: string
 }

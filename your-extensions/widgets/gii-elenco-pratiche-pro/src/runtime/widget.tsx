@@ -1080,19 +1080,20 @@ type UtentiEntry = {
 };
 
 const AREA_LABELS: Record<string, string> = {
-  AMM: "Amministrativa",
+  AMM: "Affari Generali e P.F.",
   AGR: "Agraria",
   TEC: "Tecnica",
 };
 const SETTORE_LABELS: Record<string, string> = {
   CR: "Catasto, Ruoli e Servizi Territoriali",
   GI: "Gestione irrigua",
-  D1: "Distretto 1 – San Sperate",
-  D2: "Distretto 2 – Serramanna/Pimpisu",
-  D3: "Distretto 3 – San Gavino/Villacidro",
-  D4: "Distretto 4 – Basso Sulcis",
-  D5: "Distretto 5 – Senorbì",
-  D6: "Distretto 6 – Cixerri",
+  D1: "Distretto 1 Quartu Sant’Elena",
+  D2: "Distretto 2 Serramanna",
+  D3: "Distretto 3 San Gavino",
+  D4: "Distretto 4 Basso Sulcis",
+  D5: "Distretto 5 Senorbì",
+  D6: "Distretto 6 Cixerri",
+  D7: "Distretto 7 San Sperate",
   DS: "Manutenzione opere di dreno e di scolo",
 };
 
@@ -1110,6 +1111,7 @@ const SETTORE_TEXT_CODES = new Set([
   "D4",
   "D5",
   "D6",
+  "D7",
   "DS",
 ]);
 
@@ -1593,6 +1595,7 @@ function normalizeSettoreCode(settore: number | null | undefined): string {
     7: "D5",
     8: "D6",
     9: "DS",
+    10: "D7",
   };
   return settore != null ? map[Number(settore)] || "" : "";
 }
@@ -1615,7 +1618,6 @@ function getFirstValue(d: any, names: string[]): any {
 
 function getAreaCodeFromRecord(
   d: any,
-  fallbackArea?: any,
 ): "AMM" | "AGR" | "TEC" | "" {
   const raw = getFirstValue(d, [
     "area_cod",
@@ -1624,22 +1626,21 @@ function getAreaCodeFromRecord(
     "area",
     "Area",
   ]);
-  const code = normalizeTextCode(raw || fallbackArea);
+  const code = normalizeTextCode(raw);
   if (AREA_FROM_TEXT_CODE[code]) return AREA_FROM_TEXT_CODE[code];
-  const n = Number(raw || fallbackArea);
+  const n = Number(raw);
   return Number.isFinite(n) ? normalizeAreaCode(n) : "";
 }
 
 function getAreaDisplayFromRecord(
   d: any,
-  fallbackArea?: any,
   domainLabels?: DomainLabelMaps | null,
 ): string {
-  const code = getAreaCodeFromRecord(d, fallbackArea);
+  const code = getAreaCodeFromRecord(d);
   return getAreaLabelFromCode(code, domainLabels);
 }
 
-function getSettoreCodeFromRecord(d: any, fallbackSettore?: any): string {
+function getSettoreCodeFromRecord(d: any): string {
   const raw = getFirstValue(d, [
     "settore_cod",
     "Settore_cod",
@@ -1648,18 +1649,17 @@ function getSettoreCodeFromRecord(d: any, fallbackSettore?: any): string {
     "Settore",
     "id_settore",
   ]);
-  const text = normalizeTextCode(raw || fallbackSettore);
+  const text = normalizeTextCode(raw);
   if (SETTORE_TEXT_CODES.has(text)) return text;
-  const n = Number(raw || fallbackSettore);
+  const n = Number(raw);
   return Number.isFinite(n) ? normalizeSettoreCode(n) : "";
 }
 
 function getSettoreDisplayFromRecord(
   d: any,
-  fallbackSettore?: any,
   domainLabels?: DomainLabelMaps | null,
 ): string {
-  const code = getSettoreCodeFromRecord(d, fallbackSettore);
+  const code = getSettoreCodeFromRecord(d);
   return getSettoreLabelFromCode(code, domainLabels);
 }
 
@@ -1738,17 +1738,15 @@ function pickPraticaSearchText(r: DataRecord, fieldPratica: string): string {
 
 function pickTextSearchExtra(
   d: any,
-  fallbackArea?: any,
-  fallbackSettore?: any,
   domainLabels?: DomainLabelMaps | null,
 ): string {
   const parts = [
     pickTecnicoRilevatore(d),
     pickTecnicoIstruttore(d),
-    getAreaDisplayFromRecord(d, fallbackArea, domainLabels),
-    getSettoreDisplayFromRecord(d, fallbackSettore, domainLabels),
-    getAreaCodeFromRecord(d, fallbackArea),
-    getSettoreCodeFromRecord(d, fallbackSettore),
+    getAreaDisplayFromRecord(d, domainLabels),
+    getSettoreDisplayFromRecord(d, domainLabels),
+    getAreaCodeFromRecord(d),
+    getSettoreCodeFromRecord(d),
     pickField(d, "ufficio_zona"),
     // Trasgressore: la ricerca generale deve consentire di individuare
     // la pratica anche a partire dall'anagrafica del soggetto.
@@ -1766,15 +1764,13 @@ function pickTextSearchExtra(
 function pickComparableDisplayValue(
   d: any,
   field: string,
-  fallbackArea?: any,
-  fallbackSettore?: any,
   domainLabels?: DomainLabelMaps | null,
 ): any {
   const f = String(field || "").toLowerCase();
   if (f === "area" || f === "area_cod")
-    return getAreaDisplayFromRecord(d, fallbackArea, domainLabels);
+    return getAreaDisplayFromRecord(d, domainLabels);
   if (f === "settore" || f === "settore_cod" || f === "id_settore")
-    return getSettoreDisplayFromRecord(d, fallbackSettore, domainLabels);
+    return getSettoreDisplayFromRecord(d, domainLabels);
   return pickField(d, field);
 }
 
@@ -4786,8 +4782,6 @@ export default function Widget(props: Props) {
           : (pickComparableDisplayValue(
               da,
               s.field,
-              giiUser?.areaCod || giiUser?.area,
-              giiUser?.settoreCod || giiUser?.settore,
               domainLabels,
             ) ?? getSortValue(ra, s.field));
         const b = isRilevazioneDateSort
@@ -4795,8 +4789,6 @@ export default function Widget(props: Props) {
           : (pickComparableDisplayValue(
               db,
               s.field,
-              giiUser?.areaCod || giiUser?.area,
-              giiUser?.settoreCod || giiUser?.settore,
               domainLabels,
             ) ?? getSortValue(rb, s.field));
         const cmp = compareValues(a, b);
@@ -4811,21 +4803,15 @@ export default function Widget(props: Props) {
     (r: DataRecord): boolean => {
       const d = r.getData?.() || {};
       const q = normalizeSearchText(searchFilter);
-      const areaCode = getAreaCodeFromRecord(
-        d,
-        giiUser?.areaCod || giiUser?.area,
-      );
-      const settoreCode = getSettoreCodeFromRecord(
-        d,
-        giiUser?.settoreCod || giiUser?.settore,
-      );
+      const areaCode = getAreaCodeFromRecord(d);
+      const settoreCode = getSettoreCodeFromRecord(d);
       const dateMs = pickReportDateMs(d, fieldDataRil);
       const fromMs = getDateOnlyMsFromInput(fromDateFilter);
       const toMs = getDateOnlyMsFromInput(toDateFilter, true);
       const statoLabel = computeDisplaySintetico(d).label;
 
       if (q) {
-        const searchText = `${pickPraticaSearchText(r, fieldPratica)} ${pickTextSearchExtra(d, giiUser?.areaCod || giiUser?.area, giiUser?.settoreCod || giiUser?.settore, domainLabels)}`;
+        const searchText = `${pickPraticaSearchText(r, fieldPratica)} ${pickTextSearchExtra(d, domainLabels)}`;
         if (!searchText.includes(q)) return false;
       }
       if (areaFilter !== "tutte" && areaCode !== areaFilter) return false;
@@ -4978,12 +4964,9 @@ export default function Widget(props: Props) {
     const map = new Map<string, string>();
     for (const r of roleTabRecs) {
       const d = r.getData?.() || {};
-      const settoreCode = getSettoreCodeFromRecord(
-        d,
-        giiUser?.settoreCod || giiUser?.settore,
-      );
+      const settoreCode = getSettoreCodeFromRecord(d);
       if (settoreFilter !== "tutte" && settoreCode !== settoreFilter) continue;
-      const code = getAreaCodeFromRecord(d, giiUser?.areaCod || giiUser?.area);
+      const code = getAreaCodeFromRecord(d);
       if (code) map.set(code, getAreaLabelFromCode(code, domainLabels));
     }
     const order = ["AMM", "AGR", "TEC"];
@@ -5009,15 +4992,9 @@ export default function Widget(props: Props) {
     const map = new Map<string, string>();
     for (const r of roleTabRecs) {
       const d = r.getData?.() || {};
-      const areaCode = getAreaCodeFromRecord(
-        d,
-        giiUser?.areaCod || giiUser?.area,
-      );
+      const areaCode = getAreaCodeFromRecord(d);
       if (areaFilter !== "tutte" && areaCode !== areaFilter) continue;
-      const code = getSettoreCodeFromRecord(
-        d,
-        giiUser?.settoreCod || giiUser?.settore,
-      );
+      const code = getSettoreCodeFromRecord(d);
       if (code) map.set(code, getSettoreLabelFromCode(code, domainLabels));
     }
     return Array.from(map.entries()).sort((a, b) =>
@@ -7538,7 +7515,6 @@ export default function Widget(props: Props) {
                             if (fl === "area" || fl === "area_cod") {
                               const val = getAreaDisplayFromRecord(
                                 d,
-                                giiUser?.areaCod || giiUser?.area,
                                 domainLabels,
                               );
                               return (
@@ -7558,7 +7534,6 @@ export default function Widget(props: Props) {
                             ) {
                               const val = getSettoreDisplayFromRecord(
                                 d,
-                                giiUser?.settoreCod || giiUser?.settore,
                                 domainLabels,
                               );
                               return (

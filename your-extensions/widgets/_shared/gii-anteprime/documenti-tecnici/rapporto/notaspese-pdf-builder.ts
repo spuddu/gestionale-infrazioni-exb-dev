@@ -192,12 +192,13 @@ const AREA_LABELS: Record<string, string> = {
 const SETTORE_LABELS: Record<string, string> = {
   CR: 'CATASTO, RUOLI E SERVIZI TERRITORIALI',
   GI: 'GESTIONE IRRIGUA',
-  D1: "DISTRETTO 1 – QUARTU SANT'ELENA/VILLAPUTZU/MURAVERA – SAN SPERATE",
-  D2: 'DISTRETTO 2 – SERRAMANNA/PIMPISU',
-  D3: 'DISTRETTO 3 – SAN GAVINO - VILLACIDRO',
-  D4: 'DISTRETTO 4 – BASSO SULCIS',
-  D5: 'DISTRETTO 5 – SENORBÌ',
-  D6: 'DISTRETTO 6 – CIXERRI',
+  D1: 'DISTRETTO 1 QUARTU SANT’ELENA',
+  D2: 'DISTRETTO 2 SERRAMANNA',
+  D3: 'DISTRETTO 3 SAN GAVINO',
+  D4: 'DISTRETTO 4 BASSO SULCIS',
+  D5: 'DISTRETTO 5 SENORBÌ',
+  D6: 'DISTRETTO 6 CIXERRI',
+  D7: 'DISTRETTO 7 SAN SPERATE',
   DS: 'MANUTENZIONE OPERE DI DRENO E DI SCOLO'
 }
 
@@ -222,7 +223,8 @@ function normalizeSettoreCode(areaCode: string, value: any): string {
   if (s === '7') return 'D5'
   if (s === '8') return 'D6'
   if (s === '9') return 'DS'
-  const distretto = s.match(/^D\s*([1-6])$/)
+  if (s === '10') return 'D7'
+  const distretto = s.match(/^D\s*([1-7])$/)
   if (distretto) return `D${distretto[1]}`
   if (s === 'DS' || s === 'D S' || s.includes('DRENO') || s.includes('SCOLO')) return 'DS'
   if (s === 'CR' || s === 'C R' || s.includes('CATASTO')) return 'CR'
@@ -237,7 +239,7 @@ function isRawAreaCodeLabel(label: string): boolean {
 
 function isRawSettoreCodeLabel(label: string): boolean {
   const s = String(label ?? '').trim().toUpperCase().replace(/\s+/g, '')
-  return s === 'CR' || s === 'GI' || s === 'DS' || /^D[1-6]$/.test(s) || /^[1-9]$/.test(s)
+  return s === 'CR' || s === 'GI' || s === 'DS' || /^D[1-7]$/.test(s) || /^(?:[1-9]|10)$/.test(s)
 }
 
 function resolveAreaLabel(areaCode: string, labelValue: any): string {

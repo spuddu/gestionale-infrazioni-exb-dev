@@ -52,9 +52,9 @@ type AmmUtenteCached = {
 type AttoParticipantIdentity = { nome: string; cognome: string; titolo: string }
 
 const AMM_AREA_NUM: Record<string, number> = { AMM: 1, AGR: 2, TEC: 3 }
-const AMM_SETTORE_NUM: Record<string, number> = { CR: 1, GI: 2, D1: 3, D2: 4, D3: 5, D4: 6, D5: 7, D6: 8, DS: 9 }
+const AMM_SETTORE_NUM: Record<string, number> = { CR: 1, GI: 2, D1: 3, D2: 4, D3: 5, D4: 6, D5: 7, D6: 8, DS: 9, D7: 10 }
 const AMM_AREA_COD_FROM_NUM: Record<number, string> = { 1: 'AMM', 2: 'AGR', 3: 'TEC' }
-const AMM_SETTORE_COD_FROM_NUM: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
+const AMM_SETTORE_COD_FROM_NUM: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS', 10: 'D7' }
 
 function normalizeAmmUtentiRuoloCod (v: any): string {
   const s = String(v ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
@@ -78,7 +78,7 @@ function normalizeAmmUtentiSettoreCod (v: any): string {
   if (!s) return ''
   const n = Number(s)
   if (Number.isFinite(n) && AMM_SETTORE_COD_FROM_NUM[n]) return AMM_SETTORE_COD_FROM_NUM[n]
-  const distretto = s.match(/DISTRETTO([1-6])/)
+  const distretto = s.match(/DISTRETTO([1-7])/)
   if (distretto) return `D${distretto[1]}`
   if (s.includes('DRENO') || s.includes('SCOLO')) return 'DS'
   if (s.includes('CATASTO') || s.includes('RUOLI')) return 'CR'
@@ -1629,7 +1629,7 @@ function getFallbackDomainOptions (fieldName: string): Array<{ code: any, name: 
   }
   if (fieldName === 'area_cod') {
     return [
-      { code: 'AMM', name: 'Amministrativa' },
+      { code: 'AMM', name: 'Affari Generali e P.F.' },
       { code: 'AGR', name: 'Agraria' },
       { code: 'TEC', name: 'Tecnica' }
     ]
@@ -1638,12 +1638,13 @@ function getFallbackDomainOptions (fieldName: string): Array<{ code: any, name: 
     return [
       { code: 'CR', name: 'Catasto, Ruoli e Servizi Territoriali' },
       { code: 'GI', name: 'Gestione irrigua' },
-      { code: 'D1', name: "Distretto 1 (Quartu Sant'Elena/Villaputzu/Muravera – San Sperate)" },
-      { code: 'D2', name: 'Distretto 2 (Serramanna/Pimpisu)' },
-      { code: 'D3', name: 'Distretto 3 (San Gavino - Villacidro)' },
-      { code: 'D4', name: 'Distretto 4 (Basso Sulcis)' },
-      { code: 'D5', name: 'Distretto 5 (Senorbì)' },
-      { code: 'D6', name: 'Distretto 6 (Cixerri)' },
+      { code: 'D1', name: 'Distretto 1 Quartu Sant’Elena' },
+      { code: 'D2', name: 'Distretto 2 Serramanna' },
+      { code: 'D3', name: 'Distretto 3 San Gavino' },
+      { code: 'D4', name: 'Distretto 4 Basso Sulcis' },
+      { code: 'D5', name: 'Distretto 5 Senorbì' },
+      { code: 'D6', name: 'Distretto 6 Cixerri' },
+      { code: 'D7', name: 'Distretto 7 San Sperate' },
       { code: 'DS', name: 'Manutenzione opere di dreno e di scolo' }
     ]
   }
@@ -5302,9 +5303,9 @@ function normalizeSectorCodeForAmm (value: any): string {
   const raw = String(value || '').trim()
   if (!raw) return ''
   const upper = raw.toUpperCase().replace(/[–—]/g, '-').replace(/\s+/g, ' ')
-  const direct = upper.match(/(D[1-6]|DS|CR|GI)/)
+  const direct = upper.match(/(D[1-7]|DS|CR|GI)/)
   if (direct) return direct[1]
-  const distretto = upper.match(/DISTRETTO\s*([1-6])/) || upper.match(/D\.?\s*([1-6])/)
+  const distretto = upper.match(/DISTRETTO\s*([1-7])/) || upper.match(/D\.?\s*([1-7])/)
   if (distretto) return `D${distretto[1]}`
   if (/DRENO|SCOLO|TECNICO/.test(upper)) return 'DS'
   if (/CATASTO|RUOLI|SERVIZI TERRITORIALI/.test(upper)) return 'CR'
@@ -5315,12 +5316,13 @@ function normalizeSectorCodeForAmm (value: any): string {
 function settoreCodeFromUfficioAmm (value: any): string {
   const upper = String(value || '').toUpperCase()
   if (!upper) return ''
-  if (/QUARTU|VILLAPUTZU|MURAVERA|SAN SPERATE/.test(upper)) return 'D1'
+  if (/QUARTU|VILLAPUTZU|MURAVERA/.test(upper)) return 'D1'
+  if (/SAN SPERATE/.test(upper)) return 'D7'
   if (/SERRAMANNA|PIMPISU/.test(upper)) return 'D2'
   if (/SAN GAVINO|VILLACIDRO/.test(upper)) return 'D3'
   if (/SAN GIOVANNI SUERGIU|MASAINAS|BASSO SULCIS/.test(upper)) return 'D4'
   if (/SENORB/.test(upper)) return 'D5'
-  if (/IGLESIAS|SILIQUA|VILLASOR|CIXERRI/.test(upper)) return 'D6'
+  if (/IGLESIAS|SILIQUA|VILLASOR|FLUMINIMAGGIORE|CIXERRI/.test(upper)) return 'D6'
   return ''
 }
 

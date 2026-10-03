@@ -75,7 +75,7 @@ async function enrichAdministrativeIterFromLog (data: any, map: Record<string, s
         dtChiusura: pickAttrCI(a, ['dt_chiusura']),
         utenteOperatore: String(pickAttrCI(a, ['utente_operatore']) || '').trim()
       }
-    }).sort((a, b) => (iterTimeValue(a.dtApertura) || iterTimeValue(a.dtChiusura)) - (iterTimeValue(b.dtApertura) || iterTimeValue(b.dtChiusura)))
+    }).sort((a: AmmIterLogRow, b: AmmIterLogRow) => (iterTimeValue(a.dtApertura) || iterTimeValue(a.dtChiusura)) - (iterTimeValue(b.dtApertura) || iterTimeValue(b.dtChiusura)))
 
     const lastForRole = (role: 'IA' | 'RIA', preferredClosures: string[]): AmmIterLogRow | null => {
       const matches = rows.filter(row => row.ruolo === role && row.eventoApertura === 'PRESA_IN_CARICO' && iterTimeValue(row.dtApertura) > 0)
@@ -274,7 +274,7 @@ function getFallbackDomainOptions (fieldName: string): Array<{ code: any, name: 
   }
   if (fieldName === 'area_cod') {
     return [
-      { code: 'AMM', name: 'Amministrativa' },
+      { code: 'AMM', name: 'Affari Generali e P.F.' },
       { code: 'AGR', name: 'Agraria' },
       { code: 'TEC', name: 'Tecnica' }
     ]
@@ -283,12 +283,13 @@ function getFallbackDomainOptions (fieldName: string): Array<{ code: any, name: 
     return [
       { code: 'CR', name: 'Catasto, Ruoli e Servizi Territoriali' },
       { code: 'GI', name: 'Gestione irrigua' },
-      { code: 'D1', name: "Distretto 1 (Quartu Sant'Elena/Villaputzu/Muravera – San Sperate)" },
-      { code: 'D2', name: 'Distretto 2 (Serramanna/Pimpisu)' },
-      { code: 'D3', name: 'Distretto 3 (San Gavino - Villacidro)' },
-      { code: 'D4', name: 'Distretto 4 (Basso Sulcis)' },
-      { code: 'D5', name: 'Distretto 5 (Senorbì)' },
-      { code: 'D6', name: 'Distretto 6 (Cixerri)' },
+      { code: 'D1', name: 'Distretto 1 Quartu Sant’Elena' },
+      { code: 'D2', name: 'Distretto 2 Serramanna' },
+      { code: 'D3', name: 'Distretto 3 San Gavino' },
+      { code: 'D4', name: 'Distretto 4 Basso Sulcis' },
+      { code: 'D5', name: 'Distretto 5 Senorbì' },
+      { code: 'D6', name: 'Distretto 6 Cixerri' },
+      { code: 'D7', name: 'Distretto 7 San Sperate' },
       { code: 'DS', name: 'Manutenzione opere di dreno e di scolo' }
     ]
   }
@@ -360,25 +361,13 @@ function normalizeSectorCodeForAmm (value: any): string {
   const raw = String(value || '').trim()
   if (!raw) return ''
   const upper = raw.toUpperCase().replace(/[–—]/g, '-').replace(/\s+/g, ' ')
-  const direct = upper.match(/(D[1-6]|DS|CR|GI)/)
+  const direct = upper.match(/(D[1-7]|DS|CR|GI)/)
   if (direct) return direct[1]
-  const distretto = upper.match(/DISTRETTO\s*([1-6])/) || upper.match(/D\.?\s*([1-6])/)
+  const distretto = upper.match(/DISTRETTO\s*([1-7])/) || upper.match(/D\.?\s*([1-7])/)
   if (distretto) return `D${distretto[1]}`
   if (/DRENO|SCOLO|TECNICO/.test(upper)) return 'DS'
   if (/CATASTO|RUOLI|SERVIZI TERRITORIALI/.test(upper)) return 'CR'
   if (/GESTIONE IRRIGUA/.test(upper)) return 'GI'
-  return ''
-}
-
-function settoreCodeFromUfficioAmm (value: any): string {
-  const upper = String(value || '').toUpperCase()
-  if (!upper) return ''
-  if (/QUARTU|VILLAPUTZU|MURAVERA|SAN SPERATE/.test(upper)) return 'D1'
-  if (/SERRAMANNA|PIMPISU/.test(upper)) return 'D2'
-  if (/SAN GAVINO|VILLACIDRO/.test(upper)) return 'D3'
-  if (/SAN GIOVANNI SUERGIU|MASAINAS|BASSO SULCIS/.test(upper)) return 'D4'
-  if (/SENORB/.test(upper)) return 'D5'
-  if (/IGLESIAS|SILIQUA|VILLASOR|CIXERRI/.test(upper)) return 'D6'
   return ''
 }
 
@@ -389,7 +378,7 @@ function normalizeRilevazioneCodeForAmm (data: any, oid: number | null): string 
   const op = pickAttrCI(d, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
   let prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'IT') ? 'IT' : 'TR'
   let oidPart = oid != null && Number.isFinite(Number(oid)) ? String(Number(oid)) : ''
-  let settore = normalizeSectorCodeForAmm(pickAttrCI(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'SETTORE'])) || settoreCodeFromUfficioAmm(pickAttrCI(d, ['ufficio_zona', 'Ufficio_zona', 'UFFICIO_ZONA']))
+  let settore = normalizeSectorCodeForAmm(pickAttrCI(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'SETTORE']))
 
   let m = raw.match(/^(TR|IT)-?(\d+)(?:-([A-Z0-9]+))?$/i)
   if (m) {

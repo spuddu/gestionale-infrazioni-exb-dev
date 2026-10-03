@@ -296,7 +296,7 @@ function getFallbackDomainOptions (fieldName: string): Array<{ code: any, name: 
   }
   if (fieldName === 'area_cod') {
     return [
-      { code: 'AMM', name: 'Amministrativa' },
+      { code: 'AMM', name: 'Affari Generali e P.F.' },
       { code: 'AGR', name: 'Agraria' },
       { code: 'TEC', name: 'Tecnica' }
     ]
@@ -305,12 +305,13 @@ function getFallbackDomainOptions (fieldName: string): Array<{ code: any, name: 
     return [
       { code: 'CR', name: 'Catasto, Ruoli e Servizi Territoriali' },
       { code: 'GI', name: 'Gestione irrigua' },
-      { code: 'D1', name: "Distretto 1 (Quartu Sant'Elena/Villaputzu/Muravera – San Sperate)" },
-      { code: 'D2', name: 'Distretto 2 (Serramanna/Pimpisu)' },
-      { code: 'D3', name: 'Distretto 3 (San Gavino - Villacidro)' },
-      { code: 'D4', name: 'Distretto 4 (Basso Sulcis)' },
-      { code: 'D5', name: 'Distretto 5 (Senorbì)' },
-      { code: 'D6', name: 'Distretto 6 (Cixerri)' },
+      { code: 'D1', name: 'Distretto 1 Quartu Sant’Elena' },
+      { code: 'D2', name: 'Distretto 2 Serramanna' },
+      { code: 'D3', name: 'Distretto 3 San Gavino' },
+      { code: 'D4', name: 'Distretto 4 Basso Sulcis' },
+      { code: 'D5', name: 'Distretto 5 Senorbì' },
+      { code: 'D6', name: 'Distretto 6 Cixerri' },
+      { code: 'D7', name: 'Distretto 7 San Sperate' },
       { code: 'DS', name: 'Manutenzione opere di dreno e di scolo' }
     ]
   }

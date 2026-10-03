@@ -7,19 +7,20 @@ import { defaultConfig } from '../config'
 const GII_PORTAL = 'https://cbsm-hub.maps.arcgis.com'
 const ROLE_CODES = new Set(['TR', 'IT', 'CS', 'RIT', 'DT', 'DA', 'RIA', 'IA', 'ADMIN'])
 const AREA_CODES = new Set(['AMM', 'AGR', 'TEC'])
-const SETTORE_CODES = new Set(['CR', 'GI', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'DS'])
+const SETTORE_CODES = new Set(['CR', 'GI', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'DS', 'D7'])
 const AREA_FROM_NUM: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
-const SETTORE_FROM_NUM: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS' }
-const AREA_FULL: Record<string, string> = { AMM:'Amministrativa', AGR:'Agraria', TEC:'Tecnica' }
+const SETTORE_FROM_NUM: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS', 10:'D7' }
+const AREA_FULL: Record<string, string> = { AMM:'Affari Generali e P.F.', AGR:'Agraria', TEC:'Tecnica' }
 const SETTORE_FULL: Record<string, string> = {
   CR:'Catasto, Ruoli e Servizi Territoriali',
   GI:'Gestione irrigua',
-  D1:"Distretto 1 (Quartu Sant'Elena/Villaputzu/Muravera - San Sperate)",
-  D2:'Distretto 2 (Serramanna/Pimpisu)',
-  D3:'Distretto 3 (San Gavino - Villacidro)',
-  D4:'Distretto 4 (Basso Sulcis)',
-  D5:'Distretto 5 (Senorbì)',
-  D6:'Distretto 6 (Cixerri)',
+  D1:'Distretto 1 Quartu Sant’Elena',
+  D2:'Distretto 2 Serramanna',
+  D3:'Distretto 3 San Gavino',
+  D4:'Distretto 4 Basso Sulcis',
+  D5:'Distretto 5 Senorbì',
+  D6:'Distretto 6 Cixerri',
+  D7:'Distretto 7 San Sperate',
   DS:'Manutenzione opere di dreno e di scolo'
 }
 
@@ -205,9 +206,9 @@ function getOrgContext(user: UserInfo | null): { area: string; settore: string; 
   const area = String(user.areaFull || (user.areaCod ? AREA_FULL[user.areaCod] || user.areaCod : '')).trim()
   const settore = String(user.settoreFull || (user.settoreCod ? SETTORE_FULL[user.settoreCod] || user.settoreCod : '')).trim()
   const ufficio = String(user.ufficioLabel || '').trim()
-  const areaText = area ? `Area ${area}` : (user.isAdmin ? 'Area Agraria' : '')
-  const settoreText = settore ? `Settore ${settore}` : (user.isAdmin ? "Settore Distretto 1 (Quartu Sant'Elena/Villaputzu/Muravera - San Sperate)" : '')
-  const ufficioText = ufficio ? (/^Ufficio\b/i.test(ufficio) ? ufficio : `Ufficio di ${ufficio}`) : (user.isAdmin ? 'Ufficio di Quartucciu (loc. Is Forreddus)' : '')
+  const areaText = area ? `Area ${area}` : ''
+  const settoreText = settore ? (/^Settore\b/i.test(settore) ? settore : `Settore ${settore}`) : ''
+  const ufficioText = ufficio ? (/^Ufficio\b/i.test(ufficio) ? ufficio : `Ufficio di ${ufficio}`) : ''
 
   return {
     area: areaText,

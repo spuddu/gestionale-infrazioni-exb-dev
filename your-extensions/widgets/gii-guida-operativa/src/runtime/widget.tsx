@@ -1,6 +1,7 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps } from 'jimu-core'
+import { createPortal } from 'react-dom'
 import type { IMConfig } from '../config'
 import { GiiPageTitle } from '../../../_shared/gii-ui/page-title'
 import {
@@ -24,6 +25,12 @@ type SearchHit = {
   title: string
   context: string
   score: number
+}
+
+type GuideImagePreview = {
+  src: string
+  alt: string
+  label?: string
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -168,14 +175,14 @@ function buildSearchHits(chapters: GuideChapter[], query: string): SearchHit[] {
     .slice(0, 80)
 }
 
-function roleBadges(chapter: GuideChapter, accent: string): React.ReactNode {
+function roleBadges(chapter: GuideChapter, accent: string, fontSize = 12.5): React.ReactNode {
   const roles = chapter.roles || []
   if (roles.includes('*')) return null
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
       {roles.filter(r => r !== '*').map(r => (
         <span key={r} style={{
-          fontSize: 12.5,
+          fontSize,
           fontWeight: 700,
           lineHeight: 1,
           padding: '4px 6px',
@@ -269,6 +276,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
   const shellRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const runwayRef = useRef<HTMLDivElement>(null)
+  const imageViewportRef = useRef<HTMLDivElement>(null)
   const leftScrollRef = useRef<HTMLDivElement>(null)
   const scrollSyncFrame = useRef<number | null>(null)
   const lastContentScrollTopRef = useRef(0)
@@ -280,6 +288,20 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
   const [splitterActive, setSplitterActive] = useState(false)
   const [scrollRunwayHeight, setScrollRunwayHeight] = useState(0)
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(() => new Set())
+  const [textScale, setTextScale] = useState(1)
+  const [imagePreview, setImagePreview] = useState<GuideImagePreview | null>(null)
+  const [imageScale, setImageScale] = useState(1)
+  const [imageFit, setImageFit] = useState(true)
+  const [imageFitScale, setImageFitScale] = useState(1)
+  const [imageNaturalSize, setImageNaturalSize] = useState({ width: 0, height: 0 })
+
+  const contentBodyFontSize = bodyFontSize * textScale
+  const contentChapterTitleFontSize = chapterTitleFontSize * textScale
+  const contentHeading2FontSize = heading2FontSize * textScale
+  const contentHeading3FontSize = heading3FontSize * textScale
+  const contentLeadFontSize = leadFontSize * textScale
+  const contentTableFontSize = tableFontSize * textScale
+  const contentBadgeFontSize = 12.5 * textScale
 
   // Spazio di scorrimento finale (scroll runway). Serve a permettere anche agli
   // ultimi paragrafi del capitolo di raggiungere la stessa linea ScrollSpy dei
@@ -328,7 +350,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
       observer?.disconnect()
       window.removeEventListener('resize', updateRunway)
     }
-  }, [activeChapterId, bodyFontSize, heading2FontSize, contentPaddingTop, contentPaddingRight, contentPaddingBottom, contentPaddingLeft])
+  }, [activeChapterId, contentBodyFontSize, contentHeading2FontSize, contentPaddingTop, contentPaddingRight, contentPaddingBottom, contentPaddingLeft])
 
   useEffect(() => {
     if (!GUIDE_CHAPTERS.some(c => c.id === activeChapterId)) setActiveChapterId(GUIDE_CHAPTERS[0]?.id || '')
@@ -341,6 +363,20 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
   useEffect(() => {
     setExpandedSteps(new Set())
   }, [activeChapterId])
+
+  useEffect(() => {
+    if (!imagePreview) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setImagePreview(null)
+    }
+    const previousBodyOverflow = typeof document !== 'undefined' ? document.body.style.overflow : ''
+    if (typeof document !== 'undefined') document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      if (typeof document !== 'undefined') document.body.style.overflow = previousBodyOverflow
+    }
+  }, [imagePreview])
 
   const visibleChapters = useMemo(() => GUIDE_CHAPTERS.filter(c => chapterMatchesRole(c, roleFilter)), [roleFilter])
   const activeChapter = useMemo(() => GUIDE_CHAPTERS.find(c => c.id === activeChapterId) || GUIDE_CHAPTERS[0], [activeChapterId])
@@ -568,6 +604,68 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
     })
   }
 
+  const openImagePreview = (image: GuideImagePreview) => {
+    setImagePreview(image)
+    setImageScale(1)
+    setImageFit(true)
+    setImageFitScale(1)
+    setImageNaturalSize({ width: 0, height: 0 })
+  }
+
+  const imageIsVector = Boolean(imagePreview?.src?.startsWith('data:image/svg+xml'))
+
+  const calculateImageFitScale = (width = imageNaturalSize.width, height = imageNaturalSize.height) => {
+    if (width <= 0 || height <= 0) return 1
+    const viewport = imageViewportRef.current
+    const availableWidth = Math.max(1, (viewport?.clientWidth || window.innerWidth - 36) - 24)
+    const availableHeight = Math.max(1, (viewport?.clientHeight || window.innerHeight - 92) - 24)
+    return Math.min(1, availableWidth / width, availableHeight / height)
+  }
+
+  const imageMinScale = Math.max(0.1, imageFitScale * 0.5)
+  const imageMaxScale = imageIsVector ? Math.max(4, imageFitScale) : 1
+  const imageZoomStep = 0.15
+
+  const centerImageViewport = () => {
+    const viewport = imageViewportRef.current
+    if (!viewport) return
+    viewport.scrollLeft = Math.max(0, (viewport.scrollWidth - viewport.clientWidth) / 2)
+    viewport.scrollTop = Math.max(0, (viewport.scrollHeight - viewport.clientHeight) / 2)
+  }
+
+  const changeImageZoom = (delta: number) => {
+    setImageFit(false)
+    setImageScale(prev => {
+      const next = Math.round((prev + delta) * 100) / 100
+      return clamp(next, imageMinScale, imageMaxScale)
+    })
+  }
+
+  const fitImageToWindow = () => {
+    const nextFitScale = calculateImageFitScale()
+    setImageFitScale(nextFitScale)
+    setImageScale(nextFitScale)
+    setImageFit(true)
+  }
+
+  useEffect(() => {
+    if (!imagePreview || imageNaturalSize.width <= 0 || imageNaturalSize.height <= 0) return
+    const updateFit = () => {
+      const nextFitScale = calculateImageFitScale()
+      setImageFitScale(nextFitScale)
+      if (imageFit) setImageScale(nextFitScale)
+    }
+    updateFit()
+    window.addEventListener('resize', updateFit)
+    return () => window.removeEventListener('resize', updateFit)
+  }, [imagePreview, imageFit, imageNaturalSize.width, imageNaturalSize.height])
+
+  useEffect(() => {
+    if (!imagePreview) return
+    const frame = window.requestAnimationFrame(centerImageViewport)
+    return () => window.cancelAnimationFrame(frame)
+  }, [imagePreview, imageScale])
+
   const renderFigureAsset = (figureKey: string, keyPrefix: string, compact = false): React.ReactNode => {
     const figure = GUIDE_FIGURES[figureKey]
     if (!figure) return null
@@ -576,18 +674,26 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
         <div style={{ display: 'grid', gap: 12 }}>
           {figure.images.map((image, imageIndex) => (
             <div key={`${figureKey}-${imageIndex}`} style={{ minWidth: 0 }}>
-              {image.label ? <div style={{ margin: '0 0 6px', color: titleColor, fontSize: tableFontSize, fontWeight: 800 }}>{image.label}</div> : null}
-              <img
-                src={image.src}
-                alt={image.alt}
-                loading='lazy'
-                draggable={false}
-                style={{ display: 'block', width: '100%', height: 'auto', border: `1px solid ${borderColor}`, borderRadius: Math.max(5, radius - 2), background: '#ffffff' }}
-              />
+              {image.label ? <div style={{ margin: '0 0 6px', color: titleColor, fontSize: contentTableFontSize, fontWeight: 800 }}>{image.label}</div> : null}
+              <button
+                type='button'
+                onClick={() => openImagePreview(image)}
+                aria-label={`Ingrandisci immagine${image.label ? `: ${image.label}` : ''}`}
+                title='Ingrandisci immagine'
+                style={{ display: 'block', width: '100%', border: 0, padding: 0, margin: 0, background: 'transparent', cursor: 'zoom-in', textAlign: 'left' }}
+              >
+                <img
+                  src={image.src}
+                  alt={image.alt}
+                  loading='lazy'
+                  draggable={false}
+                  style={{ display: 'block', width: '100%', height: 'auto', border: `1px solid ${borderColor}`, borderRadius: Math.max(5, radius - 2), background: '#ffffff', cursor: 'zoom-in' }}
+                />
+              </button>
             </div>
           ))}
         </div>
-        <figcaption style={{ marginTop: 9, color: mutedColor, fontSize: tableFontSize, lineHeight: 1.45, fontStyle: 'italic', fontWeight: 600 }}>
+        <figcaption style={{ marginTop: 9, color: mutedColor, fontSize: contentTableFontSize, lineHeight: 1.45, fontStyle: 'italic', fontWeight: 600 }}>
           {figure.caption}
         </figcaption>
       </figure>
@@ -616,8 +722,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
               if (!help) {
                 return (
                   <li key={stepKey} style={{ display: 'grid', gridTemplateColumns: '28px minmax(0,1fr)', gap: 10, alignItems: 'start', lineHeight: 1.55, padding: '4px 2px' }}>
-                    <span style={{ width: 26, height: 26, borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff', background: accent, fontSize: Math.max(12, bodyFontSize - 3), fontWeight: 800, marginTop: 1 }}>{s.number ?? idx + 1}</span>
-                    <span style={{ fontSize: bodyFontSize, lineHeight: 1.55, fontWeight: 500 }}>{renderTextWithChapterLinks(s.text)}</span>
+                    <span style={{ width: 26, height: 26, borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff', background: accent, fontSize: Math.max(12, contentBodyFontSize - 3), fontWeight: 800, marginTop: 1 }}>{s.number ?? idx + 1}</span>
+                    <span style={{ fontSize: contentBodyFontSize, lineHeight: 1.55, fontWeight: 500 }}>{renderTextWithChapterLinks(s.text)}</span>
                   </li>
                 )
               }
@@ -629,15 +735,15 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
                     onClick={() => toggleStep(stepKey)}
                     style={{ width: '100%', border: 0, background: isOpen ? '#f8fafc' : '#fff', color: textColor, padding: '9px 10px', cursor: 'pointer', display: 'grid', gridTemplateColumns: '28px minmax(0,1fr) 20px', gap: 10, alignItems: 'start', textAlign: 'left', font: 'inherit' }}
                   >
-                    <span style={{ width: 26, height: 26, borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff', background: accent, fontSize: Math.max(12, bodyFontSize - 3), fontWeight: 800, marginTop: 1 }}>{s.number ?? idx + 1}</span>
-                    <span style={{ fontSize: bodyFontSize, lineHeight: 1.55, fontWeight: 600 }}>{s.label || s.text}</span>
+                    <span style={{ width: 26, height: 26, borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff', background: accent, fontSize: Math.max(12, contentBodyFontSize - 3), fontWeight: 800, marginTop: 1 }}>{s.number ?? idx + 1}</span>
+                    <span style={{ fontSize: contentBodyFontSize, lineHeight: 1.55, fontWeight: 600 }}>{s.label || s.text}</span>
                     <span style={{ color: '#64748b', display: 'flex', justifyContent: 'center', paddingTop: 5 }}><Chevron open={isOpen} /></span>
                   </button>
                   {isOpen ? (
                     <div style={{ margin: '0 10px 10px 48px', padding: '10px 12px', borderLeft: '3px solid #94a3b8', background: '#f8fafc', borderRadius: 4 }}>
-                      <div style={{ color: '#475569', fontSize: Math.max(12.5, bodyFontSize - 1.5), fontWeight: 800, marginBottom: 6 }}>Come si fa</div>
-                      {help.paragraphs.map((p, pi) => <p key={`${stepKey}-p-${pi}`} style={{ fontSize: bodyFontSize, lineHeight: 1.58, color: textColor, margin: pi ? '7px 0 0' : 0, fontWeight: 500 }}>{renderTextWithChapterLinks(p)}</p>)}
-                      {help.bullets?.length ? <div style={{ marginTop: 8 }}>{help.bullets.map((item, bi) => <div key={`${stepKey}-b-${bi}`} style={{ display: 'grid', gridTemplateColumns: '12px minmax(0,1fr)', gap: 7, margin: '5px 0', fontSize: bodyFontSize, lineHeight: 1.5 }}><span style={{ color: '#64748b', fontWeight: 900 }}>•</span><span>{renderTextWithChapterLinks(item)}</span></div>)}</div> : null}
+                      <div style={{ color: '#475569', fontSize: Math.max(12.5, contentBodyFontSize - 1.5), fontWeight: 800, marginBottom: 6 }}>Come si fa</div>
+                      {help.paragraphs.map((p, pi) => <p key={`${stepKey}-p-${pi}`} style={{ fontSize: contentBodyFontSize, lineHeight: 1.58, color: textColor, margin: pi ? '7px 0 0' : 0, fontWeight: 500 }}>{renderTextWithChapterLinks(p)}</p>)}
+                      {help.bullets?.length ? <div style={{ marginTop: 8 }}>{help.bullets.map((item, bi) => <div key={`${stepKey}-b-${bi}`} style={{ display: 'grid', gridTemplateColumns: '12px minmax(0,1fr)', gap: 7, margin: '5px 0', fontSize: contentBodyFontSize, lineHeight: 1.5 }}><span style={{ color: '#64748b', fontWeight: 900 }}>•</span><span>{renderTextWithChapterLinks(item)}</span></div>)}</div> : null}
                       {help.figure ? renderFigureAsset(help.figure, `${stepKey}-help`, true) : null}
                     </div>
                   ) : null}
@@ -652,30 +758,30 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
       if (b.type === 'heading2') {
         currentSectionTitle = ''
         const selected = activeAnchorId === b.id
-        nodes.push(<h2 key={b.id} data-guide-anchor={b.id} data-guide-nav-anchor={b.id} onClick={() => { setActiveAnchorId(b.id); setExpanded(prev => { const next = new Set(prev); if (activeChapter?.id) next.add(activeChapter.id); return next }) }} style={{ color: selected ? accent : titleColor, fontSize: heading2FontSize, lineHeight: 1.25, margin: '26px 0 10px', paddingBottom: 7, paddingLeft: selected ? 11 : 0, paddingRight: selected ? 6 : 0, borderBottom: `1px solid ${selected ? accent : borderColor}`, background: selected ? `${accent}12` : 'transparent', boxShadow: selected ? `inset 3px 0 0 ${accent}` : 'none', borderRadius: selected ? 4 : 0, boxSizing: 'border-box' }}>{b.text}</h2>)
+        nodes.push(<h2 key={b.id} data-guide-anchor={b.id} data-guide-nav-anchor={b.id} onClick={() => { setActiveAnchorId(b.id); setExpanded(prev => { const next = new Set(prev); if (activeChapter?.id) next.add(activeChapter.id); return next }) }} style={{ color: selected ? accent : titleColor, fontSize: contentHeading2FontSize, lineHeight: 1.25, margin: '26px 0 10px', paddingBottom: 7, paddingLeft: selected ? 11 : 0, paddingRight: selected ? 6 : 0, borderBottom: `1px solid ${selected ? accent : borderColor}`, background: selected ? `${accent}12` : 'transparent', boxShadow: selected ? `inset 3px 0 0 ${accent}` : 'none', borderRadius: selected ? 4 : 0, boxSizing: 'border-box' }}>{b.text}</h2>)
       } else if (b.type === 'heading3') {
         currentSectionTitle = b.text
         const selected = activeAnchorId === b.id
-        nodes.push(<h3 key={b.id} data-guide-anchor={b.id} style={{ color: selected ? accent : titleColor, fontSize: heading3FontSize, lineHeight: 1.3, margin: '20px 0 8px', paddingLeft: selected ? 11 : 0, paddingRight: selected ? 6 : 0, background: selected ? `${accent}12` : 'transparent', boxShadow: selected ? `inset 3px 0 0 ${accent}` : 'none', borderRadius: selected ? 4 : 0, boxSizing: 'border-box' }}>{b.text}</h3>)
+        nodes.push(<h3 key={b.id} data-guide-anchor={b.id} style={{ color: selected ? accent : titleColor, fontSize: contentHeading3FontSize, lineHeight: 1.3, margin: '20px 0 8px', paddingLeft: selected ? 11 : 0, paddingRight: selected ? 6 : 0, background: selected ? `${accent}12` : 'transparent', boxShadow: selected ? `inset 3px 0 0 ${accent}` : 'none', borderRadius: selected ? 4 : 0, boxSizing: 'border-box' }}>{b.text}</h3>)
       } else if (b.type === 'lead') {
-        nodes.push(<p key={`lead-${i}`} style={{ fontSize: leadFontSize, lineHeight: 1.65, color: '#1f2937', margin: '3px 0 16px', fontWeight: 600 }}>{renderTextWithChapterLinks(b.text)}</p>)
+        nodes.push(<p key={`lead-${i}`} style={{ fontSize: contentLeadFontSize, lineHeight: 1.65, color: '#1f2937', margin: '3px 0 16px', fontWeight: 600 }}>{renderTextWithChapterLinks(b.text)}</p>)
       } else if (b.type === 'paragraph') {
-        nodes.push(<p key={`p-${i}`} style={{ fontSize: bodyFontSize, lineHeight: 1.62, margin: '8px 0', color: textColor, fontWeight: 500 }}>{renderTextWithChapterLinks(b.text)}</p>)
+        nodes.push(<p key={`p-${i}`} style={{ fontSize: contentBodyFontSize, lineHeight: 1.62, margin: '8px 0', color: textColor, fontWeight: 500 }}>{renderTextWithChapterLinks(b.text)}</p>)
       } else if (b.type === 'bullet') {
-        nodes.push(<div key={`bullet-${i}`} style={{ display: 'grid', gridTemplateColumns: '12px minmax(0,1fr)', gap: 8, margin: '6px 0', fontSize: bodyFontSize, lineHeight: 1.58, color: textColor, fontWeight: 500 }}><span style={{ color: accent, fontWeight: 900 }}>•</span><span>{renderTextWithChapterLinks(b.text)}</span></div>)
+        nodes.push(<div key={`bullet-${i}`} style={{ display: 'grid', gridTemplateColumns: '12px minmax(0,1fr)', gap: 8, margin: '6px 0', fontSize: contentBodyFontSize, lineHeight: 1.58, color: textColor, fontWeight: 500 }}><span style={{ color: accent, fontWeight: 900 }}>•</span><span>{renderTextWithChapterLinks(b.text)}</span></div>)
       } else if (b.type === 'figure') {
         const renderedFigure = renderFigureAsset(b.text, `fig-${i}`)
         if (renderedFigure) nodes.push(renderedFigure)
-        else nodes.push(<div key={`fig-${i}`} style={{ margin: '14px 0', padding: '12px 14px', border: `1px dashed ${borderColor}`, borderRadius: Math.max(5, radius - 1), color: mutedColor, background: '#f8fafc', fontSize: tableFontSize, fontStyle: 'italic', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 9 }}><span style={{ color: accent }}><FigureIcon /></span><span>{b.text}</span></div>)
+        else nodes.push(<div key={`fig-${i}`} style={{ margin: '14px 0', padding: '12px 14px', border: `1px dashed ${borderColor}`, borderRadius: Math.max(5, radius - 1), color: mutedColor, background: '#f8fafc', fontSize: contentTableFontSize, fontStyle: 'italic', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 9 }}><span style={{ color: accent }}><FigureIcon /></span><span>{b.text}</span></div>)
       } else if (b.type === 'callout') {
         const attention = norm(b.title).includes('attenzione')
         const after = norm(b.title).includes('cosa accade dopo')
         const calloutAccent = attention ? '#a16207' : after ? '#166534' : '#0284c7'
-        nodes.push(<div key={`call-${i}`} style={{ margin: '14px 0', border: `1px solid ${calloutAccent}33`, borderLeft: `4px solid ${calloutAccent}`, borderRadius: radius, background: `${calloutAccent}0b`, padding: '11px 13px' }}><div style={{ color: calloutAccent, fontWeight: 800, fontSize: Math.max(12.5, bodyFontSize - 1.5), marginBottom: b.text ? 5 : 0 }}>{b.title}</div>{b.text ? <div style={{ fontSize: bodyFontSize, lineHeight: 1.56, color: textColor }}>{renderTextWithChapterLinks(b.text)}</div> : null}</div>)
+        nodes.push(<div key={`call-${i}`} style={{ margin: '14px 0', border: `1px solid ${calloutAccent}33`, borderLeft: `4px solid ${calloutAccent}`, borderRadius: radius, background: `${calloutAccent}0b`, padding: '11px 13px' }}><div style={{ color: calloutAccent, fontWeight: 800, fontSize: Math.max(12.5, contentBodyFontSize - 1.5), marginBottom: b.text ? 5 : 0 }}>{b.title}</div>{b.text ? <div style={{ fontSize: contentBodyFontSize, lineHeight: 1.56, color: textColor }}>{renderTextWithChapterLinks(b.text)}</div> : null}</div>)
       } else if (b.type === 'table') {
         nodes.push(
           <div key={`table-${i}`} style={{ margin: '14px 0 18px', overflowX: 'auto', border: `1px solid ${borderColor}`, borderRadius: radius }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: tableFontSize, color: textColor, minWidth: 520, fontWeight: 500 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: contentTableFontSize, color: textColor, minWidth: 520, fontWeight: 500 }}>
               <thead><tr>{b.headers.map((h, hi) => <th key={hi} style={{ textAlign: 'left', verticalAlign: 'top', padding: '9px 10px', color: titleColor, background: headerBg, borderBottom: `1px solid ${borderColor}`, fontWeight: 800 }}>{h}</th>)}</tr></thead>
               <tbody>{b.rows.map((row, ri) => <tr key={ri}>{row.map((cell, ci) => <td key={ci} style={{ verticalAlign: 'top', padding: '8px 10px', borderBottom: ri < b.rows.length - 1 ? `1px solid ${borderColor}88` : 'none', background: ri % 2 ? '#fbfdff' : '#ffffff', lineHeight: 1.5, whiteSpace: 'pre-line' }}>{renderTextWithChapterLinks(cell)}</td>)}</tr>)}</tbody>
             </table>
@@ -720,6 +826,11 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
           dividerColor={titleDividerColor}
           dividerWidth={titleDividerWidth}
           rightContent={<div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <div role='group' aria-label='Dimensione testo della guida' style={{ display: 'inline-flex', alignItems: 'stretch', border: `1px solid ${borderColor}`, borderRadius: 6, overflow: 'hidden', background: '#fff' }}>
+              <button type='button' aria-label='Riduci dimensione testo' title='Riduci dimensione testo' disabled={textScale <= 0.8} onClick={() => setTextScale(prev => clamp(Math.round((prev - 0.1) * 10) / 10, 0.8, 1.4))} style={{ border: 0, borderRight: `1px solid ${borderColor}`, minWidth: 34, height: 31, padding: '0 7px', background: '#fff', color: textScale <= 0.8 ? '#94a3b8' : titleColor, cursor: textScale <= 0.8 ? 'default' : 'pointer', fontSize: 12, fontWeight: 800 }}>A−</button>
+              <button type='button' aria-label='Ripristina dimensione testo' title='Ripristina dimensione testo (100%)' aria-pressed={textScale === 1} onClick={() => setTextScale(1)} style={{ border: 0, borderRight: `1px solid ${borderColor}`, minWidth: 34, height: 31, padding: '0 7px', background: textScale === 1 ? `${accent}12` : '#fff', color: titleColor, cursor: 'pointer', fontSize: 13, fontWeight: 800 }}>A</button>
+              <button type='button' aria-label='Aumenta dimensione testo' title='Aumenta dimensione testo' disabled={textScale >= 1.4} onClick={() => setTextScale(prev => clamp(Math.round((prev + 0.1) * 10) / 10, 0.8, 1.4))} style={{ border: 0, minWidth: 34, height: 31, padding: '0 7px', background: '#fff', color: textScale >= 1.4 ? '#94a3b8' : titleColor, cursor: textScale >= 1.4 ? 'default' : 'pointer', fontSize: 15, fontWeight: 800 }}>A+</button>
+            </div>
             {showVersion ? <span style={{ fontSize: Math.max(11.5, indexFontSize - 2), color: mutedColor, background: '#fff', border: `1px solid ${borderColor}`, borderRadius: 999, padding: '5px 8px', fontWeight: 600 }}>Base {GUIDE_VERSION}</span> : null}
             {manualDownloadUrl ? <button type='button' style={buttonStyle} onClick={() => window.open(manualDownloadUrl, '_blank', 'noopener,noreferrer')}>Scarica manuale</button> : null}
           </div>}
@@ -825,8 +936,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
                 <div style={{ maxWidth: 1040, margin: '0 auto' }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 5 }}>
                     <div style={{ minWidth: 0 }}>
-                      <h1 style={{ color: !activeAnchorId ? accent : titleColor, fontSize: chapterTitleFontSize, lineHeight: 1.22, margin: 0, fontWeight: 800, paddingLeft: !activeAnchorId ? 11 : 0, paddingRight: !activeAnchorId ? 6 : 0, background: !activeAnchorId ? `${accent}12` : 'transparent', boxShadow: !activeAnchorId ? `inset 3px 0 0 ${accent}` : 'none', borderRadius: !activeAnchorId ? 4 : 0, boxSizing: 'border-box' }}>{activeChapter.title}</h1>
-                      {roleBadges(activeChapter, accent)}
+                      <h1 style={{ color: !activeAnchorId ? accent : titleColor, fontSize: contentChapterTitleFontSize, lineHeight: 1.22, margin: 0, fontWeight: 800, paddingLeft: !activeAnchorId ? 11 : 0, paddingRight: !activeAnchorId ? 6 : 0, background: !activeAnchorId ? `${accent}12` : 'transparent', boxShadow: !activeAnchorId ? `inset 3px 0 0 ${accent}` : 'none', borderRadius: !activeAnchorId ? 4 : 0, boxSizing: 'border-box' }}>{activeChapter.title}</h1>
+                      {roleBadges(activeChapter, accent, contentBadgeFontSize)}
                     </div>
                     <button type='button' onClick={() => { activeAnchorRef.current = ''; programmaticAnchorRef.current = ''; setActiveAnchorId(''); programmaticScrollUntilRef.current = Date.now() + 250; if (contentRef.current) contentRef.current.scrollTop = 0 }} style={{ ...buttonStyle, flexShrink: 0 }} title='Torna all’inizio del capitolo'>Inizio ↑</button>
                   </div>
@@ -841,6 +952,50 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
             </main>
           </section>
         </div>
+
+        {imagePreview && typeof document !== 'undefined' ? createPortal(
+          <div
+            role='dialog'
+            aria-modal='true'
+            aria-label={imagePreview.label ? `Immagine ingrandita: ${imagePreview.label}` : 'Immagine ingrandita'}
+            onMouseDown={(event) => { if (event.target === event.currentTarget) setImagePreview(null) }}
+            style={{ position: 'fixed', inset: 0, zIndex: 2147483647, background: 'rgba(15, 23, 42, 0.78)', display: 'flex', flexDirection: 'column', padding: 18, boxSizing: 'border-box' }}
+          >
+            <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10, color: '#fff' }}>
+              <div style={{ minWidth: 0, fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{imagePreview.label || imagePreview.alt}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                <button type='button' onClick={() => changeImageZoom(-imageZoomStep)} disabled={imageScale <= imageMinScale + 0.001} aria-label='Riduci immagine' title='Riduci immagine' style={{ ...buttonStyle, minWidth: 36, background: '#fff', color: titleColor, opacity: imageScale <= imageMinScale + 0.001 ? 0.55 : 1 }}>−</button>
+                <button type='button' onClick={() => changeImageZoom(imageZoomStep)} disabled={imageScale >= imageMaxScale - 0.001} aria-label='Ingrandisci immagine' title={imageIsVector ? 'Ingrandisci immagine' : 'Ingrandisci fino alla risoluzione originale'} style={{ ...buttonStyle, minWidth: 36, background: '#fff', color: titleColor, opacity: imageScale >= imageMaxScale - 0.001 ? 0.55 : 1 }}>+</button>
+                <button type='button' onClick={fitImageToWindow} style={{ ...buttonStyle, background: imageFit ? `${accent}12` : '#fff' }}>Adatta</button>
+                <button type='button' onClick={() => setImagePreview(null)} aria-label='Chiudi immagine' title='Chiudi (Esc)' style={{ ...buttonStyle, minWidth: 38, padding: '4px 10px', background: '#fff', color: titleColor, fontSize: 18, lineHeight: 1 }}>×</button>
+              </div>
+            </div>
+            <div
+              ref={imageViewportRef}
+              style={{ flex: '1 1 auto', minHeight: 0, overflow: 'auto', background: 'rgba(255,255,255,0.05)', borderRadius: 8, boxSizing: 'border-box' }}
+            >
+              <div style={{ minWidth: '100%', minHeight: '100%', width: 'max-content', height: 'max-content', display: 'grid', placeItems: 'center', padding: 12, boxSizing: 'border-box' }}>
+                <img
+                  src={imagePreview.src}
+                  alt={imagePreview.alt}
+                  draggable={false}
+                  onLoad={(event) => {
+                    const img = event.currentTarget
+                    const naturalSize = { width: img.naturalWidth || 0, height: img.naturalHeight || 0 }
+                    setImageNaturalSize(naturalSize)
+                    window.requestAnimationFrame(() => {
+                      const nextFitScale = calculateImageFitScale(naturalSize.width, naturalSize.height)
+                      setImageFitScale(nextFitScale)
+                      if (imageFit) setImageScale(nextFitScale)
+                    })
+                  }}
+                  style={{ display: 'block', width: imageNaturalSize.width > 0 ? `${Math.max(1, Math.round(imageNaturalSize.width * imageScale))}px` : 'auto', maxWidth: 'none', height: 'auto', background: '#fff', borderRadius: 5, boxShadow: '0 12px 35px rgba(0,0,0,.35)' }}
+                />
+              </div>
+            </div>
+          </div>,
+          document.body
+        ) : null}
       </div>
     </div>
   )

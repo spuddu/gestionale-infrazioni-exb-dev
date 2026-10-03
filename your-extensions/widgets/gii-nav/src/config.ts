@@ -10,6 +10,8 @@ export interface NavItem {
   colorAccent: string
   colorBgRest: string
   colorBgHover: string
+  colorBgSelected?: string
+  colorAccentSelected?: string
   roles: string[]
   icon: string
 }

@@ -86,15 +86,16 @@ type SortRule = { key: SortKey; dir: SortDir }
 
 const DEFAULT_SORT_RULES: SortRule[] = [{ key: 'lastUpdate', dir: 'desc' }]
 
-const SETTORE_FROM_CODE: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
-const AREA_LABELS: Record<string, string> = { AGR: 'Agraria', TEC: 'Tecnica', AMM: 'Amministrativa' }
+const SETTORE_FROM_CODE: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS', 10: 'D7' }
+const AREA_LABELS: Record<string, string> = { AGR: 'Agraria', TEC: 'Tecnica', AMM: 'Affari Generali e P.F.' }
 const SETTORE_LABELS: Record<string, string> = {
-  D1: 'Distretto 1 – San Sperate',
-  D2: 'Distretto 2 – Serramanna/Pimpisu',
-  D3: 'Distretto 3 – San Gavino/Villacidro',
-  D4: 'Distretto 4 – Basso Sulcis',
-  D5: 'Distretto 5 – Senorbì',
-  D6: 'Distretto 6 – Cixerri',
+  D1: 'Distretto 1 Quartu Sant’Elena',
+  D2: 'Distretto 2 Serramanna',
+  D3: 'Distretto 3 San Gavino',
+  D4: 'Distretto 4 Basso Sulcis',
+  D5: 'Distretto 5 Senorbì',
+  D6: 'Distretto 6 Cixerri',
+  D7: 'Distretto 7 San Sperate',
   DS: 'Manutenzione opere di dreno e di scolo',
   CR: 'Catasto, Ruoli e Servizi Territoriali',
   GI: 'Gestione irrigua'
@@ -104,7 +105,7 @@ type DomainLabelGroup = 'area' | 'settore' | 'ruolo'
 type DomainLabelMaps = Record<DomainLabelGroup, Record<string, string>>
 
 const EMPTY_DOMAIN_LABELS: DomainLabelMaps = { area: {}, settore: {}, ruolo: {} }
-const SETTORE_TEXT_CODES = new Set(['CR', 'GI', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'DS'])
+const SETTORE_TEXT_CODES = new Set(['CR', 'GI', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'DS'])
 
 function normalizeTextCode (v: any): string {
   return String(v ?? '').trim().toUpperCase()
@@ -851,23 +852,23 @@ function getDataRapportoMs (d: any): number | null {
     getCreatedMs(d)
 }
 
-function getAreaCodeFromRecord (d: any, fallbackArea?: any): 'AMM' | 'AGR' | 'TEC' | '' {
+function getAreaCodeFromRecord (d: any): 'AMM' | 'AGR' | 'TEC' | '' {
   const raw = getFirst(d, ['area_cod', 'Area_cod', 'AREA_COD', 'area', 'Area'], '')
-  return normalizeAreaCode(raw || fallbackArea)
+  return normalizeAreaCode(raw)
 }
 
-function getAreaDisplay (d: any, fallbackArea?: any, domainLabels?: DomainLabelMaps | null): string {
-  const code = getAreaCodeFromRecord(d, fallbackArea)
+function getAreaDisplay (d: any, domainLabels?: DomainLabelMaps | null): string {
+  const code = getAreaCodeFromRecord(d)
   return getAreaLabelFromCode(code, domainLabels)
 }
 
-function getSettoreCodeFromRecord (d: any, fallbackSettore?: any): string {
+function getSettoreCodeFromRecord (d: any): string {
   const raw = getFirst(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'id_settore'], '')
-  return normalizeSettoreCode(raw || fallbackSettore)
+  return normalizeSettoreCode(raw)
 }
 
-function getSettoreDisplay (d: any, user?: GiiUserInfo | null, domainLabels?: DomainLabelMaps | null): string {
-  const code = getSettoreCodeFromRecord(d, user?.settoreCod || user?.settore)
+function getSettoreDisplay (d: any, domainLabels?: DomainLabelMaps | null): string {
+  const code = getSettoreCodeFromRecord(d)
   return getSettoreLabelFromCode(code, domainLabels)
 }
 
@@ -878,7 +879,7 @@ function getGiorniFermo (d: any, now: number): string {
   return String(days)
 }
 
-function getRecordSearchText (d: any, user: GiiUserInfo | null, domainLabels?: DomainLabelMaps | null): string {
+function getRecordSearchText (d: any, domainLabels?: DomainLabelMaps | null): string {
   const parts: any[] = []
   Object.keys(d || {}).forEach(k => {
     const v = d[k]
@@ -897,8 +898,8 @@ function getRecordSearchText (d: any, user: GiiUserInfo | null, domainLabels?: D
     getTecnicoRilevatore(d),
     getIstruttore(d),
     formatDate(getDataRapportoMs(d)),
-    getAreaDisplay(d, user?.areaCod, domainLabels),
-    getSettoreDisplay(d, user, domainLabels),
+    getAreaDisplay(d, domainLabels),
+    getSettoreDisplay(d, domainLabels),
     faseProcedimentaleLabel(d),
     ruoloPressoLabel(d)
   )
@@ -1111,9 +1112,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const ruoloCorrente = getRuoloPressoCuiSiTrova(r)
       const isStale = last !== null && (now - last) > staleMs
 
-      if (q && !getRecordSearchText(r, user, domainLabels).includes(q)) return false
-      if (areaFilter !== 'tutte' && getAreaCodeFromRecord(r, user?.areaCod) !== areaFilter) return false
-      if (settoreFilter !== 'tutte' && getSettoreCodeFromRecord(r, user?.settoreCod) !== settoreFilter) return false
+      if (q && !getRecordSearchText(r, domainLabels).includes(q)) return false
+      if (areaFilter !== 'tutte' && getAreaCodeFromRecord(r) !== areaFilter) return false
+      if (settoreFilter !== 'tutte' && getSettoreCodeFromRecord(r) !== settoreFilter) return false
       if (fromMs !== null && (last === null || last < fromMs)) return false
       if (toMs !== null && (last === null || last > toMs)) return false
       if (faseFilter !== 'tutte' && phase !== faseFilter) return false
@@ -1133,8 +1134,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (key === 'reportDate') return getDataRapportoMs(row) || 0
       if (key === 'rilevatore') return getTecnicoRilevatore(row)
       if (key === 'istruttore') return getIstruttore(row)
-      if (key === 'area') return getAreaDisplay(row, user?.areaCod, domainLabels)
-      if (key === 'settore') return getSettoreDisplay(row, user, domainLabels)
+      if (key === 'area') return getAreaDisplay(row, domainLabels)
+      if (key === 'settore') return getSettoreDisplay(row, domainLabels)
       if (key === 'faseProcedimentale') return faseProcedimentaleLabel(row)
       if (key === 'ruoloCorrente') return ruoloPressoLabel(row)
       if (key === 'giorniFermo') return Number(getGiorniFermo(row, now)) || 0
@@ -1197,11 +1198,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const areeDisponibili = React.useMemo(() => {
     const map = new Map<string, string>()
     for (const r of records) {
-      const settoreCode = getSettoreCodeFromRecord(r, user?.settoreCod)
+      const settoreCode = getSettoreCodeFromRecord(r)
       if (settoreFilter !== 'tutte' && settoreCode !== settoreFilter) continue
-      const code = getAreaCodeFromRecord(r, user?.areaCod)
+      const code = getAreaCodeFromRecord(r)
       if (!code) continue
-      map.set(code, getAreaDisplay(r, user?.areaCod, domainLabels))
+      map.set(code, getAreaDisplay(r, domainLabels))
     }
     const order = ['AMM', 'AGR', 'TEC']
     return Array.from(map.entries()).sort((a, b) => {
@@ -1217,11 +1218,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const settoriDisponibili = React.useMemo(() => {
     const map = new Map<string, string>()
     for (const r of records) {
-      const areaCode = getAreaCodeFromRecord(r, user?.areaCod)
+      const areaCode = getAreaCodeFromRecord(r)
       if (areaFilter !== 'tutte' && areaCode !== areaFilter) continue
-      const code = getSettoreCodeFromRecord(r, user?.settoreCod)
+      const code = getSettoreCodeFromRecord(r)
       if (!code) continue
-      map.set(code, getSettoreDisplay(r, user, domainLabels))
+      map.set(code, getSettoreDisplay(r, domainLabels))
     }
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], 'it', { numeric: true, sensitivity: 'base' }))
   }, [records, areaFilter, user?.settoreCod, user?.areaCod, domainLabels])
@@ -1322,8 +1323,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       formatDate(getDataRapportoMs(r)),
       getTecnicoRilevatore(r),
       getIstruttore(r),
-      getAreaDisplay(r, user?.areaCod, domainLabels),
-      getSettoreDisplay(r, user, domainLabels),
+      getAreaDisplay(r, domainLabels),
+      getSettoreDisplay(r, domainLabels),
       faseProcedimentaleLabel(r),
       ruoloPressoLabel(r),
       formatDateTime(getLastTouchMs(r)),
@@ -1543,8 +1544,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                       <td style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatDate(getDataRapportoMs(r))}</td>
                       <td title={getTecnicoRilevatore(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getTecnicoRilevatore(r)}</td>
                       <td title={getIstruttore(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getIstruttore(r)}</td>
-                      <td title={getAreaDisplay(r, user?.areaCod, domainLabels)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getAreaDisplay(r, user?.areaCod, domainLabels)}</td>
-                      <td title={getSettoreDisplay(r, user, domainLabels)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getSettoreDisplay(r, user, domainLabels)}</td>
+                      <td title={getAreaDisplay(r, domainLabels)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getAreaDisplay(r, domainLabels)}</td>
+                      <td title={getSettoreDisplay(r, domainLabels)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getSettoreDisplay(r, domainLabels)}</td>
                       <td title={faseProcedimentaleLabel(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{faseProcedimentaleLabel(r)}</td>
                       <td title={ruoloPressoLabel(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ruoloPressoLabel(r)}</td>
                       <td style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatDateTime(last)}</td>

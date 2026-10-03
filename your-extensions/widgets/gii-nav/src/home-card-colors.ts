@@ -11,6 +11,8 @@ type HomeCardLike = {
   colorAccent?: string
   colorBgRest?: string
   colorBgHover?: string
+  colorBgSelected?: string
+  colorAccentSelected?: string
   roles?: string[]
   icon?: string
 }
@@ -195,6 +197,8 @@ export function getEffectiveHomeCardsFromAppConfig(appConfig: any): HomeCardLike
       colorAccent: pal.accent,
       colorBgRest: '#192e4d',
       colorBgHover: '',
+      colorBgSelected: '',
+      colorAccentSelected: '',
       roles: ['*'],
       icon: inferCardIcon({ id: `card_page_${pg.pageId}`, label: pg.label, hashPage: pg.token })
     })
@@ -247,13 +251,17 @@ export function applyHomeCardColors(item: NavItem, appConfig: any): NavItem {
   const colorAccent = String(card.colorAccent || '').trim() || item.colorAccent
   const colorBgRest = getHomeCardRestBgFromAppConfig(appConfig) || item.colorBgRest
   const colorBgHover = colorBg
+  const colorBgSelected = String(card.colorBgSelected || '').trim()
+  const colorAccentSelected = String(card.colorAccentSelected || '').trim()
 
   return {
     ...item,
     colorBg,
     colorAccent,
     colorBgRest,
-    colorBgHover
+    colorBgHover,
+    colorBgSelected,
+    colorAccentSelected
   }
 }
 
@@ -295,6 +303,8 @@ export function buildNavItemsFromHome(appConfig: any): NavItem[] {
 
     const colorBg = String(card.colorBg || '').trim() || '#1e3a5f'
     const colorAccent = String(card.colorAccent || '').trim() || '#60a5fa'
+    const colorBgSelected = String(card.colorBgSelected || '').trim()
+    const colorAccentSelected = String(card.colorAccentSelected || '').trim()
     const roles = Array.isArray(card.roles) && card.roles.length ? card.roles.map(String) : ['*']
 
     items.push({
@@ -309,6 +319,8 @@ export function buildNavItemsFromHome(appConfig: any): NavItem[] {
       colorAccent,
       colorBgRest: restBg,
       colorBgHover: colorBg,
+      colorBgSelected,
+      colorAccentSelected,
       roles,
       icon: String(card.icon || '').trim() || inferCardIcon(card)
     })

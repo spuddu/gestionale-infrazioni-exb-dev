@@ -118,25 +118,13 @@ function normalizeSectorCodeForAmm (value: any): string {
   const raw = String(value || '').trim()
   if (!raw) return ''
   const upper = raw.toUpperCase().replace(/[–—]/g, '-').replace(/\s+/g, ' ')
-  const direct = upper.match(/\b(D[1-6]|DS|CR|GI)\b/)
+  const direct = upper.match(/\b(D[1-7]|DS|CR|GI)\b/)
   if (direct) return direct[1]
-  const distretto = upper.match(/DISTRETTO\s*([1-6])/) || upper.match(/\bD\.?\s*([1-6])\b/)
+  const distretto = upper.match(/DISTRETTO\s*([1-7])/) || upper.match(/\bD\.?\s*([1-7])\b/)
   if (distretto) return `D${distretto[1]}`
   if (/DRENO|SCOLO|TECNICO/.test(upper)) return 'DS'
   if (/CATASTO|RUOLI|SERVIZI TERRITORIALI/.test(upper)) return 'CR'
   if (/GESTIONE IRRIGUA/.test(upper)) return 'GI'
-  return ''
-}
-
-function settoreCodeFromUfficioAmm (value: any): string {
-  const upper = String(value || '').toUpperCase()
-  if (!upper) return ''
-  if (/QUARTU|VILLAPUTZU|MURAVERA|SAN SPERATE/.test(upper)) return 'D1'
-  if (/SERRAMANNA|PIMPISU/.test(upper)) return 'D2'
-  if (/SAN GAVINO|VILLACIDRO/.test(upper)) return 'D3'
-  if (/SAN GIOVANNI SUERGIU|MASAINAS|BASSO SULCIS/.test(upper)) return 'D4'
-  if (/SENORB/.test(upper)) return 'D5'
-  if (/IGLESIAS|SILIQUA|VILLASOR|CIXERRI/.test(upper)) return 'D6'
   return ''
 }
 
@@ -147,7 +135,7 @@ function normalizeRilevazioneCodeForAmm (data: any, oid: number | null): string 
   const op = pickAttrCI(d, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
   let prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'IT') ? 'IT' : 'TR'
   let oidPart = oid != null && Number.isFinite(Number(oid)) ? String(Number(oid)) : ''
-  let settore = normalizeSectorCodeForAmm(pickAttrCI(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'SETTORE'])) || settoreCodeFromUfficioAmm(pickAttrCI(d, ['ufficio_zona', 'Ufficio_zona', 'UFFICIO_ZONA']))
+  let settore = normalizeSectorCodeForAmm(pickAttrCI(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'SETTORE']))
 
   let m = raw.match(/^(TR|IT)-?(\d+)(?:-([A-Z0-9]+))?$/i)
   if (m) {
@@ -252,17 +240,18 @@ function buildArticleReference (data: any): { elenco: string, riferimento: strin
 // --- etichette dominio codificato (hardcoded, verificate contro lo schema
 // del Feature Layer madre - non dipendono dall'array fields live) ---
 
-const AREA_LABELS: Record<string, string> = { AMM: 'Amministrativa', AGR: 'Agraria', TEC: 'Tecnica' }
+const AREA_LABELS: Record<string, string> = { AMM: 'Affari Generali e P.F.', AGR: 'Agraria', TEC: 'Tecnica' }
 
 const SETTORE_LABELS: Record<string, string> = {
   CR: 'Catasto, Ruoli e Servizi Territoriali',
   GI: 'Gestione irrigua',
-  D1: 'Distretto 1 (Quartu Sant’Elena/Villaputzu/Muravera – San Sperate)',
-  D2: 'Distretto 2 (Serramanna/Pimpisu)',
-  D3: 'Distretto 3 (San Gavino - Villacidro)',
-  D4: 'Distretto 4 (Basso Sulcis)',
-  D5: 'Distretto 5 (Senorbì)',
-  D6: 'Distretto 6 (Cixerri)',
+  D1: 'Distretto 1 Quartu Sant’Elena',
+  D2: 'Distretto 2 Serramanna',
+  D3: 'Distretto 3 San Gavino',
+  D4: 'Distretto 4 Basso Sulcis',
+  D5: 'Distretto 5 Senorbì',
+  D6: 'Distretto 6 Cixerri',
+  D7: 'Distretto 7 San Sperate',
   DS: 'Manutenzione opere di dreno e di scolo'
 }
 

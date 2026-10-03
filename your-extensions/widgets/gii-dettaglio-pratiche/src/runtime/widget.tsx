@@ -41,9 +41,9 @@ function readDetailCurrentUser (): DetailCurrentUser | null {
 
 const RUOLO_CODES = new Set(['TR', 'IT', 'CS', 'RIT', 'DT', 'DA', 'ADMIN', 'IA', 'RIA'])
 const AREA_NUM: Record<string, number> = { AMM: 1, AGR: 2, TEC: 3 }
-const SETTORE_NUM: Record<string, number> = { CR: 1, GI: 2, D1: 3, D2: 4, D3: 5, D4: 6, D5: 7, D6: 8, DS: 9 }
+const SETTORE_NUM: Record<string, number> = { CR: 1, GI: 2, D1: 3, D2: 4, D3: 5, D4: 6, D5: 7, D6: 8, DS: 9, D7: 10 }
 const AREA_COD_FROM_NUM: Record<number, string> = { 1: 'AMM', 2: 'AGR', 3: 'TEC' }
-const SETTORE_COD_FROM_NUM: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
+const SETTORE_COD_FROM_NUM: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS', 10: 'D7' }
 
 function normalizeRuoloCod (v: any): string {
   const s = String(v ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
@@ -75,7 +75,7 @@ function normalizeSettoreCod (v: any): string {
   if (!s) return ''
   const n = Number(s)
   if (Number.isFinite(n) && SETTORE_COD_FROM_NUM[n]) return SETTORE_COD_FROM_NUM[n]
-  const distretto = s.match(/DISTRETTO([1-6])/)
+  const distretto = s.match(/DISTRETTO([1-7])/)
   if (distretto) return `D${distretto[1]}`
   if (s.includes('DRENO') || s.includes('SCOLO')) return 'DS'
   if (s.includes('CATASTO') || s.includes('RUOLI')) return 'CR'
@@ -85,7 +85,7 @@ function normalizeSettoreCod (v: any): string {
 
 
 const AREA_LABEL: Record<string, string> = {
-  AMM: 'Amministrativa',
+  AMM: 'Affari Generali e P.F.',
   AGR: 'Agraria',
   TEC: 'Tecnica'
 }
@@ -93,12 +93,13 @@ const AREA_LABEL: Record<string, string> = {
 const SETTORE_LABEL: Record<string, string> = {
   CR: 'Catasto, Ruoli e Servizi Territoriali',
   GI: 'Gestione irrigua',
-  D1: "Distretto 1 (Quartu Sant'Elena/Villaputzu/Muravera – San Sperate)",
-  D2: 'Distretto 2 (Serramanna/Pimpisu)',
-  D3: 'Distretto 3 (San Gavino - Villacidro)',
-  D4: 'Distretto 4 (Basso Sulcis)',
-  D5: 'Distretto 5 (Senorbì)',
-  D6: 'Distretto 6 (Cixerri)',
+  D1: 'Distretto 1 Quartu Sant’Elena',
+  D2: 'Distretto 2 Serramanna',
+  D3: 'Distretto 3 San Gavino',
+  D4: 'Distretto 4 Basso Sulcis',
+  D5: 'Distretto 5 Senorbì',
+  D6: 'Distretto 6 Cixerri',
+  D7: 'Distretto 7 San Sperate',
   DS: 'Manutenzione opere di dreno e di scolo'
 }
 
@@ -2529,7 +2530,7 @@ function buildIterFullNameFromAttrs (attrs: any): string {
 function isIterRoleSectorPlaceholder (raw: any): boolean {
   const s = String(raw ?? '').trim().toUpperCase().replace(/[\s_-]+/g, ' ')
   if (!s) return false
-  if (/^(TR|IT|IA|CS|RIT|RIA|DT|DA|ADMIN)(?: (?:D[1-6]|DS|CR|GI|AGR|TEC|AMM))?$/.test(s)) return true
+  if (/^(TR|IT|IA|CS|RIT|RIA|DT|DA|ADMIN)(?: (?:D[1-7]|DS|CR|GI|AGR|TEC|AMM))?$/.test(s)) return true
   if (/^(TECNICO RILEVATORE|ISTRUTTORE TECNICO|CAPO SETTORE|RESPONSABILE ISTRUTTORIA TECNICA|RESPONSABILE ISTRUTTORIA AMMINISTRATIVA|DIRETTORE D AREA|DIRETTORE AREA)$/.test(s)) return true
   return false
 }

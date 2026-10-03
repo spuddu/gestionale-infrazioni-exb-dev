@@ -53,18 +53,19 @@ const PROFILO_FULL: Record<string, string> = {
 }
 const AREA_LABEL: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
 const AREA_NUM: Record<string, number> = { AMM:1, AGR:2, TEC:3 }
-const AREA_FULL: Record<string, string> = { AMM:'Amministrativa', AGR:'Agraria', TEC:'Tecnica' }
-const SETTORE_LABEL: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS' }
-const SETTORE_NUM: Record<string, number> = { CR:1, GI:2, D1:3, D2:4, D3:5, D4:6, D5:7, D6:8, DS:9 }
+const AREA_FULL: Record<string, string> = { AMM:'Affari Generali e P.F.', AGR:'Agraria', TEC:'Tecnica' }
+const SETTORE_LABEL: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS', 10:'D7' }
+const SETTORE_NUM: Record<string, number> = { CR:1, GI:2, D1:3, D2:4, D3:5, D4:6, D5:7, D6:8, DS:9, D7:10 }
 const SETTORE_FULL: Record<string, string> = {
   CR:'Catasto, Ruoli e Servizi Territoriali',
   GI:'Gestione irrigua',
-  D1:"Distretto 1 (Quartu Sant'Elena/Villaputzu/Muravera – San Sperate)",
-  D2:'Distretto 2 (Serramanna/Pimpisu)',
-  D3:'Distretto 3 (San Gavino - Villacidro)',
-  D4:'Distretto 4 (Basso Sulcis)',
-  D5:'Distretto 5 (Senorbì)',
-  D6:'Distretto 6 (Cixerri)',
+  D1:'Distretto 1 Quartu Sant’Elena',
+  D2:'Distretto 2 Serramanna',
+  D3:'Distretto 3 San Gavino',
+  D4:'Distretto 4 Basso Sulcis',
+  D5:'Distretto 5 Senorbì',
+  D6:'Distretto 6 Cixerri',
+  D7:'Distretto 7 San Sperate',
   DS:'Manutenzione opere di dreno e di scolo'
 }
 
@@ -83,7 +84,8 @@ const UFFICIO_LABEL: Record<number, string> = {
   12:'Iglesias (loc. Sa Stoia)',
   13:'Siliqua',
   14:'Villasor',
-  15:'San Giovanni Suergiu (loc. Is Samis)'
+  15:'San Giovanni Suergiu (loc. Is Samis)',
+  16:'Fluminimaggiore'
 }
 
 
@@ -281,7 +283,7 @@ interface GiiUserRole {
   /** Etichetta area risolta preferibilmente da dominio AGOL. */
   areaFull?: string
   settore: number | null
-  /** Codice settore testuale ufficiale (CR/GI/D1..D6/DS). */
+  /** Codice settore testuale ufficiale (CR/GI/D1..D7/DS). */
   settoreCod: string
   /** Alias snake_case per compatibilità con vecchi widget. */
   settore_cod?: string
@@ -394,7 +396,7 @@ function getSettoreLabel(user: GiiUserRole | null, compact = false): string {
   if (!user) return ''
   const code = normCode(user.settoreCod || (user.settore != null ? SETTORE_LABEL[user.settore] : ''))
   if (user.settoreFull) return String(user.settoreFull).trim()
-  if (compact && /^D[1-6]$/.test(code)) return `Distretto ${code.slice(1)}`
+  if (compact && /^D[1-7]$/.test(code)) return `Distretto ${code.slice(1)}`
   return SETTORE_FULL[code] || code
 }
 
@@ -803,6 +805,7 @@ const GII_WRITE_VIEW_BY_SETTORE: Record<string, string> = {
   D4: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D4/FeatureServer/0',
   D5: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D5/FeatureServer/0',
   D6: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D6/FeatureServer/0',
+  D7: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D7/FeatureServer/0',
   DS: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC_DS/FeatureServer/0'
 }
 
@@ -895,6 +898,7 @@ function mergeCurrentAndFallbackGiiAlerts (currentActivities: GiiAlertItem[], dy
   // passa da gii-azioni e viene materializzato dall'header.
   const dynamicTakeChargeFallback = dynamic
     .filter(a => isGiiTakeChargeAlert(a) && alertIsNewRilevazione(a))
+    .filter(a => !(a?.raw as any)?.__gii_suppress_dynamic_new_rilevazione)
     .filter(a => {
       const key = alertPracticeMergeKey(a)
       return !!key && !currentKeys.has(key)
@@ -1334,7 +1338,7 @@ function parseSectorCodeCandidate (value: any): string {
   if (!raw) return ''
 
   const compact = raw.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
-  if (/^D[1-6]$/.test(compact)) return compact
+  if (/^D[1-7]$/.test(compact)) return compact
   if (compact === 'DS' || compact === 'CR' || compact === 'GI') return compact
 
   const n = Number(compact)
@@ -1343,7 +1347,7 @@ function parseSectorCodeCandidate (value: any): string {
   // Fallback solo per valori strutturati/compositi di workflow (es. CS-D1).
   // Gli username sono identificativi opachi e non devono determinare il settore.
   const spaced = raw.toUpperCase().replace(/_/g, ' ').replace(/-/g, ' ').replace(/\s+/g, ' ').trim()
-  const d = spaced.match(/(?:^|\s)D([1-6])(?:\s|$)/)
+  const d = spaced.match(/(?:^|\s)D([1-7])(?:\s|$)/)
   if (d) return `D${d[1]}`
   if (/(?:^|\s)DS(?:\s|$)/.test(spaced)) return 'DS'
   if (/(?:^|\s)CR(?:\s|$)/.test(spaced)) return 'CR'
@@ -1369,7 +1373,7 @@ function sectorCodeFromAlert (alert: GiiAlertItem | null | undefined): string {
     .map(value => parseSectorCodeCandidate(value))
     .filter(Boolean)
 
-  const actorDistrict = actorCodes.find(code => /^D[1-6]$/.test(code) || code === 'DS' || code === 'CR') || ''
+  const actorDistrict = actorCodes.find(code => /^D[1-7]$/.test(code) || code === 'DS' || code === 'CR') || ''
 
   const directValues = alertRawValuesPracticeFirst(alert, [
     'settore_cod',
@@ -1555,13 +1559,13 @@ function looksLikeGiiRoleCode (value: any): boolean {
   const text = String(value ?? '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, ' ')
   if (!text) return false
   if (/^(TR|IT|IA|CS|RIT|RIA|DT|DA|DIR)$/.test(text)) return true
-  if (/^(TR|IT|IA|CS|RIT|RIA|DT|DIR)[\s-]*(AGR|TEC|AMM|D[1-6]|DS|CR)$/.test(text)) return true
+  if (/^(TR|IT|IA|CS|RIT|RIA|DT|DIR)[\s-]*(AGR|TEC|AMM|D[1-7]|DS|CR)$/.test(text)) return true
   return false
 }
 
 function looksLikeGiiRoleLabel (value: any): boolean {
   const norm = String(value ?? '').trim().replace(/\s+/g, ' ').toUpperCase()
-  return /^(TECNICO RILEVATORE|ISTRUTTORE TECNICO|ISTRUTTORE AMMINISTRATIVO|CAPO SETTORE(?:\s+(?:D[1-6]|DS|CR))?|RESPONSABILE ISTRUTTORIA TECNICA|RESPONSABILE ISTRUTTORIA AMMINISTRATIVA|DIRETTORE D[’']AREA|DIRETTORE AREA AMMINISTRATIVA)$/.test(norm)
+  return /^(TECNICO RILEVATORE|ISTRUTTORE TECNICO|ISTRUTTORE AMMINISTRATIVO|CAPO SETTORE(?:\s+(?:D[1-7]|DS|CR))?|RESPONSABILE ISTRUTTORIA TECNICA|RESPONSABILE ISTRUTTORIA AMMINISTRATIVA|DIRETTORE D[’']AREA|DIRETTORE AREA AMMINISTRATIVA)$/.test(norm)
 }
 
 function maybePersonDisplayName (value: any): string {
@@ -2274,17 +2278,31 @@ function materializeAlertPick (alert: GiiAlertItem | null | undefined, names: st
   return alertRawValue(alert, names)
 }
 
-function materializeAlertArea (alert: GiiAlertItem, user: any): string {
+function materializeAlertIsTakeChargeState (value: any): boolean {
+  const s = String(value ?? '').trim().toUpperCase()
+  if (!s) return false
+  if (s === '1') return true
+  return s.includes('DA_PRENDERE_IN_CARICO') || s.includes('DA_PRENDERE') || s.includes('PRESA_DA_FARE')
+}
+
+function materializeAlertIsNewSurveyTakeCharge (alert: GiiAlertItem | null | undefined): boolean {
+  return !!alert && isGiiTakeChargeAlert(alert) && alertIsNewRilevazione(alert)
+}
+
+function materializeAlertSuppressDynamicNewSurveyTakeCharge (alert: GiiAlertItem): void {
+  const raw = (alert?.raw && typeof alert.raw === 'object') ? alert.raw : {}
+  alert.raw = { ...raw, __gii_suppress_dynamic_new_rilevazione: true }
+}
+
+function materializeAlertArea (alert: GiiAlertItem): string {
   const fromPractice = String(materializeAlertPick(alert, ['area_cod', 'area', 'destinatario_area']) ?? '').trim().toUpperCase()
   if (fromPractice === 'AGR' || fromPractice === 'TEC' || fromPractice === 'AMM') return fromPractice
-  const fromUser = String(user?.areaCod || user?.area_cod || user?.area || '').trim().toUpperCase()
-  if (fromUser === 'AGR' || fromUser === 'TEC' || fromUser === 'AMM') return fromUser
   return ''
 }
 
-function materializeAlertSector (alert: GiiAlertItem, user: any): string {
-  const raw = String(materializeAlertPick(alert, ['settore_cod', 'settore', 'destinatario_settore']) ?? user?.settoreCod ?? user?.settore_cod ?? '').trim().toUpperCase()
-  const m = raw.match(/^D\s*([1-6])$/)
+function materializeAlertSector (alert: GiiAlertItem): string {
+  const raw = String(materializeAlertPick(alert, ['settore_cod', 'settore', 'destinatario_settore']) ?? '').trim().toUpperCase()
+  const m = raw.match(/^D\s*([1-7])$/)
   if (m) return `D${m[1]}`
   return raw
 }
@@ -2301,8 +2319,8 @@ function materializeAlertDestRole (user: any): string {
   return role.replace(/_(AGR|TEC|AMM)$/i, '')
 }
 
-function materializeAlertOfficeId (alert: GiiAlertItem, user: any): number | null {
-  const raw = materializeAlertPick(alert, ['id_ufficio', 'ufficio_id', 'destinatario_ufficio_id']) ?? user?.ufficio
+function materializeAlertOfficeId (alert: GiiAlertItem): number | null {
+  const raw = materializeAlertPick(alert, ['id_ufficio', 'ufficio_id', 'destinatario_ufficio_id'])
   const n = Number(raw)
   return Number.isFinite(n) ? n : null
 }
@@ -2497,17 +2515,32 @@ async function materializeMissingTakeChargeActivities (args: {
   currentActivities: GiiAlertItem[]
   dynamicAlerts: GiiAlertItem[]
   user: any
+  practiceLayerUrl?: string
   signal?: AbortSignal
 }): Promise<number> {
+  const role = materializeAlertDestRole(args.user)
+  if (role !== 'CS') return 0
+
+  const currentSurveyActivities = (args.currentActivities || [])
+    .filter(a => materializeAlertIsNewSurveyTakeCharge(a))
+
   const currentKeys = new Set((args.currentActivities || []).map(a => giiAlertPracticeIdentityKey(a)).filter(Boolean))
   const missing = (args.dynamicAlerts || [])
     .filter(a => isGiiTakeChargeAlert(a))
+    .filter(a => alertIsNewRilevazione(a))
     .filter(a => {
       const key = giiAlertPracticeIdentityKey(a)
       return !!key && !currentKeys.has(key)
     })
 
-  if (!missing.length) return 0
+  if (!currentSurveyActivities.length && !missing.length) return 0
+
+  const practiceLayerUrl = String(args.practiceLayerUrl || '').trim()
+  if (!practiceLayerUrl) {
+    console.warn('[GII-Header] Riconciliazione nuove rilevazioni saltata: vista pratica di scrittura non disponibile.')
+    return 0
+  }
+
   throwIfHeaderAborted(args.signal)
 
   try {
@@ -2517,13 +2550,32 @@ async function materializeMissingTakeChargeActivities (args: {
     if (typeof layer.load === 'function') await layer.load(args.signal ? { signal: args.signal } : undefined)
     throwIfHeaderAborted(args.signal)
 
+    const practiceLayer = new FeatureLayer({ url: practiceLayerUrl, outFields: ['*'] })
+    if (typeof practiceLayer.load === 'function') await practiceLayer.load(args.signal ? { signal: args.signal } : undefined)
+    throwIfHeaderAborted(args.signal)
+
     const fieldMap = new Map<string, string>()
     ;(Array.isArray(layer?.fields) ? layer.fields : []).forEach((f: any) => {
       const name = String(f?.name || '').trim()
       if (name) fieldMap.set(name.toLowerCase(), name)
     })
 
+    const practiceFieldMap = new Map<string, string>()
+    ;(Array.isArray(practiceLayer?.fields) ? practiceLayer.fields : []).forEach((f: any) => {
+      const name = String(f?.name || '').trim()
+      if (name) practiceFieldMap.set(name.toLowerCase(), name)
+    })
+
     const oidField = String(layer?.objectIdField || materializeAlertRealField(fieldMap, 'OBJECTID') || 'OBJECTID')
+    const practiceOidField = String(practiceLayer?.objectIdField || materializeAlertRealField(practiceFieldMap, 'OBJECTID') || 'OBJECTID')
+    const practiceGlobalIdField = String(practiceLayer?.globalIdField || materializeAlertRealField(practiceFieldMap, 'globalid') || '')
+    const practiceCsStateField = materializeAlertRealField(practiceFieldMap, 'stato_CS')
+
+    if (!practiceCsStateField) {
+      console.warn('[GII-Header] Riconciliazione nuove rilevazioni saltata: campo stato_CS non disponibile sulla vista pratica.')
+      return 0
+    }
+
     const makeAttrsForLayer = (attrs: Record<string, any>): Record<string, any> => {
       const out: Record<string, any> = {}
       Object.entries(attrs).forEach(([name, value]) => {
@@ -2533,7 +2585,95 @@ async function materializeMissingTakeChargeActivities (args: {
       return out
     }
 
+    type PracticeCsState = { found: boolean, state: any }
+    const practiceStateCache = new Map<string, PracticeCsState>()
+
+    const readPracticeCsState = async (parentGlobalId: string, parentObjectId: number | null): Promise<PracticeCsState> => {
+      const gid = materializeAlertNormGid(parentGlobalId)
+      const oid = Number(parentObjectId)
+      const cacheKey = gid ? `gid:${gid}` : (Number.isFinite(oid) ? `oid:${oid}` : '')
+      if (!cacheKey) return { found: false, state: null }
+      const cached = practiceStateCache.get(cacheKey)
+      if (cached) return cached
+
+      const clauses: string[] = []
+      if (practiceGlobalIdField && gid) {
+        clauses.push(`${practiceGlobalIdField} = ${materializeAlertSqlQuote(`{${gid}}`)}`)
+        clauses.push(`${practiceGlobalIdField} = ${materializeAlertSqlQuote(gid)}`)
+      }
+      if (Number.isFinite(oid)) clauses.push(`${practiceOidField} = ${oid}`)
+      if (!clauses.length) return { found: false, state: null }
+
+      const q = practiceLayer.createQuery ? practiceLayer.createQuery() : {}
+      q.where = clauses.map(c => `(${c})`).join(' OR ')
+      q.outFields = [practiceCsStateField, practiceOidField, practiceGlobalIdField].filter(Boolean)
+      q.returnGeometry = false
+      q.num = 1
+      const res = await practiceLayer.queryFeatures(q, args.signal ? { signal: args.signal } : undefined)
+      throwIfHeaderAborted(args.signal)
+      const attrs = res?.features?.[0]?.attributes || null
+      const result = attrs
+        ? { found: true, state: attrs[practiceCsStateField] }
+        : { found: false, state: null }
+      practiceStateCache.set(cacheKey, result)
+      return result
+    }
+
+    const deleteStaleCurrentActivity = async (alert: GiiAlertItem): Promise<number> => {
+      const parentGlobalId = String(alert.parentGlobalId || materializeAlertPick(alert, ['parent_globalid']) || '').trim()
+      const key = String(materializeAlertPick(alert, ['chiave_attivita']) || alert.alertKey || '').trim()
+      const clauses: string[] = []
+
+      const fKey = materializeAlertRealField(fieldMap, 'chiave_attivita')
+      if (fKey && key) clauses.push(`${fKey} = ${materializeAlertSqlQuote(key)}`)
+
+      const fParentGid = materializeAlertRealField(fieldMap, 'parent_globalid')
+      const fTipo = materializeAlertRealField(fieldMap, 'tipo_attivita')
+      const fRole = materializeAlertRealField(fieldMap, 'destinatario_ruolo')
+      const fSubtype = materializeAlertRealField(fieldMap, 'sottotipo_attivita')
+      const fOrigin = materializeAlertRealField(fieldMap, 'origine_evento')
+      if (fParentGid && fTipo && fRole && parentGlobalId && (fSubtype || fOrigin)) {
+        const gid = materializeAlertNormGid(parentGlobalId)
+        const newSurveyParts: string[] = []
+        if (fSubtype) newSurveyParts.push(`${fSubtype} = 'NUOVA_RILEVAZIONE'`)
+        if (fOrigin) newSurveyParts.push(`${fOrigin} = 'NUOVA_RILEVAZIONE_SURVEY'`)
+        clauses.push(`(LOWER(${fParentGid}) = ${materializeAlertSqlQuote(gid)} OR LOWER(${fParentGid}) = ${materializeAlertSqlQuote(`{${gid}}`)}) AND ${fTipo} = 'PRESA_IN_CARICO' AND ${fRole} = 'CS' AND (${newSurveyParts.join(' OR ')})`)
+      }
+      if (!clauses.length) return 0
+
+      const q = layer.createQuery ? layer.createQuery() : {}
+      q.where = clauses.map(c => `(${c})`).join(' OR ')
+      q.outFields = [oidField]
+      q.returnGeometry = false
+      const found = await layer.queryFeatures(q, args.signal ? { signal: args.signal } : undefined)
+      throwIfHeaderAborted(args.signal)
+      const deletes = (found?.features || [])
+        .map((feature: any) => feature?.attributes?.[oidField])
+        .filter((value: any) => value !== null && value !== undefined)
+        .map((objectId: any) => ({ objectId }))
+      if (!deletes.length) return 0
+
+      const editResult = await layer.applyEdits({ deleteFeatures: deletes }, args.signal ? { signal: args.signal } : undefined)
+      throwIfHeaderAborted(args.signal)
+      const results = Array.isArray(editResult?.deleteFeatureResults) ? editResult.deleteFeatureResults : []
+      if (!results.length) return deletes.length
+      return results.filter((r: any) => !r?.error && r?.success !== false).length
+    }
+
     let changed = 0
+
+    // Prima ripuliamo eventuali attività "Nuova rilevazione ricevuta" rimaste
+    // dopo la presa in carico. La fonte autorevole è lo stato_CS della pratica:
+    // solo stato 1 rappresenta ancora una presa in carico da effettuare.
+    for (const alert of currentSurveyActivities) {
+      throwIfHeaderAborted(args.signal)
+      const parentGlobalId = String(alert.parentGlobalId || materializeAlertPick(alert, ['parent_globalid']) || '').trim()
+      const parentObjectIdNum = Number(alert.parentObjectId ?? materializeAlertPick(alert, ['parent_objectid']))
+      const parentObjectId = Number.isFinite(parentObjectIdNum) ? parentObjectIdNum : null
+      const practiceState = await readPracticeCsState(parentGlobalId, parentObjectId)
+      if (!practiceState.found || materializeAlertIsTakeChargeState(practiceState.state)) continue
+      changed += await deleteStaleCurrentActivity(alert)
+    }
 
     for (const alert of missing) {
       throwIfHeaderAborted(args.signal)
@@ -2541,15 +2681,33 @@ async function materializeMissingTakeChargeActivities (args: {
       if (!parentGlobalId) continue
 
       const parentObjectId = Number(alert.parentObjectId)
-      const area = materializeAlertArea(alert, args.user)
-      const settore = materializeAlertSector(alert, args.user)
-      const ufficioId = materializeAlertOfficeId(alert, args.user)
-      const role = materializeAlertDestRole(args.user)
+      const authoritativeState = await readPracticeCsState(parentGlobalId, Number.isFinite(parentObjectId) ? parentObjectId : null)
+      if (authoritativeState.found && !materializeAlertIsTakeChargeState(authoritativeState.state)) {
+        // La vista dinamica può essere momentaneamente indietro rispetto alla pratica.
+        // In questo caso non solo evitiamo di ricreare l'attività corrente, ma
+        // impediamo anche al fallback dinamico di rimettere la card nel popup.
+        materializeAlertSuppressDynamicNewSurveyTakeCharge(alert)
+        continue
+      }
+      if (!authoritativeState.found) continue
+
+      const area = materializeAlertArea(alert)
+      const settore = materializeAlertSector(alert)
+      const ufficioId = materializeAlertOfficeId(alert)
+      if (!area || !settore || ufficioId == null) {
+        console.warn('[GII-Header] Materializzazione attività saltata: dati organizzativi della pratica incompleti.', {
+          parentGlobalId,
+          parentObjectId: Number.isFinite(parentObjectId) ? parentObjectId : null,
+          area,
+          settore,
+          ufficioId
+        })
+        continue
+      }
+
       // La materializzazione serve esclusivamente al PRIMO ingresso Survey/TR → CS.
-      // Dopo un'assegnazione all'IT o qualunque avanzamento del workflow non deve
-      // ricreare la vecchia attività "Nuova rilevazione ricevuta" se, per un
-      // ritardo di sincronizzazione, l'attività corrente appena scritta non è ancora
-      // visibile nella view. In quel caso è meglio attendere il refresh reale.
+      // Oltre alla verifica autorevole di stato_CS = 1 sopra, manteniamo il blocco
+      // sugli avanzamenti successivi del workflow per evitare ricostruzioni tardive.
       const hasWorkflowProgress = [
         'it_assegnato_username', 'it_assegnato_nome', 'dt_assegnazione_it',
         'stato_IT', 'dt_stato_IT', 'stato_RIT', 'dt_stato_RIT',
@@ -2561,7 +2719,8 @@ async function materializeMissingTakeChargeActivities (args: {
         if (v === 0 || v === '0') return false
         return true
       })
-      if (role !== 'CS' || hasWorkflowProgress) continue
+      if (hasWorkflowProgress) continue
+
       const eventMs = alertEventDateMs(alert) ?? Date.now()
       const numero = materializeAlertNumber(alert)
       const key = `${materializeAlertNormGid(parentGlobalId)}|PRESA_IN_CARICO|NUOVA_RILEVAZIONE|${role}|${area}|${settore}|${ufficioId ?? ''}`
@@ -2623,7 +2782,7 @@ async function materializeMissingTakeChargeActivities (args: {
     return changed
   } catch (e) {
     if (isGiiAbortError(e)) throw e
-    console.warn('[GII_ATTIVITA_CORRENTI] Materializzazione allarmi da FL non riuscita:', e)
+    console.warn('[GII_ATTIVITA_CORRENTI] Materializzazione/riconciliazione allarmi da FL non riuscita:', e)
     return 0
   }
 }
@@ -3742,6 +3901,7 @@ export default function Widget(props: Props) {
           currentActivities,
           dynamicAlerts,
           user,
+          practiceLayerUrl: selectAlertPracticeLayerUrlWrite(cfg, user),
           signal
         })
         if (!isCurrentBackgroundRequest()) return

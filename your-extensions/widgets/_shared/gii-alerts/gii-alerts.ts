@@ -286,7 +286,7 @@ function cleanPracticeNumberText (value: any): string {
 function normalizePracticeSectorCode (value: any): string {
   const s = String(value ?? '').trim().toUpperCase()
   if (!s) return ''
-  const mDist = s.match(/^D\s*([1-6])$/)
+  const mDist = s.match(/^D\s*([1-7])$/)
   if (mDist) return `D${mDist[1]}`
   if (s === 'DS' || s === 'CR' || s === 'GI') return s
   return s

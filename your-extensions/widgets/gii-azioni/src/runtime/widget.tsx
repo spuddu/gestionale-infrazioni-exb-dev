@@ -38,9 +38,9 @@ let _utentiLoading = false
 let _utentiCachePromise: Promise<Map<string, UtenteCached> | null> | null = null
 
 const AREA_NUM: Record<string, number> = { AMM:1, AGR:2, TEC:3 }
-const SETTORE_NUM: Record<string, number> = { CR:1, GI:2, D1:3, D2:4, D3:5, D4:6, D5:7, D6:8, DS:9 }
+const SETTORE_NUM: Record<string, number> = { CR:1, GI:2, D1:3, D2:4, D3:5, D4:6, D5:7, D6:8, DS:9, D7:10 }
 const AREA_COD_FROM_NUM: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
-const SETTORE_COD_FROM_NUM: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS' }
+const SETTORE_COD_FROM_NUM: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS', 10:'D7' }
 
 const WORKFLOW_ROLE_CODES = new Set(['TR','IT','CS','RIT','DT','DA','ADMIN','RIA','IA'])
 
@@ -73,7 +73,7 @@ function normalizeSettoreCod (v: any): string {
   if (!s) return ''
   const n = Number(s)
   if (Number.isFinite(n) && SETTORE_COD_FROM_NUM[n]) return SETTORE_COD_FROM_NUM[n]
-  const distretto = s.match(/DISTRETTO([1-6])/)
+  const distretto = s.match(/DISTRETTO([1-7])/)
   if (distretto) return `D${distretto[1]}`
   if (s.includes('DRENO') || s.includes('SCOLO')) return 'DS'
   if (s.includes('CATASTO') || s.includes('RUOLI')) return 'CR'
@@ -180,11 +180,11 @@ function findDestUsername (
     settoreCod = ''
   }
 
-  const areaCode = areaCod ? AREA_NUM[areaCod] : undefined
-  const settoreCode = settoreCod ? SETTORE_NUM[settoreCod] : undefined
   if (!ruoloCod) return ''
 
   const needsSettore = (ruoloCod === 'TR' || ruoloCod === 'CS') && areaCod !== 'AMM'
+  if (ruoloCod !== 'RIA' && ruoloCod !== 'IA' && ruoloCod !== 'DA' && !areaCod) return ''
+  if (needsSettore && !settoreCod) return ''
 
   for (const [, entry] of cache) {
     const entryRuoloCod = canonicalWorkflowRole(entry.ruoloCod, entry.areaCod || entry.area)
@@ -193,9 +193,7 @@ function findDestUsername (
 
     if (entryRuoloCod !== ruoloCod) continue
     if (areaCod && entryAreaCod !== areaCod) continue
-    if (!areaCod && areaCode != null && entry.area !== areaCode) continue
-    if (needsSettore && settoreCod && entrySettoreCod !== settoreCod) continue
-    if (needsSettore && !settoreCod && settoreCode != null && entry.settore !== settoreCode) continue
+    if (needsSettore && entrySettoreCod !== settoreCod) continue
     return String(entry.username || '').trim()
   }
   return ''
@@ -219,11 +217,11 @@ function findDestEmail (
     settoreCod = ''
   }
 
-  const areaCode = areaCod ? AREA_NUM[areaCod] : undefined
-  const settoreCode = settoreCod ? SETTORE_NUM[settoreCod] : undefined
   if (!ruoloCod) return ''
 
   const needsSettore = (ruoloCod === 'TR' || ruoloCod === 'CS') && areaCod !== 'AMM'
+  if (ruoloCod !== 'RIA' && ruoloCod !== 'IA' && ruoloCod !== 'DA' && !areaCod) return ''
+  if (needsSettore && !settoreCod) return ''
 
   for (const [, entry] of cache) {
     const entryRuoloCod = canonicalWorkflowRole(entry.ruoloCod, entry.areaCod || entry.area)
@@ -232,9 +230,7 @@ function findDestEmail (
 
     if (entryRuoloCod !== ruoloCod) continue
     if (areaCod && entryAreaCod !== areaCod) continue
-    if (!areaCod && areaCode != null && entry.area !== areaCode) continue
-    if (needsSettore && settoreCod && entrySettoreCod !== settoreCod) continue
-    if (needsSettore && !settoreCod && settoreCode != null && entry.settore !== settoreCode) continue
+    if (needsSettore && entrySettoreCod !== settoreCod) continue
     return String(entry.email || '').trim()
   }
   return ''
@@ -2371,34 +2367,28 @@ function ActionsPanel (props: {
   const getCurrentCycleContext = (): CycleContext => {
     const giiRole: any = (window as any).__giiUserRole || {}
     const parentGlobalId = String(pickAttrCI(data, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '')
-    // Per una pratica già inizializzata, area e settore del ciclo/routing devono provenire
-    // prima di tutto dai campi strutturati della pratica. Il profilo dell'utente può avere
-    // più assegnazioni IT e non identifica necessariamente il settore della pratica aperta.
-    const practiceArea = normalizeAreaLabel(pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
-    const userArea = normalizeAreaLabel(giiRole.areaCod || giiRole.area_cod || giiRole.areaLabel || giiRole.area)
-    const area = practiceArea || userArea
+    // Per una pratica già inizializzata, area e settore del ciclo/routing provengono
+    // esclusivamente dai campi strutturati della pratica.
+    const area = normalizeAreaLabel(pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
     const practiceSettore = normalizeSettoreLabel(area, pickAttrCI(data, ['settore_cod', 'settore', 'cod_settore']))
-    const userSettore = normalizeSettoreLabel(area, giiRole.settoreCod || giiRole.settore_cod || giiRole.settore)
-    const settore = isAreaScopedCycleRole(role) ? '' : (practiceSettore || userSettore)
+    const settore = isAreaScopedCycleRole(role) ? '' : practiceSettore
     const username = String(giiRole.username || (window as any).__giiUser?.username || '').trim()
     return { parentGlobalId, area, settore, username }
   }
 
   const getCurrentCycleContextAsync = async (): Promise<CycleContext> => {
     const base = getCurrentCycleContext()
-    if (base.parentGlobalId) return base
+    const needsSettore = !isAreaScopedCycleRole(role)
+    if (base.parentGlobalId && base.area && (!needsSettore || base.settore)) return base
 
     const attrs = await queryCurrentRecordAttrs()
     if (!attrs) return base
 
-    const giiRole: any = (window as any).__giiUserRole || {}
-    const parentGlobalId = String(pickAttrCI(attrs, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '')
+    const parentGlobalId = String(pickAttrCI(attrs, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || base.parentGlobalId || '')
     const attrsArea = normalizeAreaLabel(pickAttrCI(attrs, ['area_cod', 'area', 'cod_area']))
-    const userArea = normalizeAreaLabel(giiRole.areaCod || giiRole.area_cod || giiRole.areaLabel || giiRole.area)
-    const area = attrsArea || base.area || userArea
+    const area = attrsArea || base.area
     const attrsSettore = normalizeSettoreLabel(area, pickAttrCI(attrs, ['settore_cod', 'settore', 'cod_settore']))
-    const userSettore = normalizeSettoreLabel(area, giiRole.settoreCod || giiRole.settore_cod || giiRole.settore)
-    const settore = isAreaScopedCycleRole(role) ? '' : (attrsSettore || base.settore || userSettore)
+    const settore = isAreaScopedCycleRole(role) ? '' : (attrsSettore || base.settore)
     return { ...base, parentGlobalId, area, settore }
   }
 
@@ -2819,12 +2809,12 @@ function ActionsPanel (props: {
   }
 
   const getPracticeAreaForRouting = (): string => {
-    return normalizeAreaLabel(pickAttrCI(data, ['area_cod', 'area', 'cod_area']) || getCurrentCycleContext().area)
+    return normalizeAreaLabel(pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
   }
 
   const getPracticeSettoreForRouting = (): string => {
     const areaPratica = getPracticeAreaForRouting()
-    return normalizeSettoreLabel(areaPratica, pickAttrCI(data, ['settore_cod', 'settore', 'cod_settore']) || getCurrentCycleContext().settore)
+    return normalizeSettoreLabel(areaPratica, pickAttrCI(data, ['settore_cod', 'settore', 'cod_settore']))
   }
 
   const makeGiiRoleTag = (r: string, opts?: { area?: string, settore?: string }): string => {
@@ -2863,7 +2853,6 @@ function ActionsPanel (props: {
 
   const getRoutingMetaForRole = (r: string, opts?: { technicalIntegration?: boolean }) => {
     const rr = String(r || '').trim().toUpperCase()
-    const ctx = getCurrentCycleContext()
     const areaPratica = getPracticeAreaForRouting()
     const settorePratica = getPracticeSettoreForRouting()
 
@@ -2875,17 +2864,17 @@ function ActionsPanel (props: {
     // Il destinatario è il RIT dell'area tecnica di provenienza della pratica,
     // non il Responsabile dell’istruttoria amministrativa.
     if (opts?.technicalIntegration && rr === 'RIT') {
-      return { area: areaPratica || ctx.area, settore: '' }
+      return { area: areaPratica, settore: '' }
     }
 
     if (rr === 'RIT' || rr === 'DT') {
-      return { area: areaPratica || ctx.area, settore: '' }
+      return { area: areaPratica, settore: '' }
     }
 
     // Per i destinatari settoriali (CS/IT/TR) va usato il settore della pratica,
     // non il settore del ruolo che sta eseguendo l'azione. Altrimenti, ad esempio,
     // un rimando RIT -> CS finisce sul settore del RIT e non sul distretto CS corretto.
-    return { area: areaPratica || ctx.area, settore: settorePratica || ctx.settore }
+    return { area: areaPratica, settore: settorePratica }
   }
 
   const addGiiRoutingFields = (
@@ -3844,15 +3833,14 @@ function ActionsPanel (props: {
         try { await fl.load() } catch {}
       }
 
-      const u: any = (window as any).__giiUserRole || {}
-      // Per l'assegnazione CS → IT il contesto deve essere quello della pratica
-      // selezionata, non quello del profilo legacy dell'utente corrente.
-      // Il fallback al profilo legacy resta solo per compatibilità con casi in cui
-      // la pratica non esponga ancora area/settore.
+      // Per l'assegnazione CS → IT il contesto è esclusivamente quello della pratica.
       const practiceAreaRaw = pickAttrCI(data, ['area_cod', 'area', 'cod_area'])
-      const areaCod = normalizeAreaLabel(practiceAreaRaw || u?.areaCod || u?.area_cod || u?.areaLabel || u?.area)
+      const areaCod = normalizeAreaLabel(practiceAreaRaw)
       const practiceSettoreRaw = pickAttrCI(data, ['settore_cod', 'settore', 'cod_settore'])
-      const settoreCod = normalizeSettoreLabel(areaCod, practiceSettoreRaw || u?.settoreCod || u?.settore_cod || u?.settoreLabel || u?.settore)
+      const settoreCod = normalizeSettoreLabel(areaCod, practiceSettoreRaw)
+      if (!areaCod || !settoreCod) {
+        throw new Error('Dati organizzativi della pratica incompleti: Area e Settore sono obbligatori per assegnare l’Istruttore tecnico.')
+      }
       const area = areaCod ? AREA_NUM[areaCod] : null
       const settore = settoreCod ? SETTORE_NUM[settoreCod] : null
 
@@ -3890,16 +3878,7 @@ function ActionsPanel (props: {
         return opts
       }
 
-      let opts: TiOpt[] = []
-      if (areaCod && settoreCod) {
-        opts = await runQuery(`${tiRoleWhere} AND ${areaWhere} AND ${settoreWhere}`).catch((): TiOpt[] => [])
-      }
-      if (!opts.length && areaCod) {
-        opts = await runQuery(`${tiRoleWhere} AND ${areaWhere}`).catch((): TiOpt[] => [])
-      }
-      if (!opts.length) {
-        opts = await runQuery(tiRoleWhere).catch((): TiOpt[] => [])
-      }
+      const opts = await runQuery(`${tiRoleWhere} AND ${areaWhere} AND ${settoreWhere}`).catch((): TiOpt[] => [])
       setTiOptions(opts)
     } catch (e: any) {
       setTiLoadErr(e?.message ? String(e.message) : String(e))
@@ -4385,7 +4364,7 @@ function ActionsPanel (props: {
     const code = normalizeAreaLabel(areaCode)
     if (code === 'AGR') return 'Agraria'
     if (code === 'TEC') return 'Tecnica'
-    if (code === 'AMM') return 'Amministrativa'
+    if (code === 'AMM') return 'Affari Generali e P.F.'
     return ''
   }
 

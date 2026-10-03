@@ -35,12 +35,13 @@ const AREA_LABELS: Record<string, string> = {
   AGR: 'AGRARIA', TEC: 'TECNICA', AMM: 'AFFARI GENERALI E PROGRAMMAZIONE FINANZIARIA'
 }
 const SETTORE_LABELS: Record<string, string> = {
-  D1: "DISTRETTO 1 \u2013 QUARTU SANT'ELENA/VILLAPUTZU/MURAVERA \u2013 SAN SPERATE",
-  D2: 'DISTRETTO 2 \u2013 SERRAMANNA/PIMPISU',
-  D3: 'DISTRETTO 3 \u2013 SAN GAVINO/VILLACIDRO',
-  D4: 'DISTRETTO 4 \u2013 BASSO SULCIS',
-  D5: 'DISTRETTO 5 \u2013 SENORB\u00CC',
-  D6: 'DISTRETTO 6 \u2013 CIXERRI',
+  D1: 'DISTRETTO 1 QUARTU SANT’ELENA',
+  D2: 'DISTRETTO 2 SERRAMANNA',
+  D3: 'DISTRETTO 3 SAN GAVINO',
+  D4: 'DISTRETTO 4 BASSO SULCIS',
+  D5: 'DISTRETTO 5 SENORBÌ',
+  D6: 'DISTRETTO 6 CIXERRI',
+  D7: 'DISTRETTO 7 SAN SPERATE',
   DS: 'MANUTENZIONE OPERE DI DRENO E DI SCOLO',
   CR: 'CATASTO, RUOLI E SERVIZI TERRITORIALI',
   GI: 'GESTIONE IRRIGUA'
@@ -97,7 +98,8 @@ function normalizeSettoreCode (area: string, v: any): string {
   if (s === '7') return 'D5'
   if (s === '8') return 'D6'
   if (s === '9') return 'DS'
-  if (/^D\s*([1-6])$/.test(s)) return `D${s.match(/^D\s*([1-6])$/)?.[1] || ''}`
+  if (s === '10') return 'D7'
+  if (/^D\s*([1-7])$/.test(s)) return `D${s.match(/^D\s*([1-7])$/)?.[1] || ''}`
   if (s === 'DS' || s === 'D S' || s.includes('DRENO')) return 'DS'
   if (s === 'CR' || s === 'C R' || s.includes('CATASTO')) return 'CR'
   if (s === 'GI' || s.includes('GESTIONE IRRIGUA')) return 'GI'

@@ -21,7 +21,7 @@ export type GiiRuntimeViewContext = {
 const SERVICE_ROOT = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services'
 
 const SETTORE_FROM_NUMERIC_CODE: Record<number, string> = {
-  1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS'
+  1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS', 10: 'D7'
 }
 
 function makeRuntimeView (
@@ -50,6 +50,7 @@ export const GII_RUNTIME_VIEWS: GiiRuntimeView[] = [
   makeRuntimeView('AGR_D4', 'GII_VIEW_AGR_D4', ['IT', 'CS'], 'AGR', 'D4'),
   makeRuntimeView('AGR_D5', 'GII_VIEW_AGR_D5', ['IT', 'CS'], 'AGR', 'D5'),
   makeRuntimeView('AGR_D6', 'GII_VIEW_AGR_D6', ['IT', 'CS'], 'AGR', 'D6'),
+  makeRuntimeView('AGR_D7', 'GII_VIEW_AGR_D7', ['IT', 'CS'], 'AGR', 'D7'),
   makeRuntimeView('AMM_RIA_DA', 'GII_VIEW_AMM', ['DA', 'RIA'], 'AMM'),
   makeRuntimeView('AMM_IA', 'GII_VIEW_AMM_ALL', ['IA'], 'AMM'),
   makeRuntimeView('TEC_ALL', 'GII_VIEW_TEC', ['RIT', 'DT'], 'TEC'),

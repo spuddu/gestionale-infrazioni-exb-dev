@@ -670,6 +670,8 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       colorAccent: '#60a5fa',
       colorBgRest: 'rgba(30,58,95,0.25)',
       colorBgHover: '',
+      colorBgSelected: '',
+      colorAccentSelected: '',
       roles: ['*'],
       icon: 'nuova'
     }
@@ -756,6 +758,8 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         colorAccent: accent,
         colorBgRest: '#192e4d',
         colorBgHover: '',
+        colorBgSelected: '',
+        colorAccentSelected: '',
         roles: ['*'],
         icon: inferCardIconValue(pg)
       }
@@ -1010,12 +1014,17 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
                   return null
                 })()}
 
-                <label style={P.lbl}>Colore card / trasparenza</label>
+                <label style={P.lbl}>Sfondo hover / trasparenza</label>
                 <ColInp value={card.colorBg} onChange={v=>setCard(card.id,{colorBg:v})} transparencyLabel='Trasparenza hover'/>
-                <div style={P.hint}>Usato per lo sfondo della card al passaggio del mouse.</div>
 
-                <label style={P.lbl}>Colore accento / trasparenza</label>
-                <ColInp value={card.colorAccent} onChange={v=>setCard(card.id,{colorAccent:v})} transparencyLabel='Trasparenza accento'/>
+                <label style={P.lbl}>Bordo hover / trasparenza</label>
+                <ColInp value={card.colorAccent} onChange={v=>setCard(card.id,{colorAccent:v})} transparencyLabel='Trasparenza bordo hover'/>
+
+                <label style={P.lbl}>Sfondo selezionata / trasparenza</label>
+                <ColInp value={String(card.colorBgSelected ?? '')} onChange={v=>setCard(card.id,{colorBgSelected:v})} transparencyLabel='Trasparenza selezionata'/>
+
+                <label style={P.lbl}>Bordo selezionata / trasparenza</label>
+                <ColInp value={String(card.colorAccentSelected ?? '')} onChange={v=>setCard(card.id,{colorAccentSelected:v})} transparencyLabel='Trasparenza bordo selezionata'/>
 
                 <label style={P.lbl}>Ruoli visibili</label>
                 <div style={{ display:'flex',flexWrap:'wrap' as const,gap:5,marginTop:4 }}>

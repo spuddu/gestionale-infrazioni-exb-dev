@@ -61,11 +61,11 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "rows": [
           [
             "Tecnico rilevatore",
-            "Effettua la rilevazione sul territorio tramite l’applicazione Esri Survey123, utilizzando il rilevamento Infrazioni predisposto per smartphone e tablet. La rilevazione confluisce quindi nel gestionale e viene successivamente gestita dal Capo Settore."
+            "Effettua la rilevazione sul territorio tramite l’applicazione Esri Survey123, utilizzando il rilevamento \"Infrazioni\" predisposto per smartphone e tablet. La rilevazione confluisce quindi nel gestionale e viene successivamente gestita dal Capo Settore."
           ],
           [
             "Istruttore tecnico",
-            "Lavora le pratiche assegnate, può creare una nuova pratica, svolge l’istruttoria tecnica e risponde alle eventuali richieste di integrazione, ma non ne apre di nuove."
+            "Lavora le pratiche assegnate, può creare una nuova pratica, svolge l’istruttoria tecnica e risponde alle eventuali richieste di integrazione."
           ],
           [
             "Capo Settore",
@@ -118,6 +118,10 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           "Pratiche visibili"
         ],
         "rows": [
+          [
+            "Tecnico rilevatore",
+            "Non accede al gestionale e, pertanto, non ha accesso ad alcuna pratica."
+          ],
           [
             "Istruttore tecnico",
             "Le pratiche a lui assegnate o da lui create nell’Area Agraria o nell’Area Tecnica di competenza."
@@ -211,12 +215,13 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           [
             "Gestione utenti",
             "Amministratore del sistema"
-          ],
-          [
-            "Atto di accertamento",
-            "Istruttore amministrativo"
           ]
         ]
+      },
+      {
+        "type": "callout",
+        "title": "Accesso alle schermate di istruttoria",
+        "text": "Le schermate utilizzate per lo svolgimento dell’istruttoria tecnica e amministrativa non compaiono come voci autonome nel menu. Vi si accede aprendo una pratica dall’Elenco pratiche, in base al ruolo dell’utente e alla fase in cui si trova la pratica."
       }
     ]
   },
@@ -280,7 +285,8 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "text": "Il tipo pratica è mostrato come “Rilevazione” finché non esiste un numero ufficiale di rapporto tecnico; dopo la formalizzazione diventa “Rapporto tecnico”. Tra le informazioni principali figurano Fase istruttoria, Stato pratica, Eseguito da, Trasmesso a e Ultimo aggiornamento."
       },
       {
-        "type": "paragraph",
+        "type": "callout",
+        "title": "Stato pratica e Iter",
         "text": "Lo stato della pratica è mostrato con etichette operative: Da prendere in carico, In carico, Rimandato, Trasmesso, Istruttoria assegnata e Respinto; per l’Amministratore del sistema può inoltre comparire Archiviata. Non va confuso con il singolo evento registrato nell’Iter."
       },
       {
@@ -1340,7 +1346,8 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "text": "11.2 Importi calcolati e dati manuali"
       },
       {
-        "type": "paragraph",
+        "type": "callout",
+        "title": "Attenzione",
         "text": "Le sanzioni di base/ridotte, i danni e i riepiloghi collegati ai parametri configurati sono calcolati dal sistema. L’Istruttore amministrativo deve concentrarsi sui dati amministrativi che l’interfaccia abilita e non tentare di “correggere a mano” valori che il sistema ricalcola dalla pratica e dai parametri."
       },
       {
@@ -1511,7 +1518,8 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "text": "Istruttore amministrativo — predisporre la bozza di determinazione e trasmettere il fascicolo"
       },
       {
-        "type": "paragraph",
+        "type": "callout",
+        "title": "Proposta di contestazione e determinazione",
         "text": "Con l’esito Conforme il gestionale genera o aggiorna automaticamente la Proposta di contestazione e la inserisce nel fascicolo in stato di bozza. L’Istruttore amministrativo non deve predisporre manualmente questo documento: deve invece elaborare la bozza di determinazione."
       },
       {
@@ -2066,7 +2074,8 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "text": "16.2 Stato del pagamento"
       },
       {
-        "type": "paragraph",
+        "type": "callout",
+        "title": "Stato del pagamento e incasso",
         "text": "Dopo il perfezionamento della notifica il pannello Pagamento mostra il piano e il totale in sola lettura e consente di aggiornare lo stato del pagamento e le note. La registrazione dell’importo effettivamente incassato, della data e dei riferimenti avviene invece nella sezione Definizione/Incasso."
       },
       {
@@ -3141,7 +3150,8 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "text": "Salvare il firmatario."
       },
       {
-        "type": "paragraph",
+        "type": "callout",
+        "title": "Rimozione dalla Rubrica",
         "text": "La rimozione da una funzione della Rubrica non elimina automaticamente la persona se è ancora utilizzata come utente gestionale o nell’altra funzione della Rubrica."
       },
       {
@@ -3301,11 +3311,11 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           ],
           [
             "Istruttore amministrativo",
-            "Area Amministrativa, con il contesto amministrativo previsto per il ruolo."
+            "Area Affari Generali e P.F., con il contesto amministrativo previsto per il ruolo."
           ],
           [
             "Responsabile dell’istruttoria amministrativa",
-            "Area Amministrativa, con il contesto amministrativo previsto per il ruolo."
+            "Area Affari Generali e P.F., con il contesto amministrativo previsto per il ruolo."
           ],
           [
             "Direttore tecnico",
@@ -3313,7 +3323,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           ],
           [
             "Direttore amministrativo",
-            "Area Amministrativa."
+            "Area Affari Generali e P.F."
           ],
           [
             "Amministratore del sistema",
@@ -3324,7 +3334,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "callout",
         "title": "Ruoli apicali con titolare unico",
-        "text": "Per alcuni ruoli apicali il gestionale applica un vincolo di titolarità esclusiva. Può essere presente un solo Capo Settore nello stesso ambito di Area e Settore, un solo Responsabile dell’istruttoria tecnica per ciascuna Area Agraria o Area Tecnica, un solo Responsabile dell’istruttoria amministrativa per l’Area Amministrativa, un solo Direttore tecnico per ciascuna Area Agraria o Area Tecnica e un solo Direttore amministrativo nell’intero gestionale. Prima di attribuire a un altro utente uno di questi incarichi occorre revocarlo al titolare corrente."
+        "text": "Per alcuni ruoli apicali il gestionale applica un vincolo di titolarità esclusiva. Può essere presente un solo Capo Settore nello stesso ambito di Area e Settore, un solo Responsabile dell’istruttoria tecnica per ciascuna Area Agraria o Area Tecnica, un solo Responsabile dell’istruttoria amministrativa per l’Area Affari Generali e P.F., un solo Direttore tecnico per ciascuna Area Agraria o Area Tecnica e un solo Direttore amministrativo nell’intero gestionale. Prima di attribuire a un altro utente uno di questi incarichi occorre revocarlo al titolare corrente."
       },
       {
         "type": "heading2",

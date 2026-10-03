@@ -57,7 +57,7 @@ type InfrazioneSortBy = 'article' | 'count'
 
 const DEFAULT_RECENT_SORT_RULES: RecentSortRule[] = [{ key: 'lastUpdate', dir: 'desc' }]
 
-const SETTORE_FROM_CODE: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
+const SETTORE_FROM_CODE: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS', 10: 'D7' }
 
 function loadEsriModule<T = any> (path: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -486,7 +486,8 @@ const UFFICIO_LABEL_BY_ID: Record<number, string> = {
   12: 'Iglesias (loc. Sa Stoia)',
   13: 'Siliqua',
   14: 'Villasor',
-  15: 'San Giovanni Suergiu (loc. Is Samis)'
+  15: 'San Giovanni Suergiu (loc. Is Samis)',
+  16: 'Fluminimaggiore'
 }
 
 const UFFICIO_CANONICAL_BY_KEY: Record<string, string> = {
@@ -505,6 +506,7 @@ const UFFICIO_CANONICAL_BY_KEY: Record<string, string> = {
   'senorbì': 'Senorbì',
   iglesias: 'Iglesias (loc. Sa Stoia)',
   'iglesias loc sa stoia': 'Iglesias (loc. Sa Stoia)',
+  fluminimaggiore: 'Fluminimaggiore',
   siliqua: 'Siliqua',
   villasor: 'Villasor'
 }

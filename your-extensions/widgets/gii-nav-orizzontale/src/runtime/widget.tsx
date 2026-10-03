@@ -10,10 +10,10 @@ const RUOLO_FULL: Record<string, string> = {
   RIT:'Responsabile istruttoria tecnica', RIA:'Responsabile istruttoria amministrativa', DT:'Direttore Tecnico', DA:'Direttore Amministrativo', ADMIN:'Amministratore'
 }
 const AREA_LABEL: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
-const SETTORE_LABEL: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS' }
+const SETTORE_LABEL: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS', 10:'D7' }
 const RUOLI_VALIDI = new Set(['TR', 'IT', 'CS', 'RIT', 'RIA', 'IA', 'DT', 'DA', 'ADMIN'])
 const AREE_VALIDE = new Set(['AMM', 'AGR', 'TEC'])
-const SETTORI_VALIDI = new Set(['CR', 'GI', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'DS'])
+const SETTORI_VALIDI = new Set(['CR', 'GI', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'DS'])
 
 function normCode(value: any): string {
   return String(value ?? '').trim().toUpperCase()

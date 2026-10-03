@@ -208,6 +208,9 @@ const GROUP_MAP: Record<string, string> = {
   'GII_AGR_D6_TR': 'd4f997fcc65140b585f9784f36b82efb',
   'GII_AGR_D6_IT': 'f82bc26c62cf49328fc101f83121d1a7',
   'GII_AGR_D6_CS': '62e5ca9cb9e04de7b446cf97d287b815',
+  'GII_AGR_D7_TR': 'b2f510e30c424f809e95a3b8a883e7cc',
+  'GII_AGR_D7_IT': '0c917b6777c8434f803d3a87539992cd',
+  'GII_AGR_D7_CS': '799314be48e04e87b17c21013f7de082',
   'GII_AGR_DIR': 'efd1d706a54249c785fc2d85fa8a672b',
   'GII_AGR_RIT': '4eb266a8da414fe6a47bc16f66c58e6a',
   'GII_AMM_DIR': '317c399ad1984c4392a6341d129fda89',
@@ -566,7 +569,7 @@ function ruoloItem(code: any): (typeof RUOLI)[number] | undefined {
 }
 
 const AREE = [
-  { label: 'AMM', code: 'AMM', value: 1, desc: 'Amministrativa' },
+  { label: 'AMM', code: 'AMM', value: 1, desc: 'Affari Generali e P.F.' },
   { label: 'AGR', code: 'AGR', value: 2, desc: 'Agraria' },
   { label: 'TEC', code: 'TEC', value: 3, desc: 'Tecnica' },
 ]
@@ -574,13 +577,14 @@ const AREE = [
 const SETTORI = [
   { label: 'CR', code: 'CR', value: 1, desc: 'Catasto, Ruoli e Servizi Territoriali' },
   { label: 'GI', code: 'GI', value: 2, desc: 'Gestione irrigua' },
-  { label: 'D1', code: 'D1', value: 3, desc: 'Distretto 1 (Quartu Sant\'Elena/Villaputzu/Muravera – San Sperate)' },
-  { label: 'D2', code: 'D2', value: 4, desc: 'Distretto 2 (Serramanna/Pimpisu)' },
-  { label: 'D3', code: 'D3', value: 5, desc: 'Distretto 3 (San Gavino - Villacidro)' },
-  { label: 'D4', code: 'D4', value: 6, desc: 'Distretto 4 (Basso Sulcis)' },
-  { label: 'D5', code: 'D5', value: 7, desc: 'Distretto 5 (Senorbì)' },
-  { label: 'D6', code: 'D6', value: 8, desc: 'Distretto 6 (Cixerri)' },
+  { label: 'D1', code: 'D1', value: 3, desc: 'Distretto 1 Quartu Sant’Elena' },
+  { label: 'D2', code: 'D2', value: 4, desc: 'Distretto 2 Serramanna' },
+  { label: 'D3', code: 'D3', value: 5, desc: 'Distretto 3 San Gavino' },
+  { label: 'D4', code: 'D4', value: 6, desc: 'Distretto 4 Basso Sulcis' },
+  { label: 'D5', code: 'D5', value: 7, desc: 'Distretto 5 Senorbì' },
+  { label: 'D6', code: 'D6', value: 8, desc: 'Distretto 6 Cixerri' },
   { label: 'DS', code: 'DS', value: 9, desc: 'Manutenzione opere di dreno e di scolo' },
+  { label: 'D7', code: 'D7', value: 10, desc: 'Distretto 7 San Sperate' },
 ]
 
 interface Ufficio { label: string; value: number; aree: number[]; settori: number[] }
@@ -590,7 +594,7 @@ const UFFICI: Ufficio[] = [
   { label: 'Quartucciu (loc. Is Forreddus)',         value: 2,  aree: [2],   settori: [3]   },
   { label: 'Muravera',                               value: 3,  aree: [2],   settori: [3]   },
   { label: 'Villaputzu',                             value: 4,  aree: [2],   settori: [3]   },
-  { label: 'San Sperate',                            value: 5,  aree: [2],   settori: [3]   },
+  { label: 'San Sperate',                            value: 5,  aree: [2],   settori: [10]  },
   { label: 'Serramanna (loc. Pimpisu)',              value: 6,  aree: [2],   settori: [4]   },
   { label: 'San Gavino Monreale',                    value: 7,  aree: [2],   settori: [5]   },
   { label: 'Villacidro',                             value: 8,  aree: [2],   settori: [5]   },
@@ -601,6 +605,7 @@ const UFFICI: Ufficio[] = [
   { label: 'Siliqua',                                value: 13, aree: [2],   settori: [8]   },
   { label: 'Villasor',                               value: 14, aree: [3],   settori: [9]   },
   { label: 'San Giovanni Suergiu (loc. Is Samis)',  value: 15, aree: [3],   settori: [9]   },
+  { label: 'Fluminimaggiore',                         value: 16, aree: [2],   settori: [8]   },
 ]
 
 // ── Regole cascata ─────────────────────────────────────────────────────────
@@ -629,7 +634,7 @@ function getSettoriPerRuoloArea(ruoloCod: string | null | undefined, area: numbe
   }
   if (ruolo === 'RIA') return area === 1 ? [1] : []    // RIA → CR
   if (ruolo === 'IA' && area === 1) return [1]         // IA → CR
-  if (area === 2) return [3, 4, 5, 6, 7, 8]           // AGR → D1-D6
+  if (area === 2) return [3, 4, 5, 6, 7, 8, 10]       // AGR → D1-D7
   if (area === 3) return [9]                           // TEC → DS
   return []
 }
