@@ -2525,9 +2525,14 @@ async function materializeMissingTakeChargeActivities (args: {
     .filter(a => materializeAlertIsNewSurveyTakeCharge(a))
 
   const currentKeys = new Set((args.currentActivities || []).map(a => giiAlertPracticeIdentityKey(a)).filter(Boolean))
+  // Le nuove rilevazioni Survey/TR non hanno ancora il marcatore
+  // NUOVA_RILEVAZIONE nel fallback dinamico: quel marcatore nasce proprio
+  // quando questa funzione materializza GII_ATTIVITA_CORRENTI. Se filtrassimo
+  // qui con alertIsNewRilevazione(), il primo allarme non verrebbe mai creato.
+  // La selezione del solo primo ingresso Survey/TR → CS viene fatta più sotto
+  // usando stato_CS autorevole + assenza di avanzamenti successivi del workflow.
   const missing = (args.dynamicAlerts || [])
     .filter(a => isGiiTakeChargeAlert(a))
-    .filter(a => alertIsNewRilevazione(a))
     .filter(a => {
       const key = giiAlertPracticeIdentityKey(a)
       return !!key && !currentKeys.has(key)
