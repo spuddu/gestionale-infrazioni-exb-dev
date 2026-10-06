@@ -1318,7 +1318,7 @@ export default function Setting(props: Props) {
         <div style={P.grid2}>
           <NumInput label='Massimo feature ricerca' value={parseNum(cfg.maxResultFeatures, 500, 1, 5000)} min={1} max={5000} onChange={v => setCfg({ maxResultFeatures: v })} />
           <NumInput label='Massimo valori lista' value={parseNum(cfg.maxDistinctValues, 5000, 50, 20000)} min={50} max={20000} onChange={v => setCfg({ maxDistinctValues: v })} />
-          <NumInput label='Scala zoom singolo punto' value={parseNum(cfg.zoomScale, 2500, 0, 500000)} min={0} max={500000} onChange={v => setCfg({ zoomScale: v })} />
+          <NumInput label='Scala zoom singolo punto' value={parseNum(cfg.zoomScale, 1128, 0, 500000)} min={0} max={500000} onChange={v => setCfg({ zoomScale: v })} />
         </div>
       </div>
 

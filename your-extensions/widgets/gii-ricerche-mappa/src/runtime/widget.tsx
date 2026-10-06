@@ -690,7 +690,7 @@ export default function Widget(props: Props) {
   const evidenziaRisultati = bool(cfg.evidenziaRisultati, true)
   const maxResultFeatures = num(cfg.maxResultFeatures, 500, 1, 5000)
   const maxDistinctValues = num(cfg.maxDistinctValues, 5000, 50, 20000)
-  const zoomScale = num(cfg.zoomScale, 2500, 0, 500000)
+  const zoomScale = num(cfg.zoomScale, 1128, 0, 500000) // 1128 ≈ livello di zoom 19
 
   const [activeSearchId, setActiveSearchId] = React.useState(selectedInitial)
   const activeSearch = searches.find(s => s.id === activeSearchId) || searches[0] || null

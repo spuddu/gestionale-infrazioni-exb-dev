@@ -11625,6 +11625,72 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     if (Number(ep.x) === 0 && Number(ep.y) === 0) return null  // (0,0) = nessuna localizzazione reale
     return ep
   })()
+
+  // ── Pulsante "Centra sul punto" (zoom 19) inserito nella colonna strumenti ExB, subito sotto Home ──
+  // Sempre presente; disabilitato quando la pratica non ha un punto valido.
+  const centerPointRef = React.useRef<any>(null)
+  centerPointRef.current = effectiveMarkerPoint
+  const hasCenterPoint = !!effectiveMarkerPoint
+  const centerPointBtnRef = React.useRef<HTMLDivElement | null>(null)
+  const applyCenterPointBtnState = (btn: HTMLDivElement | null, enabled: boolean) => {
+    if (!btn) return
+    btn.classList.toggle('disabled', !enabled)
+    btn.setAttribute('aria-disabled', enabled ? 'false' : 'true')
+    btn.setAttribute('tabindex', enabled ? '0' : '-1')
+    btn.title = enabled ? 'Centra sul punto' : 'Centra sul punto (nessun punto nella pratica)'
+    btn.style.cursor = enabled ? 'pointer' : 'not-allowed'
+    btn.style.color = enabled ? '#6a6a6a' : '#c4c4c4'
+  }
+  React.useEffect(() => {
+    const view: any = mapView
+    if (!view) return
+    const centerOnPoint = () => {
+      const ep = centerPointRef.current
+      if (!ep) return
+      loadEsriModule<any>('esri/geometry/Point').then((Point: any) => {
+        const target = new Point({ longitude: Number(ep.x), latitude: Number(ep.y), spatialReference: { wkid: 4326 } })
+        view.goTo({ target, zoom: 19 }, { duration: 600 }).catch(() => {})
+      }).catch(() => {})
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); centerOnPoint() }
+    }
+    // Stesse classi degli strumenti ExB (shell + pulsante) per ereditarne spaziatura e stile.
+    const shell = document.createElement('div')
+    shell.className = 'exbmap-ui exbmap-ui-tool-shell divitem exbmap-ui-tool-shell-GiiCenterPoint'
+    const btn = document.createElement('div')
+    btn.className = 'exbmap-ui-tool esri-widget--button-like'
+    btn.setAttribute('role', 'button')
+    btn.setAttribute('aria-label', 'Centra sul punto')
+    btn.style.cssText = 'width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#fff;box-shadow:inset 0 1px 0 rgba(0,0,0,0.28)'
+    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor"/><line x1="12" y1="1" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="1" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="23" y2="12"/></svg>'
+    shell.appendChild(btn)
+    applyCenterPointBtnState(btn, !!centerPointRef.current)
+    centerPointBtnRef.current = btn
+    btn.addEventListener('click', centerOnPoint)
+    btn.addEventListener('keydown', onKeyDown)
+
+    // Il pulsante va solo nella colonna ExB, subito dopo Home. Se la colonna non è
+    // (ancora) disegnata, ad es. con la mappa nascosta, si attende che compaia.
+    const mapRoot: HTMLElement | null = (view.container as HTMLElement | null)?.closest?.('.jimu-widget') as HTMLElement | null
+    const ensurePlaced = () => {
+      const homeShell = mapRoot?.querySelector?.('.exbmap-ui-tool-shell-Home') as HTMLElement | null
+      if (homeShell?.parentElement && shell.previousElementSibling !== homeShell) homeShell.insertAdjacentElement('afterend', shell)
+    }
+    ensurePlaced()
+    const observer = mapRoot && typeof MutationObserver !== 'undefined' ? new MutationObserver(() => ensurePlaced()) : null
+    try { if (observer && mapRoot) observer.observe(mapRoot, { childList: true, subtree: true }) } catch {}
+    return () => {
+      try { observer?.disconnect() } catch {}
+      btn.removeEventListener('click', centerOnPoint)
+      btn.removeEventListener('keydown', onKeyDown)
+      if (centerPointBtnRef.current === btn) centerPointBtnRef.current = null
+      try { shell.remove() } catch {}
+    }
+  }, [mapView])
+  React.useEffect(() => {
+    applyCenterPointBtnState(centerPointBtnRef.current, hasCenterPoint)
+  }, [hasCenterPoint])
   React.useEffect(() => {
     const view: any = mapView
     if (!view) return
@@ -11969,7 +12035,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
           if (targetGeom && editReqPoint === 1) {
             layerViews.forEach((lv: any) => { lv.featureEffect = { filter: { where: `${idField} = ${editOid}` }, excludedEffect: 'opacity(0)' } })
-            view.goTo({ target: targetGeom, zoom: Math.max(view.zoom || 18, 18) }, { duration: 600 }).catch(() => {})
+            view.goTo({ target: targetGeom, zoom: Math.max(view.zoom || 19, 19) }, { duration: 600 }).catch(() => {})
           } else {
             layerViews.forEach((lv: any) => { lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' } })
           }

@@ -1,6 +1,6 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, ReactRedux, type IMState, type AllWidgetProps, DataSourceComponent, DataSourceManager } from 'jimu-core'
+import { React, jsx, ReactRedux, type IMState, type AllWidgetProps, DataSourceComponent, DataSourceManager, getAppStore } from 'jimu-core'
 import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
@@ -1999,6 +1999,48 @@ function getLayerIdFromUrlForMatch (raw: any): string {
   return m?.[1] || ''
 }
 
+// Vista iniziale personalizzata (Builder) di un widget Mappa ExB sulla stessa web map:
+// prima i widget indicati, poi il primo widget Mappa con vista personalizzata su quella web map.
+// Della vista si usa solo il centro; lo zoom è quello della mini-mappa ("Zoom iniziale" nelle impostazioni).
+async function readGiiMapWidgetCustomViewpoint (preferredMapWidgetIds: string[], webMapDataSourceId: string, zoom: number): Promise<any | null> {
+  try {
+    const st: any = getAppStore()?.getState?.()
+    const widgetsRaw: any = st?.appConfig?.widgets || {}
+    const widgets: any = typeof widgetsRaw?.asMutable === 'function' ? widgetsRaw.asMutable({ deep: true }) : widgetsRaw
+    const customVp = (id: string): any => {
+      const cfg: any = widgets?.[id]?.config
+      if (cfg?.isUseCustomMapState !== true) return null
+      const st = cfg?.initialMapState
+      const center = st?.viewPoint?.targetGeometry
+      if (center && Number.isFinite(Number(center.x)) && Number.isFinite(Number(center.y))) return { targetGeometry: center }
+      const ext = st?.extent
+      if (ext && [ext.xmin, ext.ymin, ext.xmax, ext.ymax].every((v: any) => Number.isFinite(Number(v)))) {
+        return { targetGeometry: { x: (Number(ext.xmin) + Number(ext.xmax)) / 2, y: (Number(ext.ymin) + Number(ext.ymax)) / 2, spatialReference: ext.spatialReference } }
+      }
+      return null
+    }
+    let vpJson: any = null
+    for (const id of preferredMapWidgetIds) { vpJson = customVp(String(id || '')); if (vpJson) break }
+    if (!vpJson && webMapDataSourceId) {
+      for (const [id, w] of Object.entries<any>(widgets)) {
+        if (!String(w?.uri || '').includes('arcgis-map')) continue
+        if (String(w?.config?.initialMapDataSourceID || '') !== webMapDataSourceId) continue
+        vpJson = customVp(id)
+        if (vpJson) break
+      }
+    }
+    if (!vpJson) return null
+    // Scala del livello di zoom nello schema Web Mercator standard (livello 0 = 1:591.657.527,59).
+    const z = Number.isFinite(Number(zoom)) && Number(zoom) > 0 ? Number(zoom) : 8
+    vpJson.scale = 591657527.591555 / Math.pow(2, z)
+    vpJson.rotation = 0
+    const Viewpoint = await loadEsriModule<any>('esri/Viewpoint')
+    return Viewpoint.fromJSON(vpJson)
+  } catch {
+    return null
+  }
+}
+
 function findRapportiLayers (view: any, opts?: { layerUrl?: string; mapLayerUrl?: string; mapLayerId?: string; mapLayerLayerId?: string; mapLayerTitle?: string }): any[] {
   try {
     const sourceMap = view?.map || view
@@ -2100,6 +2142,7 @@ function MapTabContent (props: {
     showZoom: boolean; showAttribution: boolean; showScaleBar: boolean; showCompass: boolean
     showPopup?: boolean; showHome?: boolean; showFullscreen?: boolean; showLayerList?: boolean
     webMapItemId?: string; webMapLabel?: string
+    initialViewMapWidgetIds?: string[]; webMapDataSourceId?: string
     mapLayerTitle?: string; mapLayerUrl?: string; mapLayerId?: string; mapLayerLayerId?: string
   }
   selectionSig?: string
@@ -2111,6 +2154,8 @@ function MapTabContent (props: {
   const targetLayerViewRefs = React.useRef<any[]>([])
   const targetLayerViewCacheRef = React.useRef<Record<string, any>>({})
   const defaultViewpointRef = React.useRef<any>(null)
+  const centerPointRef = React.useRef<any>(null)
+  const centerPointBtnRef = React.useRef<HTMLDivElement | null>(null)
   const fullscreenWidgetRef = React.useRef<any>(null)
   const [status, setStatus] = React.useState<'loading' | 'ok' | 'nogeom' | 'error'>('loading')
   const [viewReadyTick, setViewReadyTick] = React.useState(0)
@@ -2118,6 +2163,19 @@ function MapTabContent (props: {
   const mc = props.mapCfg
   const latestFilterWhereRef = React.useRef<string>('1=0')
   latestFilterWhereRef.current = props.hasSel && props.oid != null ? getRapportoWhereFromOid(props.oid) : '1=0'
+
+  const setCenterPointBtnEnabled = (btn: HTMLDivElement | null, enabled: boolean) => {
+    if (!btn) return
+    btn.setAttribute('aria-disabled', enabled ? 'false' : 'true')
+    btn.setAttribute('tabindex', enabled ? '0' : '-1')
+    btn.title = enabled ? 'Centra sul punto' : 'Centra sul punto (nessun punto nella pratica)'
+    btn.style.cursor = enabled ? 'pointer' : 'not-allowed'
+    btn.style.opacity = enabled ? '1' : '0.45'
+  }
+  const setCenterPoint = (pt: any | null) => {
+    centerPointRef.current = pt
+    setCenterPointBtnEnabled(centerPointBtnRef.current, !!pt)
+  }
 
   const hexToRgba = (hex: string, alpha = 255): number[] => {
     const h = hex.replace('#', '')
@@ -2170,14 +2228,43 @@ function MapTabContent (props: {
         } catch {
           defaultViewpointRef.current = view.viewpoint ? view.viewpoint.clone() : null
         }
+        // Vista iniziale: centro della vista personalizzata di Mappa 7/8 (Builder) + "Zoom iniziale" della mini-mappa;
+        // in mancanza, quella della web map.
+        try {
+          const customVp = await readGiiMapWidgetCustomViewpoint(mc.initialViewMapWidgetIds || [], mc.webMapDataSourceId || '', mc.initZoom || 8)
+          if (customVp) {
+            defaultViewpointRef.current = customVp
+            if (!props.hasSel) { try { await view.goTo(customVp, { animate: false }) } catch {} }
+          }
+        } catch {}
         if (cancelled) { view.destroy(); return }
         if (mc.showHome) {
           try {
             const Home = await loadEsriModule<any>('esri/widgets/Home')
             const home = new Home({ view })
+            if (defaultViewpointRef.current) { try { home.viewpoint = defaultViewpointRef.current.clone() } catch {} }
             view.ui.add(home, 'top-left')
           } catch {}
         }
+        // Pulsante "Centra sul punto" (stesso zoom del punto da impostazioni) sotto Home; disabilitato senza punto.
+        try {
+          const btn = document.createElement('div')
+          btn.className = 'esri-widget--button esri-widget esri-interactive'
+          btn.setAttribute('role', 'button')
+          btn.setAttribute('aria-label', 'Centra sul punto')
+          btn.style.cssText = 'display:flex;align-items:center;justify-content:center'
+          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor"/><line x1="12" y1="1" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="1" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="23" y2="12"/></svg>'
+          const centerOnPoint = () => {
+            const pt = centerPointRef.current
+            if (!pt) return
+            view.goTo({ target: pt, zoom: mc.pointZoom || 19 }, { duration: 600 }).catch(() => {})
+          }
+          btn.addEventListener('click', centerOnPoint)
+          btn.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); centerOnPoint() } })
+          centerPointBtnRef.current = btn
+          setCenterPointBtnEnabled(btn, !!centerPointRef.current)
+          view.ui.add(btn, { position: 'top-left', index: mc.showHome ? 1 : 0 })
+        } catch {}
         let FullscreenCtor: any = null
         const recreateFullscreenWidget = () => {
           try {
@@ -2300,6 +2387,7 @@ function MapTabContent (props: {
       targetLayerViewRefs.current = []
       targetLayerViewCacheRef.current = {}
       defaultViewpointRef.current = null
+      centerPointBtnRef.current = null
     }
   }, [])
 
@@ -2311,6 +2399,7 @@ function MapTabContent (props: {
     const clearMapSelection = async (hideAll = false, resetToDefault = false) => {
       try { view.graphics?.removeAll?.() } catch {}
       markerRef.current = null
+      setCenterPoint(null)
       try { view.popup?.close?.() } catch {}
       const where = hideAll ? '1=0' : '1=1'
       try {
@@ -2461,6 +2550,7 @@ function MapTabContent (props: {
         view.graphics?.removeAll?.()
         view.graphics?.add?.(marker)
         markerRef.current = marker
+        setCenterPoint(pt)
 
         try { await view.goTo({ target: targetGeom, zoom: mc.pointZoom || 19 }, { duration: 800 }) } catch {}
         if (mc.showPopup !== false) {
@@ -5975,6 +6065,8 @@ const queryFields = React.useMemo(() => {
     showLayerList: cfg.mapShowLayerList === true,
     webMapItemId: String((cfg as any).mapWebMapItemId || ''),
     webMapLabel: String((cfg as any).mapWebMapLabel || ''),
+    initialViewMapWidgetIds: ((cfg as any).useMapWidgetIds?.asMutable ? (cfg as any).useMapWidgetIds.asMutable() : ((cfg as any).useMapWidgetIds || [])).map((x: any) => String(x || '')),
+    webMapDataSourceId: String((cfg as any).mapWebMapDataSourceId || ''),
     mapLayerTitle: String((cfg as any).mapLayerTitle || ''),
     mapLayerUrl: String((cfg as any).mapLayerUrl || ''),
     mapLayerId: String((cfg as any).mapLayerId || ''),
@@ -5984,7 +6076,7 @@ const queryFields = React.useMemo(() => {
     cfg.mapMarkerColor, cfg.mapMarkerSize, cfg.mapMarkerOutlineColor, cfg.mapMarkerOutlineWidth,
     cfg.mapShowZoom, cfg.mapShowAttribution, cfg.mapShowScaleBar, cfg.mapShowCompass, cfg.mapShowPopup,
     cfg.mapShowHome, cfg.mapShowFullscreen, cfg.mapShowLayerList,
-    (cfg as any).mapWebMapItemId, (cfg as any).mapWebMapLabel, (cfg as any).mapLayerTitle,
+    (cfg as any).mapWebMapItemId, (cfg as any).mapWebMapLabel, (cfg as any).useMapWidgetIds, (cfg as any).mapWebMapDataSourceId, (cfg as any).mapLayerTitle,
     (cfg as any).mapLayerUrl, (cfg as any).mapLayerId, (cfg as any).mapLayerLayerId
   ])
 

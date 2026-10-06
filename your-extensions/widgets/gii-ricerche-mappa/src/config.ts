@@ -72,7 +72,7 @@ export const defaultConfig: IMConfig = makeImmutable<Config>({
   evidenziaRisultati: true,
   maxResultFeatures: 500,
   maxDistinctValues: 5000,
-  zoomScale: 2500,
+  zoomScale: 1128,
   colorBackground: '#ffffff',
   colorBorder: 'rgba(0,0,0,0.12)',
   colorLabel: '#374151',
