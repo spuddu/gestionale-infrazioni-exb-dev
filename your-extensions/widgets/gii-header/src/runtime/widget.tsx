@@ -2375,6 +2375,25 @@ const GII_SURVEY_UPPERCASE_FLAG_FIELD = 'testi_normalizzati'
 const GII_SURVEY_UPPERCASE_DATE_FIELD = 'dt_testi_normalizzati'
 const GII_SURVEY_UPPERCASE_USER_FIELD = 'testi_normalizzati_da'
 
+// Acquisizione catastale delle nuove rilevazioni Survey/TR: il Survey non interroga
+// più il catasto sul campo, quindi il GII ricava Comune/Sezione/Foglio/Mappale dalla
+// geometria della rilevazione (geopoint "posizione") prima della normalizzazione testi.
+const GII_PARTICELLE_CATASTO_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Particelle/FeatureServer/131'
+const GII_CATASTO_FIELDS = ['nome_comun', 'sezione', 'foglio', 'mappale']
+
+function surveyCatastoText (value: any): string | null {
+  if (value === null || value === undefined) return null
+  const s = String(value).trim()
+  return s === '' ? null : s
+}
+
+function surveyPointIsUsable (geom: any): boolean {
+  if (!geom) return false
+  const x = Number(geom.x ?? geom.longitude)
+  const y = Number(geom.y ?? geom.latitude)
+  return Number.isFinite(x) && Number.isFinite(y) && !(x === 0 && y === 0)
+}
+
 function normalizeSurveyUppercaseValue (value: any): any {
   if (value === null || value === undefined) return value
   if (typeof value !== 'string') return value
@@ -2434,7 +2453,63 @@ async function normalizeSurveyUppercaseFields (args: {
       .map(name => materializeAlertRealField(fieldMap, name))
       .filter(Boolean)
 
-    if (!uppercaseFields.length && !lowercaseFields.length) return 0
+    const catastoFields = GII_CATASTO_FIELDS
+      .map(name => materializeAlertRealField(fieldMap, name))
+      .filter(Boolean)
+
+    if (!uppercaseFields.length && !lowercaseFields.length && !catastoFields.length) return 0
+
+    // Layer catastale caricato una sola volta e solo se c'è almeno una rilevazione nuova.
+    let particelleLayer: any = null
+    let particelleLoadFailed = false
+    const getParticelleLayer = async (): Promise<any> => {
+      if (particelleLayer || particelleLoadFailed) return particelleLayer
+      try {
+        const pl = new FeatureLayer({ url: GII_PARTICELLE_CATASTO_URL })
+        if (typeof pl.load === 'function') await pl.load(args.signal ? { signal: args.signal } : undefined)
+        particelleLayer = pl
+      } catch (e) {
+        if (isGiiAbortError(e)) throw e
+        particelleLoadFailed = true
+        console.warn('[GII] Layer catastale non disponibile:', e)
+      }
+      return particelleLayer
+    }
+
+    // Esito tecnico distinto dal risultato vuoto: null = interrogazione non riuscita
+    // (la rilevazione resta da trattare); oggetto con valori null = nessuna particella
+    // o attributi legittimamente assenti (es. strada senza mappale, Comune senza sezione).
+    const lookupCatasto = async (geom: any): Promise<Record<string, string | null> | null> => {
+      const empty: Record<string, string | null> = {}
+      GII_CATASTO_FIELDS.forEach(n => { empty[n] = null })
+      if (!surveyPointIsUsable(geom)) return empty
+      const pl = await getParticelleLayer()
+      if (!pl) return null
+      try {
+        const pq = pl.createQuery ? pl.createQuery() : {}
+        pq.where = '1=1'
+        pq.geometry = geom
+        pq.spatialRelationship = 'intersects'
+        pq.outFields = GII_CATASTO_FIELDS
+        pq.returnGeometry = false
+        pq.num = 1
+        if (pl.objectIdField) pq.orderByFields = [String(pl.objectIdField)]
+        const pres = await pl.queryFeatures(pq, args.signal ? { signal: args.signal } : undefined)
+        const pf = Array.isArray(pres?.features) ? pres.features[0] : null
+        if (!pf) return empty
+        const pa = pf.attributes || {}
+        const out: Record<string, string | null> = {}
+        GII_CATASTO_FIELDS.forEach(n => {
+          const key = Object.keys(pa).find(k => k.toLowerCase() === n)
+          out[n] = surveyCatastoText(key ? pa[key] : null)
+        })
+        return out
+      } catch (e) {
+        if (isGiiAbortError(e)) throw e
+        console.warn('[GII] Interrogazione catastale non riuscita:', e)
+        return null
+      }
+    }
 
     let changed = 0
     const chunkSize = 80
@@ -2443,8 +2518,9 @@ async function normalizeSurveyUppercaseFields (args: {
       const chunk = objectIds.slice(i, i + chunkSize)
       const q = layer.createQuery ? layer.createQuery() : {}
       q.objectIds = chunk
-      q.outFields = Array.from(new Set([oidField, originField, flagField, dateField, userField, ...uppercaseFields, ...lowercaseFields].filter(Boolean)))
-      q.returnGeometry = false
+      q.outFields = Array.from(new Set([oidField, originField, flagField, dateField, userField, ...uppercaseFields, ...lowercaseFields, ...catastoFields].filter(Boolean)))
+      // Geometria puntuale necessaria solo per l'acquisizione catastale delle rilevazioni nuove.
+      q.returnGeometry = catastoFields.length > 0
       const res = await layer.queryFeatures(q, args.signal ? { signal: args.signal } : undefined)
       const features = Array.isArray(res?.features) ? res.features : []
       if (!features.length) continue
@@ -2465,6 +2541,20 @@ async function normalizeSurveyUppercaseFields (args: {
 
         const out: Record<string, any> = { [oidField]: oid }
         let hasTextChange = false
+
+        // Rilevazione Survey/TR nuova (testi_normalizzati non ancora = 1):
+        // prima si acquisiscono i dati catastali dalla posizione, poi si normalizzano i testi.
+        // Se l'interrogazione catastale fallisce tecnicamente, la rilevazione non viene
+        // marcata e sarà ritrattata al passaggio successivo.
+        if (!already && catastoFields.length) {
+          const catasto = await lookupCatasto(f?.geometry)
+          throwIfHeaderAborted(args.signal)
+          if (!catasto) continue
+          for (const name of GII_CATASTO_FIELDS) {
+            const field = materializeAlertRealField(fieldMap, name)
+            if (field) out[field] = catasto[name]
+          }
+        }
 
         for (const field of uppercaseFields) {
           const oldValue = attrs[field]
@@ -2847,16 +2937,7 @@ function currentPageIdFromUrl (): string {
   return ''
 }
 
-function sectionForAlert (tipo: string): string {
-  const t = String(tipo || '').toUpperCase()
-  if (t.includes('PAGAMENTO')) return 'pagamento'
-  if (t.includes('RICORSO')) return 'ricorso'
-  if (t.includes('DEFINIRE')) return 'definizione'
-  return 'atto'
-}
-
 function storeAlertEditIntent (alert: GiiAlertItem, layerUrl: string): void {
-  const section = sectionForAlert(alert.tipoAlert)
   const raw = alert.raw || {}
   const rawGid = String((raw as any)?.GlobalID || (raw as any)?.globalid || '').trim().replace(/^\{|\}$/g, '').toLowerCase()
   const alertGid = String(alert.parentGlobalId || '').trim().replace(/^\{|\}$/g, '').toLowerCase()
@@ -2903,12 +2984,9 @@ function storeAlertEditIntent (alert: GiiAlertItem, layerUrl: string): void {
   } else {
     try { window.sessionStorage.removeItem('GII_SELECTED_DATA') } catch {}
   }
-  try { window.sessionStorage.setItem('GII_REQUESTED_EDIT_SECTION', section) } catch {}
-  try { window.sessionStorage.setItem('GII_EDIT_TAB', section) } catch {}
   try { window.dispatchEvent(new CustomEvent('gii-edit-intent-changed', { detail: intent })) } catch {}
   try { window.dispatchEvent(new CustomEvent('gii-open-practice-intent', { detail: intent })) } catch {}
   try { window.dispatchEvent(new CustomEvent('gii-selection-changed', { detail: intent })) } catch {}
-  try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section } })) } catch {}
 }
 
 function AlertBellButton (props: { counts: GiiAlertQueryResult['counts'], loading: boolean, error: string, onClick: () => void }) {

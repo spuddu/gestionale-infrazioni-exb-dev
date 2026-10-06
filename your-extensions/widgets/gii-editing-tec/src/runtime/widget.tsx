@@ -287,6 +287,33 @@ function resetInvalidEditSectionStorage (fallback: string = 'trasgressore'): str
   return next
 }
 
+// F5: URL della pagina ricaricata (vuoto se il documento non è stato ricaricato).
+// Viene consumato una sola volta al primo ingresso visibile in una pagina di editing.
+let giiReloadedPageUrlPending: string = (() => {
+  try {
+    const nav: any = (window.performance as any)?.getEntriesByType?.('navigation')?.[0]
+    return nav?.type === 'reload' ? String(nav?.name || window.location.href || '') : ''
+  } catch {
+    return ''
+  }
+})()
+
+function giiNormalizePageUrlForReload (raw: string): string {
+  try {
+    const u = new URL(raw, window.location.href)
+    return `${u.origin}${u.pathname}${String(u.hash || '').split('?')[0]}`.replace(/\/+$/, '').toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
+function consumeGiiReloadEntryForCurrentPage (): boolean {
+  const reloaded = giiReloadedPageUrlPending
+  giiReloadedPageUrlPending = ''
+  if (!reloaded) return false
+  return giiNormalizePageUrlForReload(reloaded) === giiNormalizePageUrlForReload(window.location.href)
+}
+
 function getStoredValidEditSection (): string | null {
   try {
     const current = window.sessionStorage.getItem('GII_EDIT_TAB')
@@ -2932,7 +2959,7 @@ const UPPERCASE_TEXT_FIELDS = new Set([
   'dom_notifica_via', 'dom_notifica_civico', 'dom_notifica_citta', 'dom_notifica_provincia', 'dom_notifica_cap', 'dom_notifica_stato',
   'rl_nome', 'rl_cognome', 'rl_cf',
   'rl_dom_via', 'rl_dom_civico', 'rl_dom_citta', 'rl_dom_provincia', 'rl_dom_cap', 'rl_dom_stato',
-  'distretto', 'comizio', 'idrante', 'matricola_contatore', 'matricola_tessera'
+  'matricola_contatore', 'matricola_tessera'
 ])
 
 function normalizeUppercaseTextFieldValue (fieldName: string, value: any): any {
@@ -4724,7 +4751,7 @@ function NuovaPraticaForm (p: {
     }
   }, [validationPopup, validationPopupOkId])
 
-  const [npTab, setNpTab] = React.useState<'dati_generali' | 'trasgressore' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima'>(() => getRequestedEditSection({ skipUrl: true }) || 'trasgressore')
+  const [npTab, setNpTab] = React.useState<'dati_generali' | 'trasgressore' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima'>(() => mode === 'create' ? 'trasgressore' : (getRequestedEditSection({ skipUrl: true }) || 'trasgressore'))
   const [openNorma3Article, setOpenNorma3Article] = React.useState('')
   const [openFixedArticle, setOpenFixedArticle] = React.useState('')
   const [isExternalNavMode, setIsExternalNavMode] = React.useState<boolean>(true)
@@ -5281,9 +5308,25 @@ function NuovaPraticaForm (p: {
   const spatialLookupRunningRef = React.useRef(false)
   const spatialLookupSeqRef = React.useRef(0)
   const spatialLookupPointKeyRef = React.useRef('')
-  const lastAutoSpatialValuesRef = React.useRef<Record<'descrizione_luogo' | 'distretto' | 'comizio' | 'idrante', string>>({
-    descrizione_luogo: '', distretto: '', comizio: '', idrante: ''
-  })
+  // true quando i campi catastali della bozza sono stati ricalcolati da un nuovo punto
+  const catastoAutoAppliedRef = React.useRef(false)
+  // Ultimo testo "Dati tecnici rilevati" calcolato dal punto (null = nessun calcolo in sessione)
+  const datiTecniciAutoRef = React.useRef<string | null>(null)
+
+  // Prepara il layer Particelle della mappa: i campi catastali vengono caricati lato client
+  // insieme alle feature, così la lettura al clic è immediata come il popup.
+  React.useEffect(() => {
+    const view = p.mapView
+    if (!view || isReadOnly) return
+    let cancelled = false
+    ;(async () => {
+      try { if (typeof view.when === 'function') await view.when() } catch {}
+      if (cancelled) return
+      const layer = findCatastoLayerInView(view)
+      if (layer) ensureCatastoOutFields(layer)
+    })()
+    return () => { cancelled = true }
+  }, [p.mapView, isReadOnly])
 
   React.useEffect(() => {
     const point = p.clickedPointWgs84
@@ -5292,20 +5335,21 @@ function NuovaPraticaForm (p: {
       if (!point) {
         spatialLookupPointKeyRef.current = ''
         spatialLookupRunningRef.current = false
-        const oldAuto = lastAutoSpatialValuesRef.current
-        if (oldAuto.descrizione_luogo || oldAuto.distretto || oldAuto.comizio || oldAuto.idrante) {
+        // I dati catastali dipendono solo dal punto: tornando al punto originale
+        // tornano anche i valori catastali salvati.
+        if (catastoAutoAppliedRef.current) {
           setDraft(prev => {
             const next: NpDraft = { ...prev }
-            ;(['descrizione_luogo', 'distretto', 'comizio', 'idrante'] as const).forEach(key => {
-              const current = String(prev[key] ?? '').trim()
-              const automatic = String(oldAuto[key] ?? '').trim()
-              // Ripristino del punto originale/annullamento: torno al valore iniziale
-              // solo se il campo non è stato corretto manualmente dopo l'autocompilazione.
-              if (automatic && current === automatic) next[key] = String(baselineDraft[key] ?? '')
-            })
+            GII_CATASTO_FIELDS.forEach(key => { next[key] = String(baselineDraft[key] ?? '') })
             return next
           })
-          lastAutoSpatialValuesRef.current = { descrizione_luogo: '', distretto: '', comizio: '', idrante: '' }
+          catastoAutoAppliedRef.current = false
+        }
+        // Dati tecnici: torno al valore salvato solo se il testo non è stato corretto a mano.
+        if (datiTecniciAutoRef.current !== null) {
+          const autoText = datiTecniciAutoRef.current
+          setDraft(prev => String(prev.dati_tecnici ?? '') === autoText ? { ...prev, dati_tecnici: String(baselineDraft.dati_tecnici ?? '') } : prev)
+          datiTecniciAutoRef.current = null
         }
         setSpatialLookupState(prev => prev.running || prev.text ? { running: false, text: '', kind: 'idle' } : prev)
       }
@@ -5317,92 +5361,52 @@ function NuovaPraticaForm (p: {
     const seq = ++spatialLookupSeqRef.current
     let cancelled = false
     spatialLookupRunningRef.current = true
-    setSpatialLookupState({ running: true, text: 'Rilevazione automatica dei dati territoriali…', kind: 'idle' })
+    setSpatialLookupState({ running: true, text: 'Rilevazione automatica dei dati catastali e tecnici…', kind: 'idle' })
 
     void (async () => {
-      try {
-        const values = await resolveSpatialAutoValues(view, point)
-        if (cancelled || seq !== spatialLookupSeqRef.current) return
-
+      // Catasto: prima dalla mappa (come il popup), poi dal servizio; applicato appena disponibile.
+      // lookupCatastoAtPoint non lancia eccezioni: null = interrogazione non riuscita.
+      const catastoPromise = lookupCatastoAtPoint(view, point).then(res => {
+        if (cancelled || seq !== spatialLookupSeqRef.current) return res
+        // Dati catastali sempre coerenti con il punto corrente: vuoti se la particella o
+        // l'attributo mancano, o se l'interrogazione non è riuscita.
         setDraft(prev => {
           const next: NpDraft = { ...prev }
-          const previousAuto = lastAutoSpatialValuesRef.current
-          const nextAuto: Record<'descrizione_luogo' | 'distretto' | 'comizio' | 'idrante', string> = {
-            descrizione_luogo: previousAuto.descrizione_luogo || '',
-            distretto: previousAuto.distretto || '',
-            comizio: previousAuto.comizio || '',
-            idrante: previousAuto.idrante || ''
-          }
-          const applyAutoField = (key: 'descrizione_luogo' | 'distretto' | 'comizio' | 'idrante', detectedRaw: any) => {
-            const detected = String(detectedRaw ?? '').trim()
-            const current = String(prev[key] ?? '').trim()
-            const oldAuto = String(previousAuto[key] ?? '').trim()
-            if (detected) {
-              const normalized = String(normalizeUppercaseTextFieldValue(key, detected) ?? detected)
-              next[key] = normalized
-              nextAuto[key] = normalized
-              return
-            }
-            // Se non c'è un riscontro nel nuovo punto, elimino solo un valore che
-            // era stato autocompilato in questa stessa sessione. Un dato preesistente
-            // o modificato manualmente resta intatto (es. Comizio/Idrante lontani > 2 m).
-            if (oldAuto && current === oldAuto) next[key] = ''
-            nextAuto[key] = ''
-          }
-
-          applyAutoField('descrizione_luogo', values.descrizione_luogo)
-          applyAutoField('distretto', values.distretto)
-          applyAutoField('comizio', values.comizio)
-          applyAutoField('idrante', values.idrante)
-          lastAutoSpatialValuesRef.current = nextAuto
+          GII_CATASTO_FIELDS.forEach(key => { next[key] = res ? res.values[key] : '' })
           return next
         })
+        catastoAutoAppliedRef.current = true
+        return res
+      })
+      // Dati tecnici rilevati: stessa logica e stesso formato del Survey, applicati appena disponibili.
+      // Sostituiscono i vecchi campi Distretto/Comizio/Idrante.
+      // lookupDatiTecniciAtPoint non lancia eccezioni: null = interrogazione non riuscita.
+      const datiTecniciPromise = lookupDatiTecniciAtPoint(view, point).then(text => {
+        if (cancelled || seq !== spatialLookupSeqRef.current) return text
+        const autoText = text ?? ''
+        setDraft(prev => ({ ...prev, dati_tecnici: autoText }))
+        datiTecniciAutoRef.current = autoText
+        return text
+      })
+      try {
+        const [catastoRes, datiTecniciRes] = await Promise.all([catastoPromise, datiTecniciPromise])
+        if (cancelled || seq !== spatialLookupSeqRef.current) return
 
         const found: string[] = []
-        if (values.foundParcel) found.push('dati catastali')
-        if (values.foundManufatto) found.push('manufatto')
-        else if (values.foundNetwork) found.push('rete irrigua')
-        if (values.foundDistrict && !values.foundNetwork && !values.foundManufatto) found.push('distretto irriguo')
+        if (catastoRes?.found) found.push('dati catastali')
+        if (datiTecniciRes) found.push('dati tecnici')
         const completedText = found.length
           ? `Rilevazione automatica completata: ${found.join(', ')}.`
-          : 'Nessun elemento territoriale rilevato. Gli eventuali valori già presenti sono stati mantenuti.'
+          : 'Nessun elemento catastale o tecnico rilevato nel punto.'
 
-        // La lettura catastale completa prosegue in background: a questo punto la
-        // rilevazione tecnica (buffer 2 m) è già conclusa e Salva può tornare attivo.
-        if (values.cadastralDetailsPromise && values.foundParcel) {
-          setSpatialLookupState({ running: false, text: 'Dati territoriali disponibili. Completamento dei dati catastali in corso…', kind: 'ok' })
-          const quickDescription = String(values.descrizione_luogo ?? '').trim()
-          void values.cadastralDetailsPromise.then(fullRaw => {
-            if (cancelled || seq !== spatialLookupSeqRef.current) return
-            const fullDescription = String(fullRaw ?? '').trim()
-            if (fullDescription) {
-              setDraft(prev => {
-                const current = String(prev.descrizione_luogo ?? '').trim()
-                const trackedAuto = String(lastAutoSpatialValuesRef.current.descrizione_luogo ?? '').trim()
-                // Non sovrascrivo una correzione manuale fatta mentre il completamento
-                // catastale era in corso. Normalmente quickDescription contiene già il mappale.
-                const canReplace = quickDescription
-                  ? current === quickDescription && trackedAuto === quickDescription
-                  : (!current || (!!trackedAuto && current === trackedAuto))
-                if (!canReplace) return prev
-                if (current === fullDescription && trackedAuto === fullDescription) return prev
-                lastAutoSpatialValuesRef.current = { ...lastAutoSpatialValuesRef.current, descrizione_luogo: fullDescription }
-                return { ...prev, descrizione_luogo: fullDescription }
-              })
-            }
-            setSpatialLookupState({ running: false, text: completedText, kind: found.length ? 'ok' : 'warn' })
-          }).catch(e => {
-            if (cancelled || seq !== spatialLookupSeqRef.current) return
-            console.warn('[GII spatial auto] Completamento dati catastali non riuscito:', e)
-            setSpatialLookupState({ running: false, text: `${completedText} Dettagli catastali completi non disponibili.`, kind: 'warn' })
-          })
+        const missing: string[] = []
+        if (!catastoRes) missing.push('dati catastali')
+        if (datiTecniciRes === null) missing.push('dati tecnici')
+        if (missing.length) {
+          setSpatialLookupState({ running: false, text: `${completedText} Non disponibili: ${missing.join(', ')} (interrogazione non riuscita, riposizionare il punto per riprovare).`, kind: 'warn' })
         } else {
           setSpatialLookupState({ running: false, text: completedText, kind: found.length ? 'ok' : 'warn' })
         }
-      } catch (e) {
-        if (cancelled || seq !== spatialLookupSeqRef.current) return
-        console.warn('[GII spatial auto] Rilevazione automatica non riuscita:', e)
-        setSpatialLookupState({ running: false, text: 'Rilevazione automatica non disponibile. I dati già presenti non sono stati modificati.', kind: 'warn' })
       } finally {
         if (!cancelled && seq === spatialLookupSeqRef.current) spatialLookupRunningRef.current = false
       }
@@ -6788,7 +6792,8 @@ React.useEffect(() => {
   }, [attachmentFiles, attachments, pendingDeleteAttachmentIds, pendingDeleteAttachmentNames, pendingReplaceAttachments, pendingReplaceAttachmentOriginalNames, pendingAttachmentRotations, captureAttachmentOperation, getAttachmentPreferredUrl, isAttachmentOperationCurrent, ds, refreshCurrentAttachmentsAfterUpload])
 
   const performCancel = () => {
-    lastAutoSpatialValuesRef.current = { descrizione_luogo: '', distretto: '', comizio: '', idrante: '' }
+    catastoAutoAppliedRef.current = false
+    datiTecniciAutoRef.current = null
     spatialLookupPointKeyRef.current = ''
     spatialLookupRunningRef.current = false
     setSpatialLookupState({ running: false, text: '', kind: 'idle' })
@@ -7118,11 +7123,30 @@ React.useEffect(() => {
         gradi_violazioni: g('gradi_violazioni') || null,
         occorrenza: toInt(g('occorrenza')),
         // Dati tecnici (erano mancanti)
-        distretto: g('distretto') || null,
-        comizio: toInt(g('comizio')),
-        idrante: toInt(g('idrante')),
         matricola_contatore: g('matricola_contatore') || null,
         matricola_tessera: g('matricola_tessera') || null,
+        // Dati rilevati dal TR (Survey) e modificabili dall'IT: le variazioni
+        // confluiscono nell'audit del ciclo tramite il confronto prevAttrs/cleanAttrs.
+        // reqPoint=0: punto azzerato, quindi anche i dati tecnici riferiti al punto vengono svuotati.
+        dati_tecnici: reqPoint === 0 ? null : (g('dati_tecnici') || null),
+        note_TR: g('note_tr') || null,
+        // Dati catastali ricavati automaticamente dalla posizione del punto.
+        // reqPoint=0: la geometria viene azzerata a (0,0), quindi anche i dati catastali
+        // vengono svuotati per non lasciare valori riferiti a un punto non più presente.
+        // reqPoint=1: inviati solo se in questa sessione il punto è stato impostato o spostato,
+        // così un salvataggio da bozza aperta prima dell'acquisizione catastale
+        // in background (gii-header) non sovrascrive i valori già presenti nel layer.
+        ...(reqPoint === 0 ? {
+          nome_comun: null,
+          sezione: null,
+          foglio: null,
+          mappale: null
+        } : (catastoAutoAppliedRef.current ? {
+          nome_comun: g('nome_comun') || null,
+          sezione: g('sezione') || null,
+          foglio: g('foglio') || null,
+          mappale: g('mappale') || null
+        } : {})),
         // Art. 30 — snapshot del rimborso attrezzature selezionato dall'IT AGR/TEC.
         // Questi campi hanno significato solo quando Art. 30 e' effettivamente selezionato:
         // null = non pertinente; 0/1 per la cauzione = pertinente e assente/presente.
@@ -7209,6 +7233,8 @@ React.useEffect(() => {
         const err = updated?.error
         const ok = !err && (updated?.objectId != null || updated?.success === true || updated?.success == null)
         if (!ok) throw new Error(err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res))
+        // Dati catastali persistiti: i salvataggi successivi non li reinviano finché il punto non cambia.
+        catastoAutoAppliedRef.current = false
 
         const nextSavedData = { ...(p.initialData || {}), ...cleanAttrs, [editIdFieldName]: editOid }
         let attachmentAuditEntries: AttachmentAuditEntry[] = []
@@ -7266,6 +7292,7 @@ React.useEffect(() => {
       const err = added?.error
       const ok = !err && (added?.objectId != null || added?.success === true || added?.success == null)
       if (!ok) throw new Error(err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res))
+      catastoAutoAppliedRef.current = false
 
       const newOid = Number(added.objectId)
       if (!isGiiPracticeContextStampCurrent(saveContextStamp)) { setSaving(false); return }
@@ -8037,11 +8064,14 @@ ${e?.message || String(e)}`
       }
       case 'descrizione_luogo': return { label: 'Descrizione del luogo', el: <NpText value={g('descrizione_luogo')} onChange={v => set('descrizione_luogo', v)} multiline uppercase={false} disabled={saving}/> }
       // Dati tecnici
-      case 'distretto': return { label: 'Distretto', el: <NpText value={g('distretto')} onChange={v => set('distretto', v)} disabled={saving}/> }
-      case 'comizio': return { label: 'Comizio', el: <NpText value={g('comizio')} onChange={v => set('comizio', v)} disabled={saving}/> }
-      case 'idrante': return { label: 'Idrante', el: <NpText value={g('idrante')} onChange={v => set('idrante', v)} disabled={saving}/> }
+      // Distretto/Comizio/Idrante non più gestiti: i dati di rete e manufatti sono in "Dati tecnici rilevati".
+      // Restituendo null, le righe del layout configurato che li contengono non vengono mostrate.
       case 'matricola_contatore': return { label: 'Matricola contatore', el: <NpText value={g('matricola_contatore')} onChange={v => set('matricola_contatore', v)} disabled={saving}/> }
       case 'matricola_tessera': return { label: 'Matricola tessera', el: <NpText value={g('matricola_tessera')} onChange={v => set('matricola_tessera', v)} disabled={saving}/> }
+      // Dati originari della rilevazione TR (Survey), modificabili dall'IT con tracciamento in audit
+      case 'dati_tecnici': return { label: 'Dati tecnici rilevati', el: <NpText value={g('dati_tecnici')} onChange={v => set('dati_tecnici', v)} multiline minRows={5} uppercase={false} maxLength={4000} disabled={saving}/> }
+      case 'note_TR':
+      case 'note_tr': return { label: 'Annotazioni tecniche del Tecnico rilevatore', el: <NpText value={g('note_tr')} onChange={v => set('note_tr', v)} multiline uppercase={false} maxLength={2000} disabled={saving}/> }
       default: return null
     }
   }
@@ -8239,6 +8269,16 @@ ${e?.message || String(e)}`
                 </div>
               ) : null
             })()}
+            {reqPoint === 1 && (
+              // Dati catastali ricavati dalla posizione del punto: sola lettura,
+              // si aggiornano automaticamente impostando o spostando il punto.
+              <div style={{ marginTop: 8, display: 'grid', gridTemplateColumns: fitGridColumns('2fr 1fr 1fr 1fr'), gap: Number(cfg.fieldGap) || 12, minWidth: 0, maxWidth: '100%' }}>
+                <NpField label='Comune'><NpText value={g('nome_comun')} onChange={() => {}} disabled/></NpField>
+                <NpField label='Sezione'><NpText value={g('sezione')} onChange={() => {}} disabled/></NpField>
+                <NpField label='Foglio'><NpText value={g('foglio')} onChange={() => {}} disabled/></NpField>
+                <NpField label='Mappale'><NpText value={g('mappale')} onChange={() => {}} disabled/></NpField>
+              </div>
+            )}
             {reqPoint === 1 && (
               <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 {!p.mapClickEnabled ? (
@@ -9062,6 +9102,21 @@ ${e?.message || String(e)}`
     }
   }
 
+  // Il layout della scheda "Luoghi e dati tecnici" è salvato nella config dell'app:
+  // i campi del Survey TR (dati_tecnici, note_TR) vengono aggiunti in testa alla
+  // sezione "Dati tecnici" solo se il layout configurato non li contiene già.
+  const withSurveyTechnicalRows = (rows: any[]): any[] => {
+    if (!Array.isArray(rows)) return rows
+    const hasField = (name: string) => rows.some((row: any) => Array.isArray(row?.cells) && row.cells.some((c: any) => String(c?.field || '').toLowerCase() === name))
+    const extra: any[] = []
+    if (!hasField('dati_tecnici')) extra.push({ type: 'fields', columns: '1fr', cells: [{ field: 'dati_tecnici' }] })
+    if (!hasField('note_tr')) extra.push({ type: 'fields', columns: '1fr', cells: [{ field: 'note_TR' }] })
+    if (!extra.length) return rows
+    const headerIdx = rows.findIndex((row: any) => row?.type === 'header' && String(row?.label || '').trim().toLowerCase() === 'dati tecnici')
+    if (headerIdx < 0) return [...rows, { type: 'header', label: 'Dati tecnici' }, ...extra]
+    return [...rows.slice(0, headerIdx + 1), ...extra, ...rows.slice(headerIdx + 1)]
+  }
+
   const normalizeDatiGeneraliLayout = (rows: any[]): any[] => {
     if (!Array.isArray(rows)) return rows
     return rows.map((row: any) => {
@@ -9081,7 +9136,9 @@ ${e?.message || String(e)}`
     if (tabId === 'violazione') return renderSpecial('_violazione_due_colonne')
     const cfgLayouts = cfg.fieldLayouts || {}
     const rawLayout: any[] = (cfgLayouts as any)[tabId] || DEFAULT_FIELD_LAYOUTS[tabId] || []
-    const layout: any[] = tabId === 'dati_generali' ? normalizeDatiGeneraliLayout(rawLayout) : rawLayout
+    const layout: any[] = tabId === 'dati_generali'
+      ? normalizeDatiGeneraliLayout(rawLayout)
+      : (tabId === 'dati_tecnici' ? withSurveyTechnicalRows(rawLayout) : rawLayout)
     const defaultGap = Number(cfg.fieldGap) || 12
     const fallbackTitle = NP_TABS.find(t => t.id === tabId)?.label || 'Sezione'
 
@@ -10734,459 +10791,273 @@ function collectFeatureLayersFromView (view: any): any[] {
   }
 }
 
-type GiiSpatialLayerKind = 'particelle' | 'distretti' | 'rete' | 'manufatti'
-type GiiSpatialAutoValues = {
-  descrizione_luogo?: string
-  distretto?: string
-  comizio?: string
-  idrante?: string
-  foundParcel?: boolean
-  foundDistrict?: boolean
-  foundNetwork?: boolean
-  foundManufatto?: boolean
-  cadastralDetailsPromise?: Promise<string>
-}
-
-function getSpatialLayerKind (layer: any): GiiSpatialLayerKind | null {
-  const title = normalizeLayerTitleForMatch(layer?.title || layer?.sourceJSON?.title || layer?.sourceJSON?.name || '')
-  if (!title) return null
-  if (title.includes('particell')) return 'particelle'
-  if (title.includes('manufatt') || title.includes('idranti') || title.includes('operedipresa') || title.includes('operapresa')) return 'manufatti'
-  if (title.includes('rete') && (title.includes('irrig') || title.includes('comiz'))) return 'rete'
-  if (title.includes('distrett') && title.includes('irrig')) return 'distretti'
-  return null
-}
-
-function collectSpatialLayersFromView (view: any, kind: GiiSpatialLayerKind): any[] {
-  return collectFeatureLayersFromView(view).filter(layer => getSpatialLayerKind(layer) === kind)
-}
-
-function normalizeSpatialFieldToken (raw: any): string {
-  return normKey(raw).replace(/\s+/g, ' ').trim()
-}
-
 function spatialValueIsMeaningful (value: any): boolean {
   if (value == null) return false
   const s = String(value).trim()
   return s !== '' && s.toLowerCase() !== 'null' && s.toLowerCase() !== 'undefined'
 }
 
-function pickSpatialAttr (layer: any, attrs: any, tokenGroups: string[][], exactNames: string[] = []): any {
-  if (!attrs || typeof attrs !== 'object') return null
-  const fields = Array.isArray(layer?.fields) ? layer.fields : []
-  const exact = exactNames.map(normalizeSpatialFieldToken).filter(Boolean)
-  const descriptors: Array<{ key: string, name: string, alias: string }> = []
-  Object.keys(attrs).forEach(key => {
-    const f = fields.find((fld: any) => String(fld?.name || '').toLowerCase() === String(key).toLowerCase())
-    descriptors.push({
-      key,
-      name: normalizeSpatialFieldToken(f?.name || key),
-      alias: normalizeSpatialFieldToken(f?.alias || '')
-    })
+// Interrogazione catastale diretta sul layer Particelle pubblicato per il GII:
+// query spaziale sul solo punto, senza geometrie e con i soli campi necessari.
+// Ritorna valori null quando la particella o un attributo sono legittimamente assenti;
+// lancia un errore solo in caso di interrogazione tecnicamente non riuscita.
+const GII_PARTICELLE_CATASTO_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Particelle/FeatureServer/131'
+const GII_CATASTO_FIELDS = ['nome_comun', 'sezione', 'foglio', 'mappale'] as const
+type GiiCatastoValues = Record<typeof GII_CATASTO_FIELDS[number], string>
+
+async function queryCatastoAtPoint (wgs84: any): Promise<{ found: boolean, values: GiiCatastoValues }> {
+  const values = { nome_comun: '', sezione: '', foglio: '', mappale: '' } as GiiCatastoValues
+  const layer = await getFeatureLayerByUrl(GII_PARTICELLE_CATASTO_URL)
+  const geometry = await toLayerPoint(wgs84, layer)
+  if (!geometry) throw new Error('Punto non valido per l\'interrogazione catastale.')
+  const q: any = typeof layer.createQuery === 'function' ? layer.createQuery() : {}
+  q.where = '1=1'
+  q.geometry = geometry
+  q.spatialRelationship = 'intersects'
+  q.outFields = [...GII_CATASTO_FIELDS]
+  q.returnGeometry = false
+  q.num = 1
+  if (layer?.objectIdField) q.orderByFields = [String(layer.objectIdField)]
+  const res = await layer.queryFeatures(q)
+  const feature = Array.isArray(res?.features) ? res.features[0] : null
+  if (!feature) return { found: false, values }
+  const attrs = feature.attributes || {}
+  GII_CATASTO_FIELDS.forEach(name => {
+    const key = Object.keys(attrs).find(k => k.toLowerCase() === name)
+    const raw = key ? attrs[key] : null
+    values[name] = spatialValueIsMeaningful(raw) ? String(raw).trim() : ''
   })
-
-  const systemField = (d: { key: string, name: string, alias: string }) => {
-    const n = normalizeSpatialFieldToken(d.key)
-    return n === 'objectid' || n === 'globalid' || n === 'shape' || n.includes('shape length') || n.includes('shape area')
-  }
-
-  for (const wanted of exact) {
-    for (const d of descriptors) {
-      if (systemField(d)) continue
-      if ((wanted === d.name || wanted === d.alias || wanted === normalizeSpatialFieldToken(d.key)) && spatialValueIsMeaningful(attrs[d.key])) return attrs[d.key]
-    }
-  }
-
-  for (const group of tokenGroups) {
-    const tokens = group.map(normalizeSpatialFieldToken).filter(Boolean)
-    if (!tokens.length) continue
-    for (const d of descriptors) {
-      if (systemField(d)) continue
-      const haystacks = [d.name, d.alias, normalizeSpatialFieldToken(d.key)]
-      if (haystacks.some(h => tokens.every(t => h.includes(t))) && spatialValueIsMeaningful(attrs[d.key])) return attrs[d.key]
-    }
-  }
-  return null
+  return { found: true, values }
 }
 
-function formatCadastralSurface (raw: any): string {
-  if (!spatialValueIsMeaningful(raw)) return ''
-  const s = String(raw).trim()
-  const already = s.match(/^(\d+)[.](\d{1,2})[.](\d{1,2})$/)
-  if (already) return `${Number(already[1])}.${String(Number(already[2])).padStart(2, '0')}.${String(Number(already[3])).padStart(2, '0')}`
-  if (/^\d+$/.test(s)) {
-    const total = Number(s)
-    if (Number.isFinite(total)) {
-      const ha = Math.floor(total / 10000)
-      const aa = Math.floor((total % 10000) / 100)
-      const ca = total % 100
-      return `${ha}.${String(aa).padStart(2, '0')}.${String(ca).padStart(2, '0')}`
-    }
-  }
-  if (typeof raw === 'number' && Number.isFinite(raw) && Number.isInteger(raw)) {
-    const total = Number(raw)
-    const ha = Math.floor(total / 10000)
-    const aa = Math.floor((total % 10000) / 100)
-    const ca = total % 100
-    return `${ha}.${String(aa).padStart(2, '0')}.${String(ca).padStart(2, '0')}`
-  }
-  return s
+// Lettura catastale "come il popup": usa le feature del layer Particelle già caricate
+// nella mappa (LayerView, lato client), senza nuova richiesta al servizio.
+// Il layer della mappa viene riconosciuto solo se punta allo stesso servizio usato da
+// gii-header, così i valori coincidono con quelli acquisiti in background.
+function findCatastoLayerInView (view: any): any | null {
+  const target = normalizeMapLayerUrlForMatch(GII_PARTICELLE_CATASTO_URL)
+  return collectFeatureLayersFromView(view).find((layer: any) => normalizeMapLayerUrlForMatch(layer?.url || '', layer) === target) || null
 }
 
-function titleCaseSpatialText (raw: any): string {
-  const s = String(raw ?? '').trim()
-  if (!s) return ''
-  return s.toLocaleLowerCase('it-IT').replace(/(^|[\s'’/-])([a-zà-öø-ÿ])/giu, (_m, sep, ch) => `${sep}${String(ch).toLocaleUpperCase('it-IT')}`)
-}
-
-function normalizeAutoDistretto (raw: any): string {
-  const s = String(raw ?? '').trim()
-  if (!s) return ''
-  const m = s.toLocaleUpperCase('it-IT').match(/(?:DISTRETTO\s*)?D?\s*([1-9]\d*)/)
-  return m ? `D${m[1]}` : s.toLocaleUpperCase('it-IT')
-}
-
-function normalizeAutoNumericText (raw: any): string {
-  const s = String(raw ?? '').trim()
-  if (!s) return ''
-  if (/^-?\d+$/.test(s)) return String(parseInt(s, 10))
-  if (/^-?\d+[.]0+$/.test(s)) return String(Math.trunc(Number(s)))
-  const nums = s.match(/\d+/g) || []
-  const label = normalizeSpatialFieldToken(s)
-  if (nums.length === 1 && (label.includes('comizio') || label.includes('idrante') || label.includes('opera') || label.includes('presa') || label.includes('numero'))) return nums[0]
-  return s
-}
-
-function buildCadastralDescription (layer: any, attrs: any): string {
-  if (!attrs) return ''
-  const comune = pickSpatialAttr(layer, attrs, [['nome', 'comun'], ['comune']], ['nome_comun', 'nome_comune', 'comune'])
-  const provincia = pickSpatialAttr(layer, attrs, [['provincia']], ['provincia', 'sigla_provincia', 'prov'])
-  const sezione = pickSpatialAttr(layer, attrs, [['sezione']], ['sezione', 'sez'])
-  const foglio = pickSpatialAttr(layer, attrs, [['foglio']], ['foglio'])
-  const mappale = pickSpatialAttr(layer, attrs, [['mappale'], ['particella']], ['mappale', 'particella'])
-  const superficie = pickSpatialAttr(layer, attrs, [['superficie', 'catast'], ['sup', 'cat']], ['sup_cat', 'superficie_catastale'])
-  const qualita = pickSpatialAttr(layer, attrs, [['qualita']], ['qualita', 'qualita_coltura', 'qualita_catastale'])
-  const classe = pickSpatialAttr(layer, attrs, [['classe']], ['classe', 'classe_catastale'])
-  const deduzioni = pickSpatialAttr(layer, attrs, [['deduz']], ['deduzioni', 'deduzione'])
-
-  const parts: string[] = []
-  if (spatialValueIsMeaningful(comune)) {
-    const comuneText = titleCaseSpatialText(comune)
-    const provText = spatialValueIsMeaningful(provincia) ? String(provincia).trim().toLocaleUpperCase('it-IT') : ''
-    parts.push(`Comune: ${comuneText}${provText ? ` (${provText})` : ''}`)
-  }
-  if (spatialValueIsMeaningful(sezione)) parts.push(`Sezione: ${String(sezione).trim()}`)
-  if (spatialValueIsMeaningful(foglio)) parts.push(`Foglio: ${normalizeAutoNumericText(foglio)}`)
-  if (spatialValueIsMeaningful(mappale)) parts.push(`Mappale: ${normalizeAutoNumericText(mappale)}`)
-  const supText = formatCadastralSurface(superficie)
-  if (supText) parts.push(`Superficie: ${supText} ha.a.ca`)
-  if (spatialValueIsMeaningful(qualita)) parts.push(`Qualità: ${titleCaseSpatialText(qualita)}`)
-  if (spatialValueIsMeaningful(classe)) parts.push(`Classe: ${normalizeAutoNumericText(classe)}`)
-  if (spatialValueIsMeaningful(deduzioni)) parts.push(`Deduzioni: ${String(deduzioni).trim()}`)
-  return parts.join(' - ')
-}
-
-function sameSpatialLayer (a: any, b: any): boolean {
-  if (!a || !b) return false
-  if (a === b) return true
-  const aId = String(a?.id || '').trim()
-  const bId = String(b?.id || '').trim()
-  if (aId && bId && aId === bId) return true
-  const aUrl = normalizeMapLayerUrlForMatch(a?.url || '', a)
-  const bUrl = normalizeMapLayerUrlForMatch(b?.url || '', b)
-  return !!aUrl && !!bUrl && aUrl === bUrl
-}
-
-async function hitTestSpatialFeaturesAtPoint (view: any, layers: any[], wgs84: any): Promise<Array<{ layer: any, feature: any }>> {
+// Rende disponibili lato client i 4 campi catastali (di default il layer scarica solo
+// i campi necessari alla simbologia). Idempotente.
+function ensureCatastoOutFields (layer: any): void {
   try {
-    if (!view || typeof view.hitTest !== 'function' || !Array.isArray(layers) || layers.length === 0) return []
-    const viewPoint = await toLayerPoint(wgs84, { spatialReference: view?.spatialReference })
-    if (!viewPoint || typeof view.toScreen !== 'function') return []
-    const screenPoint = view.toScreen(viewPoint)
-    if (!screenPoint) return []
-    const response = await view.hitTest(screenPoint, { include: layers })
-    const results = Array.isArray(response?.results) ? response.results : []
-    const out: Array<{ layer: any, feature: any }> = []
-    for (const result of results) {
-      const feature = result?.graphic
-      const hitLayer = result?.layer || feature?.layer
-      if (!feature || !hitLayer) continue
-      const targetLayer = layers.find(layer => sameSpatialLayer(layer, hitLayer))
-      if (targetLayer) out.push({ layer: targetLayer, feature })
-    }
-    return out
-  } catch (e) {
-    console.warn('[GII spatial auto] hitTest non disponibile:', e)
-    return []
-  }
-}
-
-function getSpatialFeatureObjectId (layer: any, feature: any): any {
-  try {
-    const direct = feature?.getObjectId?.()
-    if (direct != null && String(direct).trim() !== '') return direct
+    const current: string[] = Array.isArray(layer?.outFields) ? layer.outFields.map((f: any) => String(f)) : []
+    if (current.includes('*')) return
+    const missing = GII_CATASTO_FIELDS.filter(name => !current.some(f => f.toLowerCase() === name))
+    if (missing.length) layer.outFields = [...current, ...missing]
   } catch {}
-  const attrs = feature?.attributes || {}
-  const objectIdField = String(layer?.objectIdField || (Array.isArray(layer?.fields) ? layer.fields.find((f: any) => String(f?.type || '').toLowerCase() === 'oid')?.name : '') || '').trim()
-  if (objectIdField) {
-    const key = Object.keys(attrs).find(k => String(k).toLowerCase() === objectIdField.toLowerCase())
-    if (key && attrs[key] != null && String(attrs[key]).trim() !== '') return attrs[key]
-  }
-  const fallbackKey = Object.keys(attrs).find(k => ['objectid', 'fid', 'oid'].includes(String(k).toLowerCase()))
-  return fallbackKey ? attrs[fallbackKey] : null
 }
 
-async function hydrateSpatialFeatureByObjectId (layer: any, feature: any, requestedFields?: string[]): Promise<any> {
+// null = lettura lato client non possibile (layer assente, spento o fuori scala):
+// in quel caso si ripiega sulla query al servizio.
+async function queryCatastoFromMapView (view: any, wgs84: any): Promise<{ found: boolean, values: GiiCatastoValues } | null> {
+  const layer = findCatastoLayerInView(view)
+  if (!layer || typeof view?.whenLayerView !== 'function') return null
   try {
-    if (!layer || !feature || typeof layer.queryFeatures !== 'function') return feature
     if (typeof layer.load === 'function' && !layer.loaded) await layer.load()
-    const objectId = getSpatialFeatureObjectId(layer, feature)
-    if (objectId == null || String(objectId).trim() === '') return feature
-
-    const q: any = typeof layer.createQuery === 'function' ? layer.createQuery() : {}
-    q.objectIds = [objectId]
-    q.returnGeometry = true
-
-    const availableFields = Array.isArray(layer?.fields) ? layer.fields.map((f: any) => String(f?.name || '').trim()).filter(Boolean) : []
-    if (Array.isArray(requestedFields) && requestedFields.length > 0 && availableFields.length > 0) {
-      const requested = requestedFields
-        .map(name => availableFields.find((fieldName: string) => fieldName.toLowerCase() === String(name).toLowerCase()))
-        .filter(Boolean) as string[]
-      const oidField = String(layer?.objectIdField || '').trim()
-      if (oidField && !requested.some(name => name.toLowerCase() === oidField.toLowerCase())) requested.push(oidField)
-      q.outFields = requested.length > 0 ? Array.from(new Set(requested)) : ['*']
-    } else {
-      q.outFields = ['*']
+    ensureCatastoOutFields(layer)
+    const layerView = await view.whenLayerView(layer)
+    if (!layerView || layerView.suspended || typeof layerView.queryFeatures !== 'function') return null
+    if (layerView.updating) {
+      const reactiveUtils = await loadEsriModule<any>('esri/core/reactiveUtils')
+      await Promise.race([
+        reactiveUtils.whenOnce(() => !layerView.updating),
+        new Promise(resolve => setTimeout(resolve, 3000))
+      ])
     }
-
-    const res = await layer.queryFeatures(q)
-    const full = Array.isArray(res?.features) ? res.features[0] : null
-    if (!full) return feature
-    try {
-      full.attributes = { ...(feature?.attributes || {}), ...(full?.attributes || {}) }
-      if (!full.geometry && feature?.geometry) full.geometry = feature.geometry
-    } catch {}
-    return full
-  } catch (e) {
-    console.warn('[GII spatial auto] Lettura attributi completi non riuscita:', layer?.title || layer?.url || '', e)
-    return feature
-  }
-}
-
-async function hydrateIrrigationSpatialHit (hit: { layer: any, feature: any } | null, kind: 'distretto' | 'rete' | 'manufatto'): Promise<{ layer: any, feature: any } | null> {
-  if (!hit) return null
-  const current = extractIrrigationValues(hit.layer, hit.feature?.attributes || {})
-  const complete = kind === 'distretto'
-    ? !!current.distretto
-    : kind === 'rete'
-      ? !!(current.distretto && current.comizio)
-      : !!current.idrante
-  if (complete) return hit
-  const feature = await hydrateSpatialFeatureByObjectId(hit.layer, hit.feature)
-  return { layer: hit.layer, feature }
-}
-
-async function spatialFeatureDistanceMeters (layer: any, feature: any, wgs84: any): Promise<number> {
-  try {
-    const geometryEngine = await loadEsriModule<any>('esri/geometry/geometryEngine')
-    const point = await toLayerPoint(wgs84, layer)
-    const geom = feature?.geometry
-    if (!geometryEngine || !point || !geom) return Number.POSITIVE_INFINITY
-    try {
-      const rawDistance = geometryEngine.distance(point, geom, 'meters')
-      const distance = rawDistance == null ? NaN : Number(rawDistance)
-      if (Number.isFinite(distance)) return Math.max(0, distance)
-    } catch {}
-    try {
-      const nearest = geometryEngine.nearestCoordinate?.(geom, point)
-      if (nearest?.coordinate) {
-        const rawNearestDistance = geometryEngine.distance(point, nearest.coordinate, 'meters')
-        const distance = rawNearestDistance == null ? NaN : Number(rawNearestDistance)
-        if (Number.isFinite(distance)) return Math.max(0, distance)
-      }
-    } catch {}
-  } catch {}
-  return Number.POSITIVE_INFINITY
-}
-
-async function querySpatialFeaturesAtPoint (view: any, layer: any, wgs84: any, distanceMeters: number | null): Promise<any[]> {
-  try {
-    if (!layer || typeof layer.queryFeatures !== 'function') return []
-    if (typeof layer.load === 'function' && !layer.loaded) await layer.load()
-    const geometry = await toLayerPoint(wgs84, layer)
-    if (!geometry) return []
+    const geometry = await toLayerPoint(wgs84, { spatialReference: view?.spatialReference })
+    if (!geometry) return null
     const q: any = typeof layer.createQuery === 'function' ? layer.createQuery() : {}
-    q.where = '1=1'
     q.geometry = geometry
     q.spatialRelationship = 'intersects'
-    q.outFields = ['*']
-    q.returnGeometry = true
-    q.num = 20
-    if (distanceMeters != null && distanceMeters > 0) {
-      q.distance = distanceMeters
-      q.units = 'meters'
-    }
-
-    // Fast path: usa le feature già caricate nel MapView, cioè la stessa sorgente
-    // client-side su cui si basa l'interazione immediata del popup.
-    if (view && typeof view.whenLayerView === 'function') {
-      try {
-        const layerView = await view.whenLayerView(layer)
-        if (layerView && typeof layerView.queryFeatures === 'function' && !layerView.suspended) {
-          const localRes = await layerView.queryFeatures(q)
-          return Array.isArray(localRes?.features) ? localRes.features : []
-        }
-      } catch (e) {
-        console.warn('[GII spatial auto] Query LayerView non riuscita, uso il servizio:', layer?.title || layer?.url || '', e)
-      }
-    }
-
-    // Fallback solo se il layer non è interrogabile dal LayerView.
-    const res = await layer.queryFeatures(q)
-    return Array.isArray(res?.features) ? res.features : []
+    q.outFields = [...GII_CATASTO_FIELDS]
+    q.returnGeometry = false
+    const res = await layerView.queryFeatures(q)
+    const feature = Array.isArray(res?.features) ? res.features[0] : null
+    const values = { nome_comun: '', sezione: '', foglio: '', mappale: '' } as GiiCatastoValues
+    if (!feature) return { found: false, values }
+    const attrs = feature.attributes || {}
+    // Campi non ancora disponibili lato client: meglio la query al servizio che valori vuoti.
+    if (!GII_CATASTO_FIELDS.every(name => Object.keys(attrs).some(k => k.toLowerCase() === name))) return null
+    GII_CATASTO_FIELDS.forEach(name => {
+      const key = Object.keys(attrs).find(k => k.toLowerCase() === name)
+      const raw = key ? attrs[key] : null
+      values[name] = spatialValueIsMeaningful(raw) ? String(raw).trim() : ''
+    })
+    return { found: true, values }
   } catch (e) {
-    console.warn('[GII spatial auto] Query layer non riuscita:', layer?.title || layer?.url || '', e)
-    return []
+    console.warn('[GII catasto] Lettura dalla mappa non riuscita, uso il servizio:', e)
+    return null
   }
 }
 
-async function pickNearestSpatialFeature (layer: any, features: any[], wgs84: any): Promise<any | null> {
-  if (!Array.isArray(features) || features.length === 0) return null
-  if (features.length === 1) return features[0]
-  let best = features[0]
-  let bestDistance = Number.POSITIVE_INFINITY
-  for (const feature of features) {
-    const distance = await spatialFeatureDistanceMeters(layer, feature, wgs84)
-    if (Number.isFinite(distance) && distance < bestDistance) { bestDistance = distance; best = feature }
+// Catasto: prima la mappa (immediato), poi il servizio. null = interrogazione non riuscita.
+async function lookupCatastoAtPoint (view: any, wgs84: any): Promise<{ found: boolean, values: GiiCatastoValues } | null> {
+  const fromMap = await queryCatastoFromMapView(view, wgs84)
+  if (fromMap) return fromMap
+  try {
+    return await queryCatastoAtPoint(wgs84)
+  } catch (e) {
+    console.warn('[GII spatial auto] Interrogazione catastale non riuscita:', e)
+    return null
   }
-  return best
 }
 
-async function queryBestSpatialFeature (view: any, layers: any[], wgs84: any, distanceMeters: number | null): Promise<{ layer: any, feature: any } | null> {
-  const candidates = await Promise.all((layers || []).map(async layer => {
-    const features = await querySpatialFeaturesAtPoint(view, layer, wgs84, distanceMeters)
-    const feature = await pickNearestSpatialFeature(layer, features, wgs84)
-    if (!feature) return null
-    const distance = await spatialFeatureDistanceMeters(layer, feature, wgs84)
-    return { layer, feature, distance: Number.isFinite(distance) ? distance : 0 }
-  }))
-  const valid = candidates.filter(Boolean) as Array<{ layer: any, feature: any, distance: number }>
-  if (!valid.length) return null
-  valid.sort((a, b) => a.distance - b.distance)
-  return { layer: valid[0].layer, feature: valid[0].feature }
+// ── Dati tecnici rilevati: stessa logica e stesso formato dello script Survey
+//    gii_dati_tecnici.js (tutti gli elementi di rete e manufatti entro 2 m dal punto). ──
+const GII_RETE_IRRIGUA_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Rete_irrigua_CBS/FeatureServer/9'
+const GII_MANUFATTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Manufatti_rete_irrigua_CBSM/FeatureServer/8'
+const GII_DISTRETTI_LORDI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Distretti_irrigui_lordi/FeatureServer/108'
+const GII_DATI_TECNICI_BUFFER_M = 2
+
+function datiTecniciText (value: any): string {
+  if (value === null || value === undefined) return ''
+  return String(value).trim()
 }
 
-async function pickBestHitForLayers (
-  hitResults: Array<{ layer: any, feature: any }>,
-  layers: any[],
-  wgs84: any,
-  maxDistanceMeters: number | null
-): Promise<{ layer: any, feature: any } | null> {
-  let best: { layer: any, feature: any, distance: number } | null = null
-  for (const hit of hitResults || []) {
-    if (!layers.some(layer => sameSpatialLayer(layer, hit.layer))) continue
-    const distance = await spatialFeatureDistanceMeters(hit.layer, hit.feature, wgs84)
-    if (maxDistanceMeters != null && (!Number.isFinite(distance) || distance > maxDistanceMeters + 1e-6)) continue
-    const d = Number.isFinite(distance) ? distance : 0
-    if (!best || d < best.distance) best = { ...hit, distance: d }
+function datiTecniciAttr (attrs: any, name: string): any {
+  const key = Object.keys(attrs || {}).find(k => k.toLowerCase() === name.toLowerCase())
+  return key ? attrs[key] : null
+}
+
+function datiTecniciAddUnique (list: string[], value: any): void {
+  const v = datiTecniciText(value)
+  if (!v) return
+  if (list.some(x => datiTecniciText(x).toLowerCase() === v.toLowerCase())) return
+  list.push(v)
+}
+
+// Interroga un layer sul punto: prima le feature già caricate nella mappa (come il popup),
+// poi il servizio con gli stessi parametri del Survey (punto WGS84, intersects, distanza in metri).
+async function queryLayerAtPointForDatiTecnici (view: any, url: string, fields: string[], wgs84: any, distanceMeters: number | null, maxRecords?: number): Promise<any[]> {
+  const sortByOid = (layer: any, features: any[]): any[] => {
+    const oidField = String(layer?.objectIdField || 'FID')
+    return [...features].sort((a, b) => Number(datiTecniciAttr(a?.attributes, oidField)) - Number(datiTecniciAttr(b?.attributes, oidField)))
   }
-  return best ? { layer: best.layer, feature: best.feature } : null
-}
-
-function extractIrrigationValues (layer: any, attrs: any): { distretto?: string, comizio?: string, idrante?: string } {
-  const rawDistretto = pickSpatialAttr(layer, attrs, [['distretto', 'irriguo'], ['distretto']], ['distretto', 'distretto_irriguo', 'distretto_irrig', 'cod_distretto', 'nome_distretto'])
-  const rawComizio = pickSpatialAttr(layer, attrs, [['comizio']], ['comizio', 'numero_comizio', 'num_comizio', 'n_comizio', 'id_comizio', 'comizio_id'])
-  let rawIdrante = pickSpatialAttr(layer, attrs, [['idrante'], ['opera', 'presa'], ['presa', 'comiziale']], ['idrante', 'numero_idrante', 'num_idrante', 'n_idrante', 'id_idrante', 'idrante_id', 'id_opera_presa', 'numero_opera_presa'])
-  if (!spatialValueIsMeaningful(rawIdrante)) {
-    const tipo = pickSpatialAttr(layer, attrs, [['tipologia'], ['tipo', 'manufatto'], ['descrizione', 'manufatto']], ['tipo', 'tipologia', 'tipo_manufatto', 'descrizione'])
-    const tipoNorm = normalizeSpatialFieldToken(tipo)
-    if (tipoNorm.includes('idrante') || (tipoNorm.includes('opera') && tipoNorm.includes('presa'))) {
-      rawIdrante = pickSpatialAttr(layer, attrs, [['identificativo'], ['numero'], ['codice']], ['id_manufatto', 'numero_manufatto', 'codice_manufatto', 'identificativo', 'numero', 'codice', 'id'])
+  const target = normalizeMapLayerUrlForMatch(url)
+  const mapLayer = view ? collectFeatureLayersFromView(view).find((layer: any) => normalizeMapLayerUrlForMatch(layer?.url || '', layer) === target) : null
+  if (mapLayer && typeof view?.whenLayerView === 'function') {
+    try {
+      if (typeof mapLayer.load === 'function' && !mapLayer.loaded) await mapLayer.load()
+      const oidField = String(mapLayer.objectIdField || 'FID')
+      const wanted = Array.from(new Set([oidField, ...fields]))
+      const current: string[] = Array.isArray(mapLayer.outFields) ? mapLayer.outFields.map((f: any) => String(f)) : []
+      if (!current.includes('*')) {
+        const missing = wanted.filter(name => !current.some(f => f.toLowerCase() === name.toLowerCase()))
+        if (missing.length) mapLayer.outFields = [...current, ...missing]
+      }
+      const layerView = await view.whenLayerView(mapLayer)
+      if (layerView && !layerView.suspended && typeof layerView.queryFeatures === 'function') {
+        if (layerView.updating) {
+          const reactiveUtils = await loadEsriModule<any>('esri/core/reactiveUtils')
+          await Promise.race([
+            reactiveUtils.whenOnce(() => !layerView.updating),
+            new Promise(resolve => setTimeout(resolve, 3000))
+          ])
+        }
+        const geometry = await toLayerPoint(wgs84, { spatialReference: view?.spatialReference })
+        if (geometry) {
+          const q: any = typeof mapLayer.createQuery === 'function' ? mapLayer.createQuery() : {}
+          q.geometry = geometry
+          q.spatialRelationship = 'intersects'
+          q.outFields = wanted
+          q.returnGeometry = false
+          if (distanceMeters != null && distanceMeters > 0) { q.distance = distanceMeters; q.units = 'meters' }
+          const res = await layerView.queryFeatures(q)
+          const features = Array.isArray(res?.features) ? res.features : []
+          // Usa il risultato locale solo se i campi richiesti sono già disponibili lato client.
+          const complete = features.every((f: any) => fields.every(name => Object.keys(f?.attributes || {}).some(k => k.toLowerCase() === name.toLowerCase())))
+          if (complete) {
+            const sorted = sortByOid(mapLayer, features)
+            return maxRecords ? sorted.slice(0, maxRecords) : sorted
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[GII dati tecnici] Lettura dalla mappa non riuscita, uso il servizio:', url, e)
     }
   }
-  const out: { distretto?: string, comizio?: string, idrante?: string } = {}
-  if (spatialValueIsMeaningful(rawDistretto)) out.distretto = normalizeAutoDistretto(rawDistretto)
-  if (spatialValueIsMeaningful(rawComizio)) out.comizio = normalizeAutoNumericText(rawComizio)
-  if (spatialValueIsMeaningful(rawIdrante)) out.idrante = normalizeAutoNumericText(rawIdrante)
-  return out
+  const layer = await getFeatureLayerByUrl(url)
+  const oidField = String(layer?.objectIdField || 'FID')
+  const q: any = typeof layer.createQuery === 'function' ? layer.createQuery() : {}
+  q.where = '1=1'
+  q.geometry = await toLayerPoint(wgs84, { spatialReference: { wkid: 4326 } })
+  q.spatialRelationship = 'intersects'
+  q.outFields = Array.from(new Set([oidField, ...fields]))
+  q.returnGeometry = false
+  if (distanceMeters != null && distanceMeters > 0) { q.distance = distanceMeters; q.units = 'meters' }
+  q.orderByFields = [oidField]
+  if (maxRecords) q.num = maxRecords
+  const res = await layer.queryFeatures(q)
+  return Array.isArray(res?.features) ? res.features : []
 }
 
-async function resolveSpatialAutoValues (view: any, wgs84: any): Promise<GiiSpatialAutoValues> {
-  try { if (typeof view?.when === 'function') await view.when() } catch {}
-  let parcelLayers = collectSpatialLayersFromView(view, 'particelle')
-  // Il layer Particelle è già configurato nell'app corrente anche per l'interrogazione
-  // catastale. Se non è presente nella Web Map di editing, uso direttamente lo stesso
-  // FeatureLayer come fallback, mantenendo comunque il punto (senza buffer) come geometria.
-  if (parcelLayers.length === 0) {
-    try { parcelLayers = [await getFeatureLayerByUrl('https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Particelle/FeatureServer/131')] } catch {}
+// Testo "Dati tecnici rilevati" identico a quello prodotto dal Survey.
+// Ritorna null solo se l'interrogazione di rete/manufatti non riesce.
+async function lookupDatiTecniciAtPoint (view: any, wgs84: any): Promise<string | null> {
+  try {
+    const [rete, manufatti] = await Promise.all([
+      queryLayerAtPointForDatiTecnici(view, GII_RETE_IRRIGUA_URL, ['Distretto', 'Comizio', 'Tipo', 'Diametro'], wgs84, GII_DATI_TECNICI_BUFFER_M),
+      queryLayerAtPointForDatiTecnici(view, GII_MANUFATTI_URL, ['Distretto', 'Comizio', 'ID', 'Tipo', 'Diametro'], wgs84, GII_DATI_TECNICI_BUFFER_M)
+    ])
+
+    const distretti: string[] = []
+    rete.forEach((f: any) => datiTecniciAddUnique(distretti, datiTecniciAttr(f?.attributes, 'Distretto')))
+    manufatti.forEach((f: any) => datiTecniciAddUnique(distretti, datiTecniciAttr(f?.attributes, 'Distretto')))
+    if (distretti.length === 0) {
+      // Come nel Survey: il distretto dal poligono è un ripiego e un suo errore non blocca il resto.
+      try {
+        const d = await queryLayerAtPointForDatiTecnici(view, GII_DISTRETTI_LORDI_URL, ['Nome'], wgs84, null, 1)
+        if (d.length) datiTecniciAddUnique(distretti, datiTecniciAttr(d[0]?.attributes, 'Nome'))
+      } catch {}
+    }
+
+    const righe: string[] = []
+    if (distretti.length === 1) righe.push(`DISTRETTO: ${distretti[0]}`)
+    else if (distretti.length > 1) righe.push(`DISTRETTI: ${distretti.join(', ')}`)
+
+    if (rete.length > 0) {
+      if (righe.length > 0) righe.push('')
+      righe.push('RETE')
+      rete.forEach((f: any) => {
+        const a = f?.attributes || {}
+        const tipo = datiTecniciText(datiTecniciAttr(a, 'Tipo'))
+        const comizio = datiTecniciText(datiTecniciAttr(a, 'Comizio'))
+        const nomeDistretto = datiTecniciText(datiTecniciAttr(a, 'Distretto'))
+        const diametro = datiTecniciText(datiTecniciAttr(a, 'Diametro'))
+        let testo = tipo || 'Rete'
+        if (tipo.toLowerCase().includes('comiziale')) {
+          if (comizio) testo += ` – Comizio ${comizio}`
+        } else if (nomeDistretto) {
+          testo += ` – ${nomeDistretto}`
+        }
+        if (diametro) testo += ` – Ø ${diametro} mm`
+        righe.push(`• ${testo}`)
+      })
+    }
+
+    if (manufatti.length > 0) {
+      if (righe.length > 0) righe.push('')
+      righe.push('MANUFATTI')
+      manufatti.forEach((f: any) => {
+        const a = f?.attributes || {}
+        const tipoM = datiTecniciText(datiTecniciAttr(a, 'Tipo'))
+        const idM = datiTecniciText(datiTecniciAttr(a, 'ID'))
+        const diametroM = datiTecniciText(datiTecniciAttr(a, 'Diametro'))
+        let testoM = tipoM || 'Manufatto'
+        if (idM) testoM += ` – ID ${idM}`
+        if (diametroM) testoM += ` – Ø ${diametroM} mm`
+        righe.push(`• ${testoM}`)
+      })
+    }
+
+    return righe.join('\n')
+  } catch (e) {
+    console.warn('[GII dati tecnici] Rilevazione non riuscita:', e)
+    return null
   }
-  const districtLayers = collectSpatialLayersFromView(view, 'distretti')
-  const networkLayers = collectSpatialLayersFromView(view, 'rete')
-  const manufattoLayers = collectSpatialLayersFromView(view, 'manufatti')
-
-  // Prima prova esattamente come l'interazione del popup: hitTest sul punto già renderizzato.
-  // Gli attributi delle feature colpite sono disponibili subito, senza una nuova richiesta REST.
-  const visibleLayers = [...parcelLayers, ...districtLayers, ...networkLayers, ...manufattoLayers]
-  const hitResults = await hitTestSpatialFeaturesAtPoint(view, visibleLayers, wgs84)
-  const [parcelFast, districtFast, networkFast, manufattoFast] = await Promise.all([
-    pickBestHitForLayers(hitResults, parcelLayers, wgs84, null),
-    pickBestHitForLayers(hitResults, districtLayers, wgs84, null),
-    pickBestHitForLayers(hitResults, networkLayers, wgs84, 2),
-    pickBestHitForLayers(hitResults, manufattoLayers, wgs84, 2)
-  ])
-
-  // Se il puntatore non ha colpito direttamente una feature (es. rete a 1,5 m),
-  // completa la ricerca sul LayerView locale con il buffer metrico esatto di 2 m.
-  // La query al FeatureLayer remoto rimane solo come ultimo fallback tecnico.
-  const [parcelHit, districtHit, networkHit, manufattoHit] = await Promise.all([
-    parcelFast ? Promise.resolve(parcelFast) : queryBestSpatialFeature(view, parcelLayers, wgs84, null),
-    districtFast ? Promise.resolve(districtFast) : queryBestSpatialFeature(view, districtLayers, wgs84, null),
-    networkFast ? Promise.resolve(networkFast) : queryBestSpatialFeature(view, networkLayers, wgs84, 2),
-    manufattoFast ? Promise.resolve(manufattoFast) : queryBestSpatialFeature(view, manufattoLayers, wgs84, 2)
-  ])
-
-  // Per il catasto uso subito gli attributi già presenti nella feature individuata
-  // (tipicamente almeno il mappale), così la UI si aggiorna senza attendere una nuova
-  // chiamata al servizio. Gli attributi catastali completi vengono recuperati in
-  // background tramite OBJECTID e non bloccano né l'interfaccia né il pulsante Salva.
-  let cadastralDetailsPromise: Promise<string> | undefined
-  let quickCadastralDescription = ''
-  if (parcelHit) {
-    quickCadastralDescription = buildCadastralDescription(parcelHit.layer, parcelHit.feature?.attributes || {})
-    cadastralDetailsPromise = hydrateSpatialFeatureByObjectId(
-      parcelHit.layer,
-      parcelHit.feature,
-      ['nome_comun', 'sezione', 'foglio', 'mappale', 'sup_cat', 'sup_geom', 'provincia']
-    ).then(feature => buildCadastralDescription(parcelHit.layer, feature?.attributes || {}))
-  }
-
-  // Distretto/Rete/Manufatti restano invece parte della rilevazione tecnica principale:
-  // la ricerca entro 2 m deve essere conclusa prima di considerare terminata la lettura.
-  const [districtFull, networkFull, manufattoFull] = await Promise.all([
-    hydrateIrrigationSpatialHit(districtHit, 'distretto'),
-    hydrateIrrigationSpatialHit(networkHit, 'rete'),
-    hydrateIrrigationSpatialHit(manufattoHit, 'manufatto')
-  ])
-
-  const out: GiiSpatialAutoValues = {
-    foundParcel: !!parcelHit,
-    foundDistrict: !!districtFull,
-    foundNetwork: !!networkFull,
-    foundManufatto: !!manufattoFull,
-    cadastralDetailsPromise
-  }
-
-  if (quickCadastralDescription) out.descrizione_luogo = quickCadastralDescription
-
-  const districtValues = districtFull ? extractIrrigationValues(districtFull.layer, districtFull.feature?.attributes || {}) : {}
-  const networkValues = networkFull ? extractIrrigationValues(networkFull.layer, networkFull.feature?.attributes || {}) : {}
-  const manufattoValues = manufattoFull ? extractIrrigationValues(manufattoFull.layer, manufattoFull.feature?.attributes || {}) : {}
-
-  // Precedenza informativa: manufatto > rete comiziale > poligono distretto.
-  out.distretto = manufattoValues.distretto || networkValues.distretto || districtValues.distretto || undefined
-  out.comizio = manufattoValues.comizio || networkValues.comizio || undefined
-  out.idrante = manufattoValues.idrante || undefined
-  return out
 }
 
 function matchesLayerByConfiguredIds (layer: any, cfg: any): boolean {
@@ -11842,9 +11713,26 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             clearEditIntent()
           }
         }
-        // Re-dispatch tab corrente per aggiornare lo stato attivo del nav orizzontale
+        // Re-dispatch tab corrente per aggiornare lo stato attivo del nav orizzontale.
+        // Nuova pratica parte sempre da Trasgressore (Sidebar chiusa): non riprende la scheda memorizzata.
         try {
-          const currentTab = getStoredValidEditSection() || resetInvalidEditSectionStorage('trasgressore')
+          // Modifica pratica: solo un F5 fatto su questa pagina riporta a Trasgressore;
+          // gli ingressi da altre pagine (azioni, rientro dal prezzario) restano invariati.
+          const forceTrasgressore = isCreatePage || consumeGiiReloadEntryForCurrentPage()
+          if (forceTrasgressore) {
+            // Scarta anche le richieste di scheda rimaste in sessione (es. ultimo clic sul nav prima di F5).
+            try { window.sessionStorage.removeItem('GII_NAV_SECTION') } catch {}
+            try { window.sessionStorage.removeItem('GII_REQUESTED_EDIT_SECTION') } catch {}
+            try { window.sessionStorage.setItem('GII_EDIT_TAB', 'trasgressore') } catch {}
+            try {
+              const url = new URL(window.location.href)
+              if (url.searchParams.has('section')) {
+                url.searchParams.delete('section')
+                window.history.replaceState(window.history.state, '', url.toString())
+              }
+            } catch {}
+          }
+          const currentTab = forceTrasgressore ? 'trasgressore' : (getStoredValidEditSection() || resetInvalidEditSectionStorage('trasgressore'))
           window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: currentTab } }))
         } catch {}
       }
@@ -12008,13 +11896,29 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     let cancelled = false
     const showMap = () => { if (needsBlind && mapContainer) mapContainer.style.opacity = '1' }
+    // Vista iniziale personalizzata del widget Mappa nel Builder (la stessa del pulsante Home):
+    // ha la precedenza su quella salvata nella web map. Ripiego: viewpoint di default già calcolato.
+    const goToDefaultViewpoint = () => {
+      const goToFallback = () => {
+        if (!cancelled && mapDefaultViewpointRef.current) view.goTo(mapDefaultViewpointRef.current, { duration: 400 }).catch(() => {})
+      }
+      let customVpJson: any = null
+      try {
+        const mapCfg: any = (getAppStore()?.getState?.() as any)?.appConfig?.widgets?.[String(mapWidgetId || '')]?.config
+        const vp: any = mapCfg?.isUseCustomMapState === true ? mapCfg?.initialMapState?.viewPoint : null
+        if (vp) customVpJson = typeof vp.asMutable === 'function' ? vp.asMutable({ deep: true }) : vp
+      } catch {}
+      if (!customVpJson) { goToFallback(); return }
+      loadEsriModule<any>('esri/Viewpoint').then((Viewpoint: any) => {
+        if (cancelled) return
+        view.goTo(Viewpoint.fromJSON(customVpJson), { duration: 400 }).catch(() => {})
+      }).catch(goToFallback)
+    }
 
     // ── CREATE MODE ──
     if (!isEdit) {
       // Zoom al default del Builder
-      if (mapDefaultViewpointRef.current) {
-        view.goTo(mapDefaultViewpointRef.current, { duration: 400 }).catch(() => {})
-      }
+      goToDefaultViewpoint()
 
       if (rapportiLayers.length > 0) {
         ;(async () => {
@@ -12032,9 +11936,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
     // ── EDIT MODE ──
     // Se reqPoint=0, zoom al default
-    if (editReqPoint === 0 && mapDefaultViewpointRef.current) {
-      view.goTo(mapDefaultViewpointRef.current, { duration: 400 }).catch(() => {})
-    }
+    if (editReqPoint === 0) goToDefaultViewpoint()
 
     if (rapportiLayers.length > 0) {
       ;(async () => {
@@ -12067,7 +11969,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
           if (targetGeom && editReqPoint === 1) {
             layerViews.forEach((lv: any) => { lv.featureEffect = { filter: { where: `${idField} = ${editOid}` }, excludedEffect: 'opacity(0)' } })
-            view.goTo({ target: targetGeom, zoom: Math.max(view.zoom || 15, 15) }, { duration: 600 }).catch(() => {})
+            view.goTo({ target: targetGeom, zoom: Math.max(view.zoom || 18, 18) }, { duration: 600 }).catch(() => {})
           } else {
             layerViews.forEach((lv: any) => { lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' } })
           }

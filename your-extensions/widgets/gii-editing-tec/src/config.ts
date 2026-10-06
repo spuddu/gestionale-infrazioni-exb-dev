@@ -623,9 +623,7 @@ export const DEFAULT_FIELD_LAYOUTS: Record<string, LayoutRow[]> = {
     { type: 'header', label: 'Descrizione del luogo' },
     { type: 'fields', columns: '1fr', cells: [{ field: 'descrizione_luogo' }] },
     { type: 'header', label: 'Dati tecnici' },
-    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'distretto' }, { field: 'comizio' }] },
-    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'idrante' }, { field: 'matricola_contatore' }] },
-    { type: 'fields', columns: '1fr', cells: [{ field: 'matricola_tessera' }] }
+    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'matricola_contatore' }, { field: 'matricola_tessera' }] }
   ]
 }
 

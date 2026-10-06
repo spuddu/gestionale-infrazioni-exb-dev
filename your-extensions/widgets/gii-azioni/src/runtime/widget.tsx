@@ -3635,8 +3635,8 @@ function ActionsPanel (props: {
       } else if (!isAmmEditRole) {
         try { sessionStorage.removeItem('GII_NAV_SECTION') } catch {}
         try { sessionStorage.removeItem('GII_REQUESTED_EDIT_SECTION') } catch {}
-        try { sessionStorage.setItem('GII_EDIT_TAB', 'anagrafica') } catch {}
-        try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: 'anagrafica' } })) } catch {}
+        try { sessionStorage.setItem('GII_EDIT_TAB', 'trasgressore') } catch {}
+        try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: 'trasgressore' } })) } catch {}
       } else {
         try { sessionStorage.removeItem('GII_NAV_SECTION') } catch {}
         try { sessionStorage.removeItem('GII_REQUESTED_EDIT_SECTION') } catch {}

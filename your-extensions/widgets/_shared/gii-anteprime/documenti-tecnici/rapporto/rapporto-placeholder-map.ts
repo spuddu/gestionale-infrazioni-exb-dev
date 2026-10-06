@@ -84,6 +84,12 @@ function formatRilevazioneTime (data: any): string {
   return ''
 }
 function esc (s: any): string { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
+
+// Rimuove gli zeri iniziali dei riferimenti catastali numerici (es. "0016" → "16").
+// Un valore composto solo da zeri resta "0"; caratteri non numerici restano invariati.
+function stripCatastoLeadingZeros (value: any): string {
+  return String(value ?? '').trim().replace(/^0+(?=\d)/, '')
+}
 function fmtNum (v: any): string { if (v == null || v === '') return ''; const n = Number(v); if (isNaN(n)) return String(v); return n.toLocaleString('it-IT', { maximumFractionDigits: 2 }) }
 
 function parseGradiViolazioniForRapporto (raw: any): Record<string, string> {
@@ -255,8 +261,12 @@ export function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteC
     telefono: esc(d.telefono || ''), cellulare: esc(d.cellulare || ''), email: esc(d.email || ''), pec: esc(d.pec || ''),
     presenza_trasgressore: String(d.presenza_trasgressore || '').toLowerCase() === 'si' || String(d.presenza_trasgressore || '').toLowerCase() === 'sì' || String(d.presenza_trasgressore || '') === '1' ? 'S\u00EC' : (String(d.presenza_trasgressore || '').toLowerCase() === 'no' || String(d.presenza_trasgressore || '') === '0' ? 'No' : String(d.presenza_trasgressore || '')),
     ...iterPlaceholders,
-    idrante: esc(pickAttrCI(d, ['idrante', 'idrante_numero']) || ''), comune: '', foglio: '', mappali: '', altro_luogo: '',
-    distretto_irriguo: esc(pickAttrCI(d, ['distretto_irriguo', 'distretto']) || ''), comizio: esc(pickAttrCI(d, ['comizio']) || ''),
+    // Dati catastali (acquisiti dal GII dalla posizione) e Dati tecnici rilevati (Survey/GII).
+    // Foglio e mappale senza zeri iniziali (0016 → 16, 000325 → 325).
+    comune: esc(pickAttrCI(d, ['nome_comun']) || ''), sezione: esc(pickAttrCI(d, ['sezione']) || ''),
+    foglio: esc(stripCatastoLeadingZeros(pickAttrCI(d, ['foglio']))), mappale: esc(stripCatastoLeadingZeros(pickAttrCI(d, ['mappale']))),
+    altro_luogo: '',
+    dati_tecnici: esc(pickAttrCI(d, ['dati_tecnici']) || ''),
     matricola_contatore: esc(pickAttrCI(d, ['matricola_contatore', 'contatore_matricola']) || ''), matricola_tessera: esc(pickAttrCI(d, ['matricola_tessera', 'tessera_matricola']) || ''),
     importo_rimborso: fmtNum(d.ns_totale_complessivo) ? fmtNum(d.ns_totale_complessivo) + ' €' : '',
     data_compilazione: formatDateIt(d.data_firma),

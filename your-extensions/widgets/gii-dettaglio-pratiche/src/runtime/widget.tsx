@@ -1360,9 +1360,12 @@ type TabFields = {
 
 const LUOGHI_DATI_TAB_ID = 'luoghi_dati'
 const DETAIL_LUOGHI_DATI_FIELDS = [
-  'distretto',
-  'comizio',
-  'idrante',
+  'nome_comun',
+  'sezione',
+  'foglio',
+  'mappale',
+  'dati_tecnici',
+  'note_TR',
   'descrizione_luogo',
   'matricola_contatore',
   'matricola_tessera'
@@ -5198,10 +5201,15 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     }
 
     const rows = [
+      // Dati catastali ricavati dal GII dalla posizione del punto (subito sotto le Coordinate)
+      { label: 'Comune', candidates: ['nome_comun'], multiline: false },
+      { label: 'Sezione', candidates: ['sezione'], multiline: false },
+      { label: 'Foglio', candidates: ['foglio'], multiline: false },
+      { label: 'Mappale', candidates: ['mappale'], multiline: false },
       { label: 'Descrizione del luogo', candidates: ['descrizione_luogo', 'descrizione_del_luogo', 'descr_luogo', 'luogo_descrizione', 'descrizione_ubicazione'], multiline: true },
-      { label: 'Distretto', candidates: ['distretto', 'distretto_irriguo'], multiline: false },
-      { label: 'Comizio', candidates: ['comizio'], multiline: false },
-      { label: 'Idrante', candidates: ['idrante', 'idrante_numero'], multiline: false },
+      // Dati originari della rilevazione TR (Survey)
+      { label: 'Dati tecnici rilevati', candidates: ['dati_tecnici'], multiline: true },
+      { label: 'Annotazioni tecniche del Tecnico rilevatore', candidates: ['note_TR', 'note_tr'], multiline: true },
       { label: 'Matricola contatore', candidates: ['matricola_contatore', 'contatore_matricola'], multiline: false },
       { label: 'Matricola tessera', candidates: ['matricola_tessera', 'tessera_matricola'], multiline: false }
     ].map(item => {

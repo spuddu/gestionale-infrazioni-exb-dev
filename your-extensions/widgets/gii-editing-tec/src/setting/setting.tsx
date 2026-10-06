@@ -181,7 +181,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       {v:'note_anagrafica',l:'Note trasgressore'}
     ],
     dati_tecnici: [
-      {v:'descrizione_luogo',l:'Descrizione luogo'}, {v:'distretto',l:'Distretto'}, {v:'comizio',l:'Comizio'}, {v:'idrante',l:'Idrante'},
+      {v:'descrizione_luogo',l:'Descrizione luogo'},
       {v:'matricola_contatore',l:'Matricola contatore'}, {v:'matricola_tessera',l:'Matricola tessera'}
     ]
   }

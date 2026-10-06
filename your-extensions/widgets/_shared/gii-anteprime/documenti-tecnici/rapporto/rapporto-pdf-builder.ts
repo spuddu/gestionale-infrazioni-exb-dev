@@ -982,14 +982,18 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   // ── Altre circostanze (area da top=231 a top≈324) ──
   textArea(p2, v('circostanze'), fR, taSz, 48, 241, taW, 90, taLh)
 
-  // ── Descrizione dei luoghi (area da top=350 a top≈443) ──
-  textArea(p2, v('descrizione_luogo'), fR, taSz, 48, 368, taW, 90, taLh)
+  // ── Modello v14: Descrizione dei luoghi (colonna sinistra, bordi 43.2–297.89)
+  //    e Dati tecnici rilevati (colonna destra, bordi 298.37–553.18); area da top=362.93 a top=468.55 ──
+  const colW = 245
+  textArea(p2, v('descrizione_luogo'), fR, taSz, 48, 368, colW, 90, taLh)
+  textArea(p2, v('dati_tecnici'), fR, taSz, 303.2, 368, colW, 90, taLh)
 
-  // ── Distretto / Comizio / Idrante (cella 468.48–489.36, centrato) ──
+  // ── Comune / Sezione / Foglio / Mappale (cella 469.03–489.43; valori dopo l'etichetta) ──
   const dsz = 8.2
-  txt(p2, firstMeaningfulValue(v('distretto_irriguo'), v('distretto')), fR, dsz, 138, bY(476.82, dsz), BLACK, 198)
-  txt(p2, v('comizio'), fR, dsz, 386, bY(476.82, dsz), BLACK, 66)
-  txt(p2, firstMeaningfulValue(v('idrante'), v('idrante_numero')), fR, dsz, 499, bY(476.82, dsz), BLACK, 52)
+  txt(p2, v('comune'), fR, dsz, 109.68, bY(476.82, dsz), BLACK, 150.8)
+  txt(p2, v('sezione'), fR, dsz, 322.35, bY(476.82, dsz), BLACK, 30.3)
+  txt(p2, v('foglio'), fR, dsz, 414.41, bY(476.82, dsz), BLACK, 37.5)
+  txt(p2, v('mappale'), fR, dsz, 511.28, bY(476.82, dsz), BLACK, 39.9)
 
   // ── Matricole (cella 489.36–510.36, centrato) ──
   txt(p2, firstMeaningfulValue(v('matricola_contatore'), v('contatore_matricola')), fR, dsz, 138, bY(497.76, dsz), BLACK, 160)
