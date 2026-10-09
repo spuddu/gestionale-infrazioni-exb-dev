@@ -211,6 +211,7 @@ const GROUP_MAP: Record<string, string> = {
   'GII_AGR_D7_TR': 'b2f510e30c424f809e95a3b8a883e7cc',
   'GII_AGR_D7_IT': '0c917b6777c8434f803d3a87539992cd',
   'GII_AGR_D7_CS': '799314be48e04e87b17c21013f7de082',
+  'GII_AGR_TR': 'aff7bfddcd4143d8a24a1d6cb10d3c82',
   'GII_AGR_DIR': 'efd1d706a54249c785fc2d85fa8a672b',
   'GII_AGR_RIT': '4eb266a8da414fe6a47bc16f66c58e6a',
   'GII_AMM_DIR': '317c399ad1984c4392a6341d129fda89',
@@ -221,6 +222,7 @@ const GROUP_MAP: Record<string, string> = {
   'GII_TEC_DS_IT': 'f204e16c17ff47a3984bedd5b6d4a6d9',
   'GII_TEC_DS_TR': 'ca0fd1f481014871bee270a89bf53bcb',
   'GII_TEC_RIT': 'e0cde3526baf4215811c211c7fda43fb',
+  'GII_TEC_TR': '4826d7c392e24abcad1e528b72ecf53d',
 }
 
 const AGOL_PORTAL = 'https://cbsm-hub.maps.arcgis.com'
@@ -634,6 +636,7 @@ function getSettoriPerRuoloArea(ruoloCod: string | null | undefined, area: numbe
   }
   if (ruolo === 'RIA') return area === 1 ? [1] : []    // RIA → CR
   if (ruolo === 'IA' && area === 1) return [1]         // IA → CR
+  if (ruolo === 'TR') return []                        // TR → censito per sola area
   if (area === 2) return [3, 4, 5, 6, 7, 8, 10]       // AGR → D1-D7
   if (area === 3) return [9]                           // TEC → DS
   return []
@@ -649,12 +652,14 @@ function calcolaGruppo(ruoloCod: string | null | undefined, area: number, settor
   const a = AREE.find(x => x.value === area)?.label ?? ''
   const s = SETTORI.find(x => x.value === settore)?.label ?? ''
   if (a === 'AGR') {
-    if (['TR','IT','CS'].includes(r)) return `GII_AGR_${s}_${r}`
+    if (r === 'TR') return 'GII_AGR_TR'
+    if (['IT','CS'].includes(r)) return `GII_AGR_${s}_${r}`
     if (r === 'RIT') return 'GII_AGR_RIT'
     if (r === 'DT') return 'GII_AGR_DIR'
   }
   if (a === 'TEC') {
-    if (['TR','IT','CS'].includes(r)) return `GII_TEC_${s}_${r}`
+    if (r === 'TR') return 'GII_TEC_TR'
+    if (['IT','CS'].includes(r)) return `GII_TEC_${s}_${r}`
     if (r === 'RIT') return 'GII_TEC_RIT'
     if (r === 'DT') return 'GII_TEC_DIR'
   }
@@ -1257,60 +1262,41 @@ async function deleteUtente(objectid: number, token: string, serviceUrl: string)
 }
 
 // ── Export CSV ────────────────────────────────────────────────────────────
+// utenti.csv per il Survey "Infrazioni": solo ciò che serve al rilevamento.
+// - una riga per ogni assegnazione TR per area (chiave tr_area_key = username|||area);
+// - una riga per ogni ADMIN (eccezione per la versione web, usata per i test).
+// Nessun dato personale oltre a username e nome completo.
 function exportCSV(utenti: UtenteRecord[], domainLabels?: DomainLabelMap): void {
-  // Per Survey123: se un utente ha un solo ufficio assegnato come TR,
-  // esporta il relativo nome su tutte le sue righe. Se gli uffici TR sono
-  // più di uno, lascia vuoto: il Survey richiederà la scelta all'operatore.
-  const trOfficesByUsername = new Map<string, Set<number>>()
+  const esc = (v: any) => {
+    const s = String(v ?? '')
+    return s.includes(',') || s.includes('"') || s.includes('\n')
+      ? `"${s.replace(/"/g, '""')}"` : s
+  }
+
+  const seen = new Set<string>()
+  const adminRows: string[] = []
+  const trRows: string[] = []
   utenti.forEach(u => {
     const username = String(u.username ?? '').trim()
-    if (!username || normalizeRuoloCod(u.ruolo_cod) !== 'TR' || u.ufficio == null) return
-    const offices = trOfficesByUsername.get(username) ?? new Set<number>()
-    offices.add(Number(u.ufficio))
-    trOfficesByUsername.set(username, offices)
+    const ruolo = normalizeRuoloCod(u.ruolo_cod)
+    if (!username || (ruolo !== 'TR' && ruolo !== 'ADMIN')) return
+    const area = ruolo === 'TR'
+      ? String(u.area_cod ?? codeOf(AREE, u.area) ?? labelForDomainItem(AREE, u.area, domainLabels, 'area_cod', 'area') ?? '').trim().toUpperCase()
+      : ''
+    if (ruolo === 'TR' && !area) return
+    const trAreaKey = ruolo === 'TR' ? `${username}|||${area}` : ''
+    const dedupeKey = `${ruolo}|${username.toLowerCase()}|${area}`
+    if (seen.has(dedupeKey)) return
+    seen.add(dedupeKey)
+    const fullName = String(u.full_name || composeFullName(u.nome, u.cognome) || '').trim()
+    const row = [username, fullName, area, ruolo, trAreaKey].map(esc).join(',')
+    if (ruolo === 'ADMIN') adminRows.push(row)
+    else trRows.push(row)
   })
 
-  const trUfficioAutoByUsername = new Map<string, string>()
-  const trUfficiListaByUsername = new Map<string, string>()
-  const trUfficiDisplayByUsername = new Map<string, string>()
-  trOfficesByUsername.forEach((offices, username) => {
-    const officeIds = Array.from(offices).sort((a, b) => a - b)
-    const officeLabels = officeIds
-      .map(officeId => labelForUfficio(officeId, domainLabels))
-      .filter(Boolean)
-
-    trUfficioAutoByUsername.set(username, officeLabels.length === 1 ? officeLabels[0] : '')
-    trUfficiListaByUsername.set(
-      username,
-      officeLabels.length > 0 ? `|||${officeLabels.join('|||')}|||` : ''
-    )
-    trUfficiDisplayByUsername.set(username, officeLabels.join(' · '))
-  })
-
-  const rows = utenti.map(u => {
-    const area    = u.area_cod    ?? codeOf(AREE, u.area) ?? labelForDomainItem(AREE, u.area, domainLabels, 'area_cod', 'area')
-    const settore = u.settore_cod ?? codeOf(SETTORI, u.settore) ?? labelForDomainItem(SETTORI, u.settore, domainLabels, 'settore_cod', 'settore')
-    const ufficio = labelForUfficio(u.ufficio, domainLabels)
-    const ruolo   = normalizeRuoloCod(u.ruolo_cod) || ''
-    // id_ufficio: valore numerico (codice ufficio)
-    const id_uff  = u.ufficio ?? ''
-    const gruppo  = u.gruppo ?? ''
-    const username = String(u.username ?? '').trim()
-    const ufficioTrAuto = trUfficioAutoByUsername.get(username) ?? ''
-    const ufficiTrLista = trUfficiListaByUsername.get(username) ?? ''
-    const ufficiTrDisplay = trUfficiDisplayByUsername.get(username) ?? ''
-    // Escaping celle con virgole
-    const esc = (v: any) => {
-      const s = String(v ?? '')
-      return s.includes(',') || s.includes('"') || s.includes('\n')
-        ? `"${s.replace(/"/g, '""')}"` : s
-    }
-    const trLookupKey = ruolo === 'TR' && username && ufficio ? `${username}|||${ufficio}` : ''
-    return [u.username, u.nome, u.cognome, u.titolo, u.email, formatBirthDate(u.data_nascita), u.full_name, area, settore, ufficio, ruolo, id_uff, gruppo, ufficioTrAuto, ufficiTrLista, ufficiTrDisplay, trLookupKey]
-      .map(esc).join(',')
-  })
-
-  const csv = ['username,nome,cognome,titolo,email,data_nascita,full_name,area_cod,settore_cod,ufficio,ruolo_cod,id_ufficio,gruppo,ufficio_tr_auto,uffici_tr_lista,uffici_tr_display,tr_lookup_key', ...rows].join('\n')
+  // Le righe ADMIN precedono quelle TR: il Survey legge il ruolo per username
+  // (prima riga trovata), così un ADMIN abilitato anche come TR resta ADMIN.
+  const csv = ['username,full_name,area_cod,ruolo_cod,tr_area_key', ...adminRows, ...trRows].join('\n')
   const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' })
   const url  = URL.createObjectURL(blob)
   const a    = document.createElement('a')
@@ -1494,7 +1480,7 @@ const styles = `
     .ggu-filter-actions { justify-content: flex-start; }
   }
   .ggu-table-wrap { flex: 1; overflow-y: auto; border: 1px solid #c5d9f1; border-radius: 6px; min-height: 0; background: var(--ggu-records-card-background, #f5f9ff); }
-  .ggu-table { width: 100%; border-collapse: collapse; font-size: var(--ggu-table-font-size, 12px); }
+  .ggu-table { width: 100%; border-collapse: collapse; font-weight: 500; font-size: var(--ggu-table-font-size, 15px); }
   .ggu-table th { background: var(--ggu-table-header-background, #1F4E79); color: var(--ggu-table-header-text, #fff); padding: 7px 8px; text-align: left; position: sticky; top: 0; z-index: 1; white-space: nowrap; }
   .ggu-table th.ggu-sortable { cursor: pointer; user-select: none; }
   .ggu-table th.ggu-sortable:hover { filter: brightness(0.9); }
@@ -1741,7 +1727,7 @@ function RubricaWidget(props: AllWidgetProps<IMConfig>) {
   const recordsCardBackgroundColor = String(cfg.recordsCardBackgroundColor || '#f5f9ff')
   const tableHeaderBackgroundColor = String(cfg.tableHeaderBackgroundColor || '#1F4E79')
   const tableHeaderTextColor = String(cfg.tableHeaderTextColor || '#ffffff')
-  const tableFontSize = Number(cfg.tableFontSize || 12)
+  const tableFontSize = Number(cfg.tableFontSize || 15) // predefinito come il Regolamento irriguo
 
   const [tab, setTab] = useState<DirectoryTab>('email')
   const [records, setRecords] = useState<DirectoryRecord[]>([])
@@ -2223,7 +2209,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
   const recordsCardBackgroundColor = String(cfg.recordsCardBackgroundColor || '#f5f9ff')
   const tableHeaderBackgroundColor = String(cfg.tableHeaderBackgroundColor || '#1F4E79')
   const tableHeaderTextColor = String(cfg.tableHeaderTextColor || '#ffffff')
-  const tableFontSize = Number(cfg.tableFontSize || 12)
+  const tableFontSize = Number(cfg.tableFontSize || 15) // predefinito come il Regolamento irriguo
 
   const [utenti, setUtenti]   = useState<UtenteRecord[]>([])
   const [form, setForm]       = useState<UtenteForm>(emptyForm())
@@ -2580,15 +2566,16 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
     // identico allo stato iniziale e il pulsante Aggiorna si disabilita.
     if (form.objectid != null && originalEditedUser && ruoloCod === normalizeRuoloCod(originalEditedUser.ruolo_cod)) {
       const isAdminOriginale = normalizeRuoloCod(originalEditedUser.ruolo_cod) === 'ADMIN'
+      const isTrOriginale = normalizeRuoloCod(originalEditedUser.ruolo_cod) === 'TR'
       setForm(f => ({
         ...f,
         ruolo_cod: normalizeRuoloCod(originalEditedUser.ruolo_cod),
         area: isAdminOriginale ? null : originalEditedUser.area,
-        settore: isAdminOriginale ? null : originalEditedUser.settore,
-        ufficio: isAdminOriginale ? null : originalEditedUser.ufficio,
+        settore: isAdminOriginale || isTrOriginale ? null : originalEditedUser.settore,
+        ufficio: isAdminOriginale || isTrOriginale ? null : originalEditedUser.ufficio,
         area_cod: isAdminOriginale ? null : (originalEditedUser.area_cod ?? codeOf(AREE, originalEditedUser.area)),
-        settore_cod: isAdminOriginale ? null : (originalEditedUser.settore_cod ?? codeOf(SETTORI, originalEditedUser.settore)),
-        gruppo: isAdminOriginale ? '' : originalEditedUser.gruppo
+        settore_cod: isAdminOriginale || isTrOriginale ? null : (originalEditedUser.settore_cod ?? codeOf(SETTORI, originalEditedUser.settore)),
+        gruppo: isAdminOriginale ? '' : (isTrOriginale ? (originalEditedUser.area ? calcolaGruppo('TR', originalEditedUser.area, 0) : '') : originalEditedUser.gruppo)
       }))
       return
     }
@@ -2616,7 +2603,8 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
     // Se si torna all'area iniziale (con lo stesso ruolo iniziale), ripristina
     // anche settore, ufficio e gruppo originali invece di lasciare la cascata
     // ricalcolata/azzerata dal cambio precedente.
-    if (form.objectid != null && originalEditedUser &&
+    // Il TR è censito per sola area: nessun ripristino di settore/ufficio/gruppo storici.
+    if (form.objectid != null && originalEditedUser && ruoloCod !== 'TR' &&
         ruoloCod === normalizeRuoloCod(originalEditedUser.ruolo_cod) &&
         Number(val) === Number(originalEditedUser.area)) {
       setForm(f => ({
@@ -2788,6 +2776,8 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
   const onDuplicateAssignment = (u: UtenteRecord) => {
     setSelectedObjectId(u.objectid)
     const isAdmin = normalizeRuoloCod(u.ruolo_cod) === 'ADMIN'
+    // TR censito per sola area: settore e ufficio storici non si riportano.
+    const isTr = normalizeRuoloCod(u.ruolo_cod) === 'TR'
     setForm({
       ...emptyForm(),
       username:          u.username,
@@ -2798,12 +2788,12 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
       data_nascita:      u.data_nascita,
       full_name:         composeFullName(u.nome, u.cognome),
       area:              isAdmin ? null : u.area,
-      settore:           isAdmin ? null : u.settore,
-      ufficio:           isAdmin ? null : u.ufficio,
+      settore:           isAdmin || isTr ? null : u.settore,
+      ufficio:           isAdmin || isTr ? null : u.ufficio,
       ruolo_cod:         normalizeRuoloCod(u.ruolo_cod),
       area_cod:          isAdmin ? null : (u.area_cod ?? codeOf(AREE, u.area)),
-      settore_cod:       isAdmin ? null : (u.settore_cod ?? codeOf(SETTORI, u.settore)),
-      gruppo:            isAdmin ? '' : u.gruppo,
+      settore_cod:       isAdmin || isTr ? null : (u.settore_cod ?? codeOf(SETTORI, u.settore)),
+      gruppo:            isAdmin ? '' : (isTr ? (u.area ? calcolaGruppo('TR', u.area, 0) : '') : u.gruppo),
       gruppo_precedente: '',
     })
     setAssignmentSourceObjectId(u.objectid)
@@ -2815,6 +2805,9 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
   const onEdit = (u: UtenteRecord) => {
     setSelectedObjectId(u.objectid)
     const isAdmin = normalizeRuoloCod(u.ruolo_cod) === 'ADMIN'
+    // TR censito per sola area: un'assegnazione storica per settore/ufficio
+    // viene proposta già normalizzata e si aggiorna con il salvataggio.
+    const isTr = normalizeRuoloCod(u.ruolo_cod) === 'TR'
     setForm({
       objectid:          u.objectid,
       existingObjectId:  null,
@@ -2826,12 +2819,12 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
       data_nascita:      u.data_nascita,
       full_name:         composeFullName(u.nome, u.cognome),
       area:              isAdmin ? null : u.area,
-      settore:           isAdmin ? null : u.settore,
-      ufficio:           isAdmin ? null : u.ufficio,
+      settore:           isAdmin || isTr ? null : u.settore,
+      ufficio:           isAdmin || isTr ? null : u.ufficio,
       ruolo_cod:         normalizeRuoloCod(u.ruolo_cod),
       area_cod:          isAdmin ? null    : (u.area_cod ?? codeOf(AREE, u.area)),
-      settore_cod:       isAdmin ? null    : (u.settore_cod ?? codeOf(SETTORI, u.settore)),
-      gruppo:            isAdmin ? ''   : u.gruppo,
+      settore_cod:       isAdmin || isTr ? null : (u.settore_cod ?? codeOf(SETTORI, u.settore)),
+      gruppo:            isAdmin ? ''   : (isTr ? (u.area ? calcolaGruppo('TR', u.area, 0) : '') : u.gruppo),
       gruppo_precedente: isAdmin ? ''   : u.gruppo,  // salva il gruppo attuale → PA lo userà per la rimozione
     })
     setHomonymPromptOpen(false); setHomonymConfirmedKey(''); setHomonymReuseId(null); setPendingBirthDates({}); setUserValidationAttempted(false); setSelectedAgolUsername(''); setAssignmentSourceObjectId(null)
@@ -2931,7 +2924,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
       if (!form.area)             { showMsg('Area obbligatoria', false); return }
       const settoriPrevisti = getSettoriPerRuoloArea(form.ruolo_cod, form.area)
       if (settoriPrevisti.length > 0 && !form.settore) { showMsg('Settore obbligatorio', false); return }
-      if (!form.ufficio)          { showMsg('Ufficio obbligatorio', false); return }
+      if (!form.ufficio && normalizeRuoloCod(form.ruolo_cod) !== 'TR') { showMsg('Ufficio obbligatorio', false); return }
     }
     const duplicateAssignment = utenti.find(u =>
       u.objectid !== form.objectid &&
@@ -3063,7 +3056,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
   const isAreaAuto     = areeDisp.length === 1
   const currentRole = normalizeRuoloCod(form.ruolo_cod)
   const isSettoreFisso = !!currentRole && (
-    currentRole === 'DT' || currentRole === 'DA' || currentRole === 'ADMIN' ||
+    currentRole === 'DT' || currentRole === 'DA' || currentRole === 'ADMIN' || currentRole === 'TR' ||
     (currentRole === 'RIT' || currentRole === 'RIA') ||
     (currentRole === 'IA' && form.area === 1)
   )
@@ -3316,7 +3309,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
             <div className="ggu-toolbar">
               <div className="ggu-toolbar-left">
                 <NewRecordButton onClick={onNew} title='Nuovo utente' />
-                <button type='button' onClick={() => exportCSV(sortedUtenti, domainLabels)} disabled={sortedUtenti.length === 0} title='Esporta utenti.csv' aria-label='Esporta utenti.csv' style={transferActionButtonStyle(sortedUtenti.length === 0)}><TransferActionIcon name='export' /></button>
+                <button type='button' onClick={() => exportCSV(utenti, domainLabels)} disabled={utenti.length === 0} title='Esporta utenti.csv' aria-label='Esporta utenti.csv' style={transferActionButtonStyle(utenti.length === 0)}><TransferActionIcon name='export' /></button>
               </div>
               <div className="ggu-toolbar-right">
                 <button
@@ -3488,8 +3481,8 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
                 }
               </div>
               <div className="ggu-field ggu-user-office">
-                <div className="ggu-label">Ufficio{currentRole && currentRole !== 'ADMIN' && !isUfficioFisso ? ' *' : ''}</div>
-                {currentRole === 'ADMIN'
+                <div className="ggu-label">Ufficio{currentRole && currentRole !== 'ADMIN' && currentRole !== 'TR' && !isUfficioFisso ? ' *' : ''}</div>
+                {currentRole === 'ADMIN' || currentRole === 'TR'
                   ? <input className="ggu-input" disabled value="—" />
                   : (isUfficioFisso
                     ? <input className="ggu-input" disabled value={labelUfficio(form.ufficio) || 'Cagliari'} />

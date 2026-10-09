@@ -9,6 +9,12 @@ export interface Config {
   serviceUrlSanzioniAmm?: string
   /** Vista editabile AGR/TEC filtrata su ATTREZZATURA. */
   serviceUrlAttrezzatureAgrTec?: string
+  /**
+   * Ambito dell'istanza: 'tecnico' = Nota spese e Attrezzature (RIT, da Gestione prezzari);
+   * 'amministrativo' = Sanzioni e cauzione (RIA, card Parametri sanzionatori);
+   * 'tutti' o vuoto = tutte le schede consentite al ruolo (comportamento precedente).
+   */
+  ambito?: 'tutti' | 'tecnico' | 'amministrativo'
   title?: string
   /** Sottotitolo personalizzato. Vuoto = descrizione della card Home. */
   subtitleText?: string

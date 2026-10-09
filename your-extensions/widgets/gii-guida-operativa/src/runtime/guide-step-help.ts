@@ -18,12 +18,14 @@ const exactHelp: Record<string, GuideStepHelp> = {
   },
   'Consultare i luoghi e i dati della rilevazione.': {
     paragraphs: [
-      'Con la pratica selezionata nell’Elenco pratiche, aprire la scheda Luoghi e dati nel pannello Dettaglio pratica selezionata. Qui sono riepilogati i riferimenti territoriali e tecnici acquisiti nella pratica, compresi quelli relativi alla localizzazione della rilevazione.'
+      'Con la pratica selezionata nell’Elenco pratiche, aprire la scheda Luoghi e dati nel pannello Dettaglio pratica selezionata. Qui sono riepilogati la descrizione del luogo, le coordinate del punto, i dati catastali (Comune, Sezione, Foglio e Mappale), i Dati tecnici rilevati, le Annotazioni tecniche del Tecnico rilevatore e le matricole.',
+      'Nella lavorazione tecnica gli stessi dati si trovano nella scheda Luoghi e dati tecnici.'
     ]
   },
   'Visualizzare la pratica sulla mappa.': {
     paragraphs: [
       'Con la pratica selezionata nell’Elenco pratiche, aprire la scheda Mappa nel pannello Dettaglio pratica selezionata. Se nella pratica è stato registrato un punto, la mappa lo visualizza nella relativa posizione; in assenza di localizzazione viene mostrata la relativa segnalazione.',
+      'Gli strumenti della mappa sono gli stessi della lavorazione tecnica: in basso a destra Bussola, Posizione, Estensione precedente/successiva, Zoom, Home e Centra sul punto, che riporta la mappa sul punto della pratica ed è disattivato quando il punto non è presente; in alto Mappa di base, Misura, l’eventuale Elenco layer e Schermo intero.',
       'Per effettuare ricerche cartografiche su particelle, opere o infrazioni utilizzare invece la vista Mappa dalla Home o dal navigatore laterale. Le funzioni della vista Mappa sono descritte nel Cap. 20.'
     ]
   },
@@ -96,7 +98,7 @@ const exactHelp: Record<string, GuideStepHelp> = {
   'Aprire Nuova pratica dalla Home o dal menu.': {
     paragraphs: [
       'Dalla Home selezionare la card Nuova pratica. Se ci si trova già in un’altra vista, utilizzare la voce Nuova pratica nel navigatore laterale.',
-      'La vista si apre direttamente nella scheda di compilazione; se l’utente opera in più ambiti, il sistema richiede prima di scegliere quello della nuova pratica.'
+      'La vista si apre direttamente sulla scheda Trasgressore; se l’Istruttore tecnico è assegnato a più settori, il sistema richiede prima di scegliere quello della nuova pratica. Con un solo settore la scelta non è richiesta.'
     ]
   },
   'Aprire Mappa e selezionare Dati catastali.': {
@@ -239,7 +241,7 @@ function getReviewedStepHelp(text: string, sectionTitle = '', chapterTitle = '')
   }
   if (chapter.startsWith('19. prezzari') && lower.startsWith('il responsabile dell’istruttoria tecnica apre gestione prezzari')) {
     return { paragraphs: [
-      'Il Responsabile dell’istruttoria tecnica apre Gestione prezzari dalla Home o dal navigatore laterale e seleziona Parametri; da qui può gestire Parametri Nota spese e Prezzi attrezzature.',
+      'Il Responsabile dell’istruttoria tecnica apre Gestione prezzari dalla Home o dal navigatore laterale e seleziona Parametri; da qui può gestire Parametri nota spese e Prezzi delle attrezzature.',
       'Il Responsabile dell’istruttoria amministrativa apre invece Parametri sanzionatori, dove sono disponibili Sanzioni, riduzioni e cauzione. In entrambi i casi selezionare quindi l’archivio da consultare o modificare.'
     ] }
   }
@@ -519,7 +521,7 @@ function getReviewedStepHelp(text: string, sectionTitle = '', chapterTitle = '')
     if (section.includes('creare o modificare un parametro') && (lower.startsWith('salvare.') || lower.startsWith('salvare il parametro'))) {
       return { paragraphs: [
         'Dopo avere compilato i campi previsti per il tipo di parametro, controllare anno, valore, stato Attivo, periodo di validità ed eventuali Note e utilizzare Salva.',
-        'Per i Prezzi attrezzature verificare anche Tipo di attrezzatura e Valore unitario. Se serve un’estrazione dell’archivio corrente, utilizzare Esporta CSV dopo il salvataggio.'
+        'Per i Prezzi delle attrezzature verificare anche Tipo di attrezzatura e Valore unitario. Se serve un’estrazione dell’archivio corrente, utilizzare Esporta CSV dopo il salvataggio.'
       ] }
     }
     if (section.includes('consultare una voce di prezzario')) {
@@ -590,6 +592,7 @@ function getReviewedStepHelp(text: string, sectionTitle = '', chapterTitle = '')
     if (section.includes('cercare e consultare il regolamento') && (lower.startsWith('usare cerca digitando') || lower === 'cercare nel regolamento irriguo.')) {
       return { paragraphs: [
         'Digitare nel campo Cerca una parola, il numero di un articolo, parte del titolo o il nome di una sezione. Durante la digitazione l’Indice regolamento si restringe alle sole sezioni e agli articoli corrispondenti.',
+        'Il numero dell’articolo può essere scritto in più forme: ad esempio 8, art 8, art. 8 o art8 trovano tutti l’articolo 8.',
         'Selezionare il risultato desiderato per leggere il Testo articolo nel pannello di destra. Utilizzare Pulisci ricerca o Reimposta indice per tornare all’indice completo.'
       ] }
     }
@@ -659,8 +662,8 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('avviare una nuova pratica')) {
       return {
         paragraphs: [
-          'Aprire Nuova pratica dalla Home oppure dal navigatore laterale. Se l’Istruttore tecnico opera in più ambiti, selezionare prima l’ambito cui appartiene la pratica da creare.',
-          'Dopo la scelta dell’ambito si apre la nuova pratica con i Dati generali compilati automaticamente dal sistema.'
+          'Aprire Nuova pratica dalla Home oppure dal navigatore laterale. Se l’Istruttore tecnico è assegnato a più settori, selezionare prima il settore cui appartiene la pratica da creare; se è assegnato a un solo settore, la scelta non è richiesta.',
+          'La nuova pratica si apre sulla scheda Trasgressore, con i Dati generali già compilati automaticamente dal sistema.'
         ]
       }
     }
@@ -668,6 +671,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
       return {
         paragraphs: [
           'Dopo avere selezionato la rilevazione, usare il pannello Dettaglio pratica selezionata sulla destra. Passare tra Trasgressore, Violazione, Luoghi e dati, Mappa, Nota spese, Allegati e Iter per verificare ciò che è già stato acquisito dal Tecnico rilevatore.',
+          'In Luoghi e dati sono già presenti i Dati tecnici rilevati e le eventuali Annotazioni tecniche provenienti dal Survey, insieme ai dati catastali ricavati dal gestionale dalla posizione della rilevazione.',
           'In questa fase il Capo Settore sta consultando la rilevazione prima dell’assegnazione: non è necessario aprire una lavorazione tecnica per controllare i dati.'
         ]
       }
@@ -683,8 +687,8 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('verificare i dati generali')) {
       return {
         paragraphs: [
-          'Nella nuova pratica aprire Dati generali e controllare i valori compilati automaticamente dal sistema per Area, Settore, Ufficio di zona, Tecnico rilevatore, Istruttore tecnico e Data rilevazione. I campi sono in sola lettura.',
-          'Se l’Istruttore tecnico opera in più ambiti e, controllando i Dati generali, si accorge di aver selezionato quello errato, può utilizzare l’azione Elimina pratica e generarne una nuova nell’ambito corretto, purché non l’abbia ancora trasmessa al Capo Settore. Se si accorge dell’errore dopo la trasmissione, la pratica potrà essere eliminata dal Capo Settore.'
+          'Nella nuova pratica, che si apre sulla scheda Trasgressore, aprire la scheda Dati generali e controllare i valori compilati automaticamente dal sistema per Area, Settore, Ufficio di zona, Tecnico rilevatore, Istruttore tecnico e Data rilevazione. I campi sono in sola lettura.',
+          'Se l’Istruttore tecnico è assegnato a più settori e, controllando i Dati generali, si accorge di aver selezionato quello errato, può utilizzare l’azione Elimina pratica e generarne una nuova nel settore corretto, purché non l’abbia ancora trasmessa al Capo Settore. Se si accorge dell’errore dopo la trasmissione, la pratica potrà essere eliminata dal Capo Settore.'
         ]
       }
     }
@@ -712,9 +716,11 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('compilare luoghi e dati tecnici')) {
       return {
         paragraphs: [
-          'Nella scheda Luoghi e dati tecnici descrivere il luogo dell’accertamento e compilare, quando disponibili, Distretto, Comizio, Idrante, Matricola contatore e Matricola tessera.',
+          'Nella scheda Luoghi e dati tecnici descrivere il luogo dell’accertamento e compilare, quando disponibili, Matricola contatore e Matricola tessera.',
           'Se nella scheda Violazione la fattispecie selezionata richiede il Punto mappa, nella sezione Localizzazione utilizzare Imposta punto in mappa e fare clic sulla posizione esatta nella mappa. Dopo il clic il gestionale mostra il punto impostato e le relative coordinate.',
-          'Per correggere la posizione utilizzare Modifica punto e fare nuovamente clic sulla mappa. Prima del salvataggio controllare che il punto corrisponda effettivamente al luogo dell’accertamento.',
+          'Impostato il punto, il gestionale ricava automaticamente i dati catastali (Comune, Sezione, Foglio e Mappale), mostrati in sola lettura, e i Dati tecnici rilevati, cioè gli elementi di rete e i manufatti individuati entro 2 m dal punto. Durante l’interrogazione compare il messaggio Rilevazione automatica dei dati catastali e tecnici; se un dato non può essere ricavato, il gestionale lo segnala e basta riposizionare il punto per riprovare.',
+          'Il testo dei Dati tecnici rilevati può essere corretto o integrato a mano; nelle Annotazioni tecniche del Tecnico rilevatore possono essere precisati l’elemento interessato o altre informazioni utili.',
+          'Per correggere la posizione utilizzare Modifica punto e fare nuovamente clic sulla mappa: dati catastali e tecnici vengono ricalcolati. Ripristina posizione originale riporta il punto salvato insieme ai relativi dati. Il pulsante Centra sul punto, sotto Home tra gli strumenti della mappa, riporta la mappa sul punto della pratica. Prima del salvataggio controllare che il punto corrisponda effettivamente al luogo dell’accertamento.',
           'Quando il Punto mappa è obbligatorio, la pratica non può essere salvata finché la localizzazione non è stata impostata.'
         ]
       }
@@ -884,7 +890,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('consultare il fascicolo tecnico')) {
       return {
         paragraphs: [
-          'Aprire Dettaglio pratica e verificare le schede tecniche, gli allegati e l’Iter. Nell’Iter controllare che l’ultimo passaggio utile corrisponda all’approvazione della fase tecnica da parte del Direttore Aree Agraria e Tecnica.',
+          'Aprire Dettaglio pratica e verificare le schede tecniche, gli allegati e l’Iter. Nell’Iter controllare che l’ultimo passaggio utile corrisponda all’approvazione della fase tecnica da parte del Direttore tecnico.',
           'La consultazione serve a verificare che il fascicolo sia pronto per essere assegnato; l’assegnazione si esegue poi da Gestisci istruttoria.'
         ]
       }
@@ -1990,10 +1996,10 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
         ]
       }
     }
-    if (lower.startsWith('per i prezzi attrezzature')) {
+    if (lower.startsWith('per i prezzi delle attrezzature')) {
       return {
         paragraphs: [
-          'Nell’archivio Prezzi attrezzature selezionare il tipo di attrezzatura e compilare Valore unitario (€). Utilizzare gli altri campi del parametro per anno, validità e stato.',
+          'Nell’archivio Prezzi delle attrezzature selezionare il tipo di attrezzatura e compilare Valore unitario (€). Utilizzare gli altri campi del parametro per anno, validità e stato.',
           'Il valore viene utilizzato nelle casistiche di risarcimento previste per l’art. 30.'
         ]
       }
@@ -2165,6 +2171,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
       return {
         paragraphs: [
           'Nel pannello Indice regolamento utilizzare le frecce delle sezioni per espanderle o richiuderle. Selezionare il titolo dell’articolo desiderato per aprirne il testo nel pannello di destra.',
+          'I pulsanti Argomento e Numero, nell’intestazione dell’indice, consentono di passare dagli articoli raggruppati per argomento all’elenco degli articoli in ordine di numero.',
           'Questa modalità è utile quando si conosce la collocazione dell’articolo ma non si vuole utilizzare la ricerca testuale.'
         ],
         figure: 'Figura – Consultazione del Regolamento irriguo'

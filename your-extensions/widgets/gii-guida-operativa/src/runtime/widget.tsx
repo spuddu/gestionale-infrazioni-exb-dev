@@ -294,6 +294,11 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
   const [imageFit, setImageFit] = useState(true)
   const [imageFitScale, setImageFitScale] = useState(1)
   const [imageNaturalSize, setImageNaturalSize] = useState({ width: 0, height: 0 })
+  const [hoverImageKey, setHoverImageKey] = useState('')
+  // Punto da mantenere fermo durante lo zoom (frazioni del contenuto + posizione nel riquadro); null = centra.
+  const zoomAnchorRef = useRef<{ fx: number, fy: number, vx: number, vy: number } | null>(null)
+  const imageDragRef = useRef<{ x: number, y: number, left: number, top: number } | null>(null)
+  const [imageDragging, setImageDragging] = useState(false)
 
   const contentBodyFontSize = bodyFontSize * textScale
   const contentChapterTitleFontSize = chapterTitleFontSize * textScale
@@ -622,9 +627,10 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
     return Math.min(1, availableWidth / width, availableHeight / height)
   }
 
+  // Zoom a passi moltiplicativi (×1,25) fino a 4 volte la dimensione originale, anche per le immagini raster.
   const imageMinScale = Math.max(0.1, imageFitScale * 0.5)
-  const imageMaxScale = imageIsVector ? Math.max(4, imageFitScale) : 1
-  const imageZoomStep = 0.15
+  const imageMaxScale = Math.max(4, imageFitScale)
+  const imageZoomStep = 1.25
 
   const centerImageViewport = () => {
     const viewport = imageViewportRef.current
@@ -633,15 +639,29 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
     viewport.scrollTop = Math.max(0, (viewport.scrollHeight - viewport.clientHeight) / 2)
   }
 
-  const changeImageZoom = (delta: number) => {
+  // factor > 1 ingrandisce, < 1 riduce. clientX/clientY: punto sotto il mouse da tenere fermo (rotella).
+  const changeImageZoom = (factor: number, clientX?: number, clientY?: number) => {
+    const viewport = imageViewportRef.current
+    if (viewport && viewport.scrollWidth > 0 && viewport.scrollHeight > 0) {
+      const rect = viewport.getBoundingClientRect()
+      const vx = clientX != null ? clientX - rect.left : viewport.clientWidth / 2
+      const vy = clientY != null ? clientY - rect.top : viewport.clientHeight / 2
+      zoomAnchorRef.current = {
+        fx: (viewport.scrollLeft + vx) / viewport.scrollWidth,
+        fy: (viewport.scrollTop + vy) / viewport.scrollHeight,
+        vx,
+        vy
+      }
+    }
     setImageFit(false)
     setImageScale(prev => {
-      const next = Math.round((prev + delta) * 100) / 100
+      const next = Math.round(prev * factor * 1000) / 1000
       return clamp(next, imageMinScale, imageMaxScale)
     })
   }
 
   const fitImageToWindow = () => {
+    zoomAnchorRef.current = null
     const nextFitScale = calculateImageFitScale()
     setImageFitScale(nextFitScale)
     setImageScale(nextFitScale)
@@ -662,9 +682,28 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
 
   useEffect(() => {
     if (!imagePreview) return
-    const frame = window.requestAnimationFrame(centerImageViewport)
+    const frame = window.requestAnimationFrame(() => {
+      const viewport = imageViewportRef.current
+      const anchor = zoomAnchorRef.current
+      zoomAnchorRef.current = null
+      if (!viewport || !anchor) { centerImageViewport(); return }
+      viewport.scrollLeft = Math.max(0, anchor.fx * viewport.scrollWidth - anchor.vx)
+      viewport.scrollTop = Math.max(0, anchor.fy * viewport.scrollHeight - anchor.vy)
+    })
     return () => window.cancelAnimationFrame(frame)
   }, [imagePreview, imageScale])
+
+  // Rotella del mouse sull'immagine ingrandita: zoom verso il punto indicato.
+  useEffect(() => {
+    const viewport = imageViewportRef.current
+    if (!imagePreview || !viewport) return
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      changeImageZoom(event.deltaY < 0 ? imageZoomStep : 1 / imageZoomStep, event.clientX, event.clientY)
+    }
+    viewport.addEventListener('wheel', onWheel, { passive: false })
+    return () => viewport.removeEventListener('wheel', onWheel)
+  })
 
   const renderFigureAsset = (figureKey: string, keyPrefix: string, compact = false): React.ReactNode => {
     const figure = GUIDE_FIGURES[figureKey]
@@ -678,16 +717,24 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
               <button
                 type='button'
                 onClick={() => openImagePreview(image)}
+                onMouseEnter={() => setHoverImageKey(`${keyPrefix}-${figureKey}-${imageIndex}`)}
+                onMouseLeave={() => setHoverImageKey('')}
+                onFocus={() => setHoverImageKey(`${keyPrefix}-${figureKey}-${imageIndex}`)}
+                onBlur={() => setHoverImageKey('')}
                 aria-label={`Ingrandisci immagine${image.label ? `: ${image.label}` : ''}`}
                 title='Ingrandisci immagine'
-                style={{ display: 'block', width: '100%', border: 0, padding: 0, margin: 0, background: 'transparent', cursor: 'zoom-in', textAlign: 'left' }}
+                style={{ position: 'relative', display: 'block', width: '100%', border: 0, padding: 0, margin: 0, background: 'transparent', cursor: 'pointer', textAlign: 'left' }}
               >
+                {/* Icona di ingrandimento disegnata dal widget: uguale in tutti i browser (il cursore "zoom-in" non lo è). */}
+                <span aria-hidden='true' style={{ position: 'absolute', top: '50%', left: '50%', width: 52, height: 52, marginLeft: -26, marginTop: -26, borderRadius: '50%', background: 'rgba(15, 23, 42, 0.62)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 14px rgba(0,0,0,.25)', opacity: hoverImageKey === `${keyPrefix}-${figureKey}-${imageIndex}` ? 1 : 0, transform: hoverImageKey === `${keyPrefix}-${figureKey}-${imageIndex}` ? 'scale(1)' : 'scale(0.85)', transition: 'opacity .15s ease, transform .15s ease', pointerEvents: 'none', zIndex: 1 }}>
+                  <svg width='26' height='26' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2.2' strokeLinecap='round'><circle cx='10.5' cy='10.5' r='6.5' /><path d='M15.5 15.5 21 21' /><path d='M10.5 7.5v6M7.5 10.5h6' /></svg>
+                </span>
                 <img
                   src={image.src}
                   alt={image.alt}
                   loading='lazy'
                   draggable={false}
-                  style={{ display: 'block', width: '100%', height: 'auto', border: `1px solid ${borderColor}`, borderRadius: Math.max(5, radius - 2), background: '#ffffff', cursor: 'zoom-in' }}
+                  style={{ display: 'block', width: '100%', height: 'auto', border: `1px solid ${borderColor}`, borderRadius: Math.max(5, radius - 2), background: '#ffffff', cursor: 'pointer' }}
                 />
               </button>
             </div>
@@ -807,6 +854,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
     fontWeight: 700,
     cursor: 'pointer'
   }
+  const imageToolBox: React.CSSProperties = { height: 33, minHeight: 33, padding: '0 10px', boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }
+  const imageToolDisabledStyle: React.CSSProperties = { background: '#e5e7eb', color: '#9ca3af', cursor: 'default', opacity: 1 }
 
   return (
     <div style={{ width: '100%', height: '100%', minHeight: 0, boxSizing: 'border-box', padding: outerPadding, color: textColor, fontWeight: 500, fontFamily: "'Avenir Next', Avenir, 'Segoe UI', sans-serif" }}>
@@ -964,15 +1013,33 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
             <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10, color: '#fff' }}>
               <div style={{ minWidth: 0, fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{imagePreview.label || imagePreview.alt}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                <button type='button' onClick={() => changeImageZoom(-imageZoomStep)} disabled={imageScale <= imageMinScale + 0.001} aria-label='Riduci immagine' title='Riduci immagine' style={{ ...buttonStyle, minWidth: 36, background: '#fff', color: titleColor, opacity: imageScale <= imageMinScale + 0.001 ? 0.55 : 1 }}>−</button>
-                <button type='button' onClick={() => changeImageZoom(imageZoomStep)} disabled={imageScale >= imageMaxScale - 0.001} aria-label='Ingrandisci immagine' title={imageIsVector ? 'Ingrandisci immagine' : 'Ingrandisci fino alla risoluzione originale'} style={{ ...buttonStyle, minWidth: 36, background: '#fff', color: titleColor, opacity: imageScale >= imageMaxScale - 0.001 ? 0.55 : 1 }}>+</button>
-                <button type='button' onClick={fitImageToWindow} style={{ ...buttonStyle, background: imageFit ? `${accent}12` : '#fff' }}>Adatta</button>
-                <button type='button' onClick={() => setImagePreview(null)} aria-label='Chiudi immagine' title='Chiudi (Esc)' style={{ ...buttonStyle, minWidth: 38, padding: '4px 10px', background: '#fff', color: titleColor, fontSize: 18, lineHeight: 1 }}>×</button>
+                <button type='button' onClick={() => changeImageZoom(1 / imageZoomStep)} disabled={imageScale <= imageMinScale + 0.001} aria-label='Riduci immagine' title='Riduci immagine' style={{ ...buttonStyle, ...imageToolBox, minWidth: 36, ...(imageScale <= imageMinScale + 0.001 ? imageToolDisabledStyle : { background: '#fff', color: titleColor }) }}>−</button>
+                <span style={{ ...imageToolBox, minWidth: 52, justifyContent: 'center', border: `1px solid ${borderColor}`, borderRadius: 6, background: '#fff', color: titleColor, fontSize: 13, fontWeight: 700 }} title='Ingrandimento rispetto alla dimensione originale'>{Math.round(imageScale * 100)}%</span>
+                <button type='button' onClick={() => changeImageZoom(imageZoomStep)} disabled={imageScale >= imageMaxScale - 0.001} aria-label='Ingrandisci immagine' title='Ingrandisci immagine (anche con la rotella del mouse)' style={{ ...buttonStyle, ...imageToolBox, minWidth: 36, ...(imageScale >= imageMaxScale - 0.001 ? imageToolDisabledStyle : { background: '#fff', color: titleColor }) }}>+</button>
+                <button type='button' onClick={fitImageToWindow} style={{ ...buttonStyle, ...imageToolBox, background: imageFit ? accent : '#fff', color: imageFit ? '#fff' : titleColor, borderColor: imageFit ? accent : borderColor }}>Adatta</button>
+                <button type='button' onClick={() => setImagePreview(null)} aria-label='Chiudi immagine' title='Chiudi (Esc)' style={{ ...buttonStyle, ...imageToolBox, minWidth: 38, background: '#fff', color: titleColor, fontSize: 18, lineHeight: 1 }}>×</button>
               </div>
             </div>
             <div
               ref={imageViewportRef}
-              style={{ flex: '1 1 auto', minHeight: 0, overflow: 'auto', background: 'rgba(255,255,255,0.05)', borderRadius: 8, boxSizing: 'border-box' }}
+              onMouseDown={(event) => {
+                const viewport = imageViewportRef.current
+                if (!viewport || event.button !== 0) return
+                if (viewport.scrollWidth <= viewport.clientWidth && viewport.scrollHeight <= viewport.clientHeight) return
+                event.preventDefault()
+                imageDragRef.current = { x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop }
+                setImageDragging(true)
+              }}
+              onMouseMove={(event) => {
+                const viewport = imageViewportRef.current
+                const drag = imageDragRef.current
+                if (!viewport || !drag) return
+                viewport.scrollLeft = drag.left - (event.clientX - drag.x)
+                viewport.scrollTop = drag.top - (event.clientY - drag.y)
+              }}
+              onMouseUp={() => { imageDragRef.current = null; setImageDragging(false) }}
+              onMouseLeave={() => { imageDragRef.current = null; setImageDragging(false) }}
+              style={{ flex: '1 1 auto', minHeight: 0, overflow: 'auto', background: 'rgba(255,255,255,0.05)', borderRadius: 8, boxSizing: 'border-box', cursor: imageDragging ? 'grabbing' : 'grab', userSelect: 'none' }}
             >
               <div style={{ minWidth: '100%', minHeight: '100%', width: 'max-content', height: 'max-content', display: 'grid', placeItems: 'center', padding: 12, boxSizing: 'border-box' }}>
                 <img

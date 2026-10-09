@@ -10,7 +10,7 @@ export type GuideBlock =
 export interface GuideChapter { id: string; order: number; title: string; roles: GuideRole[]; blocks: GuideBlock[] }
 export interface GuideQuickLink { label: string; description: string; targetChapterId: string }
 
-export const GUIDE_VERSION = '2 ottobre 2026'
+export const GUIDE_VERSION = '7 ottobre 2026'
 
 export const GUIDE_CHAPTERS: GuideChapter[] = [
   {
@@ -32,6 +32,10 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "paragraph",
         "text": "Le istruzioni operative contrassegnate dalla freccia possono essere aperte per visualizzare i passaggi di dettaglio e, quando utile, una schermata di riferimento."
+      },
+      {
+        "type": "paragraph",
+        "text": "Passando il mouse su una schermata compare la lente di ingrandimento: facendo clic l’immagine si apre a tutto schermo. Nella vista ingrandita utilizzare i pulsanti − e + oppure la rotella del mouse per variare l’ingrandimento, trascinare l’immagine per spostarsi, Adatta per riportarla alle dimensioni della finestra e × o il tasto Esc per chiuderla."
       }
     ]
   },
@@ -61,7 +65,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "rows": [
           [
             "Tecnico rilevatore",
-            "Effettua la rilevazione sul territorio tramite l’applicazione Esri Survey123, utilizzando il rilevamento \"Infrazioni\" predisposto per smartphone e tablet. La rilevazione confluisce quindi nel gestionale e viene successivamente gestita dal Capo Settore."
+            "Effettua la rilevazione sul territorio tramite l’applicazione Esri Survey123, utilizzando il rilevamento \"Infrazioni\" predisposto per smartphone e tablet: sceglie l’Ufficio di zona soltanto se è assegnato a più uffici, localizza sulla mappa il punto dell’infrazione e può aggiungere annotazioni tecniche; i Dati tecnici rilevati, cioè gli elementi di rete e i manufatti individuati entro 2 m dal punto, vengono acquisiti automaticamente. La rilevazione confluisce quindi nel gestionale, che ne ricava automaticamente i dati catastali dalla posizione, e viene successivamente gestita dal Capo Settore."
           ],
           [
             "Istruttore tecnico",
@@ -434,7 +438,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "rows": [
           [
             "Origine",
-            "Tecnico rilevatore tramite Esri Survey123, utilizzando il rilevamento Infrazioni → Capo Settore, oppure l’Istruttore tecnico crea direttamente la pratica nel gestionale",
+            "Tecnico rilevatore tramite Esri Survey123, utilizzando il rilevamento \"Infrazioni\" → Capo Settore, oppure l’Istruttore tecnico crea direttamente la pratica nel gestionale",
             "Rilevazione disponibile nel gestionale."
           ],
           [
@@ -564,7 +568,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "Una rilevazione effettuata dal Tecnico rilevatore tramite l’applicazione Esri Survey123, utilizzando il rilevamento Infrazioni, entra nel gestionale e viene indirizzata al Capo Settore. Il Capo Settore riceve l’allarme “Nuova rilevazione ricevuta”. In questo caso la pratica non è ancora assegnata a un Istruttore tecnico."
+        "text": "Una rilevazione effettuata dal Tecnico rilevatore tramite l’applicazione Esri Survey123, utilizzando il rilevamento \"Infrazioni\", entra nel gestionale e viene indirizzata al Capo Settore. All’arrivo il gestionale ricava automaticamente dalla posizione rilevata i dati catastali (Comune, Sezione, Foglio e Mappale). Il Capo Settore riceve l’allarme “Nuova rilevazione ricevuta”. In questo caso la pratica non è ancora assegnata a un Istruttore tecnico."
       },
       {
         "type": "heading3",
@@ -621,7 +625,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "Se l’Istruttore tecnico opera in più ambiti, prima di iniziare la compilazione deve selezionare quello relativo alla nuova pratica."
+        "text": "Se l’Istruttore tecnico è assegnato a più settori, prima di iniziare la compilazione deve selezionare quello relativo alla nuova pratica; se è assegnato a un solo settore, la scelta non è richiesta."
       },
       {
         "type": "heading3",
@@ -731,7 +735,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           ],
           [
             "Luoghi e dati tecnici",
-            "Descrizione luogo, Distretto, Comizio, Idrante, matricole, localizzazione cartografica."
+            "Descrizione luogo; localizzazione cartografica con i dati catastali (Comune, Sezione, Foglio, Mappale) ricavati automaticamente dal punto; Dati tecnici rilevati; Annotazioni tecniche del Tecnico rilevatore; matricola contatore e matricola tessera."
           ],
           [
             "Nota spese",
@@ -766,7 +770,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "bullet",
-        "text": "Eventuali matricole/tessere soggette a controllo non possono essere duplicate dove il sistema applica l’univocità."
+        "text": "Nella Nota spese le matricole delle tessere elettroniche devono essere univoche all’interno della stessa pratica."
       },
       {
         "type": "bullet",
@@ -2726,7 +2730,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "La pagina Parametri mostra le categorie disponibili per il proprio ruolo. Il Responsabile dell’istruttoria tecnica gestisce i Parametri Nota spese e i Prezzi attrezzature; il Responsabile dell’istruttoria amministrativa gestisce Sanzioni, riduzioni e cauzione."
+        "text": "La pagina Parametri mostra le categorie disponibili per il proprio ruolo. Il Responsabile dell’istruttoria tecnica gestisce i Parametri nota spese e i Prezzi delle attrezzature; il Responsabile dell’istruttoria amministrativa gestisce Sanzioni, riduzioni e cauzione."
       },
       {
         "type": "heading3",
@@ -2760,7 +2764,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 5,
-        "text": "Per i Prezzi attrezzature selezionare il tipo di attrezzatura e indicare il Valore unitario (€).",
+        "text": "Per i Prezzi delle attrezzature selezionare il tipo di attrezzatura e indicare il Valore unitario (€).",
         "label": "Compilare i prezzi delle attrezzature"
       },
       {
@@ -3496,7 +3500,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "L’Anteprima fascicolo mostra i dati e i documenti già disponibili. Nella creazione tecnica diventa utilizzabile dopo il primo salvataggio della pratica."
+        "text": "L’Anteprima fascicolo mostra i dati e i documenti già disponibili. Nella creazione tecnica diventa utilizzabile dopo il primo salvataggio della pratica. Nel Rapporto tecnico la Descrizione dei luoghi è riportata accanto ai Dati tecnici rilevati, seguita dai dati catastali Comune, Sezione, Foglio e Mappale."
       },
       {
         "type": "heading2",
@@ -3766,6 +3770,10 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
             "Cap. 4.2 — creazione di una nuova pratica da parte dell’Istruttore tecnico."
           ],
           [
+            "Come imposto o correggo il punto in mappa?",
+            "Cap. 4.2.5 — Luoghi e dati tecnici: Imposta punto in mappa, Modifica punto, Centra sul punto; dati catastali e tecnici ricavati dal punto."
+          ],
+          [
             "Come elimino una pratica creata per errore?",
             "Cap. 5.3 — l’azione Elimina archivia una pratica creata direttamente dall’Istruttore tecnico e non ancora inoltrata nel procedimento."
           ],
@@ -3788,6 +3796,10 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           [
             "Come creo un nuovo prezzo?",
             "Cap. 19.2 — Analisi prezzi, elementare o analizzato."
+          ],
+          [
+            "Dove gestisco i parametri sanzionatori?",
+            "Cap. 19.4 — Parametri sanzionatori per il Responsabile dell’istruttoria amministrativa; Parametri nota spese e Prezzi delle attrezzature in Gestione prezzari per il Responsabile dell’istruttoria tecnica."
           ],
           [
             "Come genero la determinazione?",
@@ -3846,6 +3858,10 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
             "Cap. 22.1 — Rubrica → Firmatari."
           ],
           [
+            "Come cerco un articolo del Regolamento per numero?",
+            "Cap. 22.2 — indice per Numero oppure ricerca del numero, anche nella forma «art 8» o «art. 8»."
+          ],
+          [
             "Come creo o modifico un utente?",
             "Cap. 23 — registrazione dell’utente, ruoli e aggiornamento dei dati."
           ],
@@ -3874,7 +3890,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "rows": [
           [
             "Tecnico rilevatore",
-            "Effettua la rilevazione sul territorio tramite l’applicazione Esri Survey123, utilizzando il rilevamento Infrazioni; la rilevazione confluisce nel gestionale e viene successivamente gestita dal Capo Settore."
+            "Effettua la rilevazione sul territorio tramite l’applicazione Esri Survey123, utilizzando il rilevamento \"Infrazioni\": sceglie l’Ufficio di zona soltanto se è assegnato a più uffici, localizza sulla mappa il punto dell’infrazione e può aggiungere annotazioni tecniche; i Dati tecnici rilevati, cioè gli elementi di rete e i manufatti individuati entro 2 m dal punto, vengono acquisiti automaticamente. La rilevazione confluisce nel gestionale, che ne ricava i dati catastali dalla posizione, e viene successivamente gestita dal Capo Settore."
           ],
           [
             "Istruttore tecnico",
@@ -3999,6 +4015,11 @@ export const GUIDE_QUICK_LINKS: GuideQuickLink[] = [
     "targetChapterId": "cap-4-nuova-rilevazione-e-nuova-pratica"
   },
   {
+    "label": "Come imposto o correggo il punto in mappa?",
+    "description": "Cap. 4.2.5 — Luoghi e dati tecnici: Imposta punto in mappa, Modifica punto, Centra sul punto; dati catastali e tecnici ricavati dal punto.",
+    "targetChapterId": "cap-4-nuova-rilevazione-e-nuova-pratica"
+  },
+  {
     "label": "Come elimino una pratica creata per errore?",
     "description": "Cap. 5.3 — l’azione Elimina archivia una pratica creata direttamente dall’Istruttore tecnico e non ancora inoltrata nel procedimento.",
     "targetChapterId": "cap-5-istruttoria-tecnica-dell-it"
@@ -4026,6 +4047,11 @@ export const GUIDE_QUICK_LINKS: GuideQuickLink[] = [
   {
     "label": "Come creo un nuovo prezzo?",
     "description": "Cap. 19.2 — Analisi prezzi, elementare o analizzato.",
+    "targetChapterId": "cap-19-prezzari-e-nuovi-prezzi"
+  },
+  {
+    "label": "Dove gestisco i parametri sanzionatori?",
+    "description": "Cap. 19.4 — Parametri sanzionatori per il Responsabile dell’istruttoria amministrativa; Parametri nota spese e Prezzi delle attrezzature in Gestione prezzari per il Responsabile dell’istruttoria tecnica.",
     "targetChapterId": "cap-19-prezzari-e-nuovi-prezzi"
   },
   {
@@ -4096,6 +4122,11 @@ export const GUIDE_QUICK_LINKS: GuideQuickLink[] = [
   {
     "label": "Come aggiungo un firmatario?",
     "description": "Cap. 22.1 — Rubrica → Firmatari.",
+    "targetChapterId": "cap-22-rubrica-e-regolamento-irriguo"
+  },
+  {
+    "label": "Come cerco un articolo del Regolamento per numero?",
+    "description": "Cap. 22.2 — indice per Numero oppure ricerca del numero, anche nella forma «art 8» o «art. 8».",
     "targetChapterId": "cap-22-rubrica-e-regolamento-irriguo"
   },
   {

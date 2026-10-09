@@ -144,6 +144,14 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       <div style={section}>
         <div style={sectionTitle}>Tabelle e viste editabili</div>
 
+        <label style={lbl}>Ambito</label>
+        <select style={inp} value={String(cfg.ambito || 'tutti')} onChange={(e) => set('ambito', e.target.value)}>
+          <option value='tutti'>Tutti (schede consentite al ruolo)</option>
+          <option value='tecnico'>Tecnico: Nota spese e Attrezzature</option>
+          <option value='amministrativo'>Amministrativo: Sanzioni e cauzione</option>
+        </select>
+        <div style={hint}>Tecnico per la scheda Parametri di Gestione prezzari (RIT); Amministrativo per la pagina Parametri sanzionatori (RIA). Il ruolo dell'utente filtra comunque le schede.</div>
+
         <label style={lbl}>URL tabella parametri nota spese</label>
         <input style={inp} value={cfg.serviceUrl || ''} onChange={(e) => set('serviceUrl', e.target.value)} placeholder="https://services2.arcgis.com/.../FeatureServer/0" />
         <div style={hint}>Utilizzata dai Responsabili istruttoria tecnica delle Aree Agraria e Tecnica e dall'Amministratore.</div>

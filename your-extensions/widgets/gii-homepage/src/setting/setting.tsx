@@ -541,7 +541,7 @@ function TextStyleControls(p: {
 const ROLE_OPTIONS = [
   {value:'*',label:'Tutti'},{value:'TR',label:'Tecnico rilevatore'},{value:'IT',label:'Istruttore tecnico'},
   {value:'CS',label:'Capo Settore'},{value:'RIT',label:'Responsabile istruttoria tecnica'},{value:'RIA',label:'Responsabile istruttoria amministrativa'},{value:'DT',label:'Direttore tecnico'},
-  {value:'DA',label:'Direttore amministrativo'},{value:'RIA',label:'Responsabile istruttoria amministrativa'},
+  {value:'DA',label:'Direttore amministrativo'},
   {value:'IA',label:'Istruttore amministrativo'},{value:'ADMIN',label:'Amministratore'}
 ]
 const ICON_OPTIONS = [

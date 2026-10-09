@@ -198,11 +198,30 @@ function colorWithAlpha(color: string, factor: number): string {
   return s
 }
 
-function NavButton(p: { item: NavItem; cfg: any; idx: number; currentPageId: string | null; animate: boolean }) {
+// Gruppi di pagine collegate da uno stesso nav orizzontale (es. Prezzari / Voci interne /
+// Analisi prezzi / Parametri / Consultazione): per il nav verticale sono un'unica sezione.
+function buildHorizontalNavPageGroups (appConfig: any): string[][] {
+  const groups: string[][] = []
+  try {
+    const raw: any = appConfig?.widgets || {}
+    const widgets: any = typeof raw?.asMutable === 'function' ? raw.asMutable({ deep: true }) : raw
+    Object.values<any>(widgets || {}).forEach((w: any) => {
+      if (!String(w?.uri || '').includes('gii-nav-orizzontale')) return
+      const items: any[] = Array.isArray(w?.config?.items) ? w.config.items : []
+      const pages = Array.from(new Set(items
+        .map((it: any) => resolvePageIdFromAppConfig(appConfig, String(it?.hashPage || '')))
+        .filter((x: any): x is string => !!x)))
+      if (pages.length > 1) groups.push(pages)
+    })
+  } catch { /* ignore */ }
+  return groups
+}
+
+function NavButton(p: { item: NavItem; cfg: any; idx: number; currentPageId: string | null; animate: boolean; active?: boolean }) {
   const { item, cfg, currentPageId, animate } = p
   const [hov, setHov] = React.useState(false)
   const itemPageId = item.hashPage ? resolvePageId(item.hashPage) : null
-  const isActive = !!currentPageId && !!itemPageId && currentPageId === itemPageId
+  const isActive = typeof p.active === 'boolean' ? p.active : (!!currentPageId && !!itemPageId && currentPageId === itemPageId)
   const hot = hov || isActive
   // Hover e Selezionata sono due stati indipendenti.
   // Nessun fallback: se i colori Selezionata non sono impostati nella Home,
@@ -365,6 +384,19 @@ export default function Widget(props: Props) {
   const visibleItems = [...effectiveItems]
     .sort((a, b) => a.order - b.order)
     .filter(isVisible)
+  // Voce attiva: la pagina corrente; se nessuna voce punta a questa pagina, la voce della
+  // stessa sezione (pagine collegate dal nav orizzontale), così "Gestione prezzari" resta
+  // accesa anche passando a Voci interne, Analisi prezzi, ecc.
+  const pageGroups = React.useMemo(() => buildHorizontalNavPageGroups(appConfig), [appConfig])
+  const itemPage = (item: NavItem) => (item.hashPage ? resolvePageIdFromAppConfig(appConfig, item.hashPage) || resolvePageId(item.hashPage) : null)
+  const exactActive = !!currentPageId && visibleItems.some(item => itemPage(item) === currentPageId)
+  const currentGroup = currentPageId ? pageGroups.find(g => g.includes(currentPageId)) || null : null
+  const isItemActive = (item: NavItem): boolean => {
+    const pid = itemPage(item)
+    if (!pid || !currentPageId) return false
+    if (pid === currentPageId) return true
+    return !exactActive && !!currentGroup && currentGroup.includes(pid)
+  }
   const isHorizontal = cfg.direction === 'horizontal'
   const initialPadding = Number.isFinite(Number(cfg.initialPadding)) ? Number(cfg.initialPadding) : 8
 
@@ -385,7 +417,7 @@ export default function Widget(props: Props) {
         @keyframes fadeInUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
       `}</style>
       {visibleItems.map((item, i) => (
-        <NavButton key={item.id} item={item} cfg={cfg} idx={i} currentPageId={currentPageId} animate={animate}/>
+        <NavButton key={item.id} item={item} cfg={cfg} idx={i} currentPageId={currentPageId} animate={animate} active={isItemActive(item)}/>
       ))}
     </div>
   )

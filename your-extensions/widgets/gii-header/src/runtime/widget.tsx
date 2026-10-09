@@ -2789,7 +2789,8 @@ async function materializeMissingTakeChargeActivities (args: {
       const area = materializeAlertArea(alert)
       const settore = materializeAlertSector(alert)
       const ufficioId = materializeAlertOfficeId(alert)
-      if (!area || !settore || ufficioId == null) {
+      // L'ufficio non è più un dato di instradamento: bastano area e settore.
+      if (!area || !settore) {
         console.warn('[GII-Header] Materializzazione attività saltata: dati organizzativi della pratica incompleti.', {
           parentGlobalId,
           parentObjectId: Number.isFinite(parentObjectId) ? parentObjectId : null,

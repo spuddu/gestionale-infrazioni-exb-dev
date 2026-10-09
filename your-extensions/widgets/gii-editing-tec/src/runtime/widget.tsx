@@ -11639,7 +11639,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     btn.setAttribute('tabindex', enabled ? '0' : '-1')
     btn.title = enabled ? 'Centra sul punto' : 'Centra sul punto (nessun punto nella pratica)'
     btn.style.cursor = enabled ? 'pointer' : 'not-allowed'
-    btn.style.color = enabled ? '#6a6a6a' : '#c4c4c4'
+    // Disabilitato come gli altri strumenti ExB della colonna: sfondo grigio e icona chiara.
+    btn.style.color = enabled ? 'rgb(0, 0, 0)' : 'rgb(173, 171, 170)'
+    btn.style.background = enabled ? 'rgb(255, 255, 255)' : 'rgb(229, 226, 225)'
   }
   React.useEffect(() => {
     const view: any = mapView
@@ -11663,12 +11665,22 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     btn.setAttribute('role', 'button')
     btn.setAttribute('aria-label', 'Centra sul punto')
     btn.style.cssText = 'width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#fff;box-shadow:inset 0 1px 0 rgba(0,0,0,0.28)'
-    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor"/><line x1="12" y1="1" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="1" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="23" y2="12"/></svg>'
+    // Stessa icona di Dettaglio, tratto 1px come le icone ExB.
+    btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="4.5"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><path d="M8 .5v3M8 12.5v3M.5 8h3M12.5 8h3"/></svg>'
     shell.appendChild(btn)
     applyCenterPointBtnState(btn, !!centerPointRef.current)
     centerPointBtnRef.current = btn
     btn.addEventListener('click', centerOnPoint)
     btn.addEventListener('keydown', onKeyDown)
+    // Hover come gli altri strumenti della mappa ExB (regola .esri-widget--button-like:hover), solo se attivo.
+    const onMouseEnter = () => {
+      if (btn.getAttribute('aria-disabled') === 'true') return
+      btn.style.background = 'rgb(229, 226, 225)'
+      btn.style.color = 'rgb(0, 0, 0)'
+    }
+    const onMouseLeave = () => applyCenterPointBtnState(btn, btn.getAttribute('aria-disabled') !== 'true')
+    btn.addEventListener('mouseenter', onMouseEnter)
+    btn.addEventListener('mouseleave', onMouseLeave)
 
     // Il pulsante va solo nella colonna ExB, subito dopo Home. Se la colonna non è
     // (ancora) disegnata, ad es. con la mappa nascosta, si attende che compaia.
@@ -11684,6 +11696,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       try { observer?.disconnect() } catch {}
       btn.removeEventListener('click', centerOnPoint)
       btn.removeEventListener('keydown', onKeyDown)
+      btn.removeEventListener('mouseenter', onMouseEnter)
+      btn.removeEventListener('mouseleave', onMouseLeave)
       if (centerPointBtnRef.current === btn) centerPointBtnRef.current = null
       try { shell.remove() } catch {}
     }

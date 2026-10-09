@@ -560,13 +560,16 @@ const styles = `
 .gap-lookup-item { padding:8px 10px; border-bottom:1px solid #e0eaf4; cursor:pointer; }
 .gap-lookup-item:hover { background:#eef4fb; }
 .gap-table-wrap { flex:1; min-height:0; overflow:auto; border:1px solid #c5d9f1; border-radius:6px; background:var(--gap-records-card-background, #f5f9ff); }
-.gap-table { width:100%; border-collapse:collapse; font-size:12px; }
+.gap-table { width:100%; border-collapse:collapse; font-size:15px; font-weight:500; } /* come il Regolamento irriguo */
 .gap-table th { background:#1F4E79; color:#fff; padding:7px 8px; text-align:left; position:sticky; top:0; z-index:1; white-space:nowrap; }
 .gap-table td { padding:6px 8px; border-bottom:1px solid #e0eaf4; vertical-align:top; }
 .gap-table tbody tr:nth-child(odd) td { background:var(--gap-records-card-background, #f5f9ff); }
 .gap-table tbody tr:nth-child(even) td { background:linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), var(--gap-records-card-background, #f5f9ff); }
-.gap-table tbody tr.gap-row-selected td { background:#dcecff !important; }
+/* Righe come la Rubrica: hover e riga selezionata evidenziata */
 .gap-table tbody tr.gap-row-clickable { cursor:pointer; }
+.gap-table tbody tr.gap-row-clickable:hover > td { background:#ddeeff !important; }
+.gap-table tbody tr.gap-row-selected > td { background:#cfe6ff !important; color:#08233f; }
+.gap-table tbody tr.gap-row-selected > td:first-child { box-shadow:inset 4px 0 0 #1F4E79; font-weight:700; }
 .gap-msg { padding:7px 12px; border-radius:4px; font-size:12px; font-weight:700; }
 .gap-ok { background:#e2efda; color:#375623; border:1px solid #b8d4b0; }
 .gap-err { background:#fce4e4; color:#c00; border:1px solid #f5b8b8; }

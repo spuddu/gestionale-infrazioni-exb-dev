@@ -1,6 +1,6 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, type AllWidgetProps } from 'jimu-core'
+import { React, jsx, type AllWidgetProps, getAppStore } from 'jimu-core'
 import { createPortal } from 'react-dom'
 import type { IMConfig } from '../config'
 import GiiActiveToggle from '../../../_shared/gii-ui/active-toggle'
@@ -295,7 +295,7 @@ const styles = `
   .gns-btn-new { background: #375623; color: #fff; }
   .gns-btn-export { background: #1B6584; color: #fff; }
   .gns-table-wrap { flex: 1; overflow: auto; border: 1px solid #c5d9f1; border-radius: 6px; min-height: 0; background: var(--gns-records-card-background, #f5f9ff); }
-  .gns-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .gns-table { width: 100%; border-collapse: collapse; font-size: 15px; font-weight: 500; } /* come il Regolamento irriguo */
   .gns-table th { background: #1F4E79; color: #fff; padding: 7px 8px; text-align: left; position: sticky; top: 0; z-index: 1; white-space: nowrap; }
   .gns-table td { padding: 6px 8px; border-bottom: 1px solid #e0eaf4; vertical-align: middle; }
   .gns-table tbody tr:nth-child(odd) td { background: var(--gns-records-card-background, #f5f9ff); }
@@ -305,7 +305,11 @@ const styles = `
   .gns.gns-editing-lock .gns-form { position: relative; z-index: 10; pointer-events: auto; }
   .gns-table-attrezzature tbody tr:nth-child(odd) td { background: #ffffff; }
   .gns-table-attrezzature tbody tr:nth-child(even) td { background: #eaf2fb; }
-  .gns-table tr:hover td, .gns-table-attrezzature tbody tr:hover td { background: #d8eaff; }
+  /* Righe come la Rubrica: selezionabili, hover e riga selezionata evidenziata */
+  .gns-table tbody tr { cursor:pointer; }
+  .gns-table tbody tr:hover > td { background:#ddeeff !important; }
+  .gns-table tbody tr.gns-row-sel > td { background:#cfe6ff !important; color:#08233f; }
+  .gns-table tbody tr.gns-row-sel > td:first-child { box-shadow:inset 4px 0 0 #1F4E79; font-weight:700; }
   .gns-act { cursor: pointer; font-size: 11px; padding: 2px 8px; border-radius: 3px; border: none; margin-right: 4px; font-weight: bold; }
   .gns-act-edit { background: #1B6584; color: #fff; }
   .gns-act-del { background: #c00; color: #fff; }
@@ -523,7 +527,27 @@ function normalizeAreaCode(...values: any[]): string {
 
 function normalizeGiiAccessCode(v: any): string { return String(v ?? '').trim().toUpperCase().replace(/-/g, '_') }
 
-function getAccessContext(): AccessContext {
+// Schede ammesse dall'ambito dell'istanza (impostazione "Ambito"); il ruolo filtra comunque.
+const DATASETS_BY_AMBITO: Record<string, DatasetKey[]> = {
+  tecnico: ['notaSpese', 'attrezzature'],
+  amministrativo: ['sanzioniAmm']
+}
+
+// Widget da coprire durante la modifica: header e nav GII presenti nell'app (oltre agli id storici).
+function getGiiLockWidgetIds (): string[] {
+  const ids = new Set<string>(['widget_840', 'widget_1082', 'widget_1111'])
+  try {
+    const raw: any = (getAppStore()?.getState?.() as any)?.appConfig?.widgets || {}
+    const widgets: any = typeof raw?.asMutable === 'function' ? raw.asMutable({ deep: true }) : raw
+    Object.entries<any>(widgets || {}).forEach(([id, w]) => {
+      const uri = String(w?.uri || '')
+      if (uri.includes('gii-header') || uri.includes('gii-nav')) ids.add(id)
+    })
+  } catch {}
+  return Array.from(ids)
+}
+
+function getAccessContext(ambito?: string): AccessContext {
   const user: any = (window as any).__giiUserRole || {}
   const profiloCod = normalizeGiiAccessCode(user?.profiloCod ?? user?.profilo_cod ?? user?.profileCode ?? user?.profile_code)
   const ruoloCod = normalizeRoleCode(user?.ruoloCod, user?.ruolo_cod, user?.roleCod, user?.roleCode, user?.role_code, profiloCod)
@@ -559,7 +583,9 @@ function getAccessContext(): AccessContext {
   const assignments = Array.isArray(user?.assignments) ? user.assignments : []
   assignments.forEach(applyAssignment)
 
-  const allowedDatasets: DatasetKey[] = ['notaSpese', 'sanzioniAmm', 'attrezzature'].filter((key) => allowed.has(key as DatasetKey)) as DatasetKey[]
+  const byAmbito = DATASETS_BY_AMBITO[String(ambito || '').trim().toLowerCase()] || null
+  const allowedDatasets: DatasetKey[] = (['notaSpese', 'sanzioniAmm', 'attrezzature'] as DatasetKey[])
+    .filter((key) => allowed.has(key) && (!byAmbito || byAmbito.includes(key)))
   return { ruoloCod, areaCod, profiloCod, allowedDatasets, isAdmin }
 }
 
@@ -674,9 +700,11 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const detailCardBackgroundColor = String(cfg.detailCardBackgroundColor || '#f5f9ff')
   const recordsCardBackgroundColor = String(cfg.recordsCardBackgroundColor || '#f5f9ff')
 
-  const [access, setAccess] = React.useState<AccessContext>(getAccessContext())
-  const [activeDataset, setActiveDataset] = React.useState<DatasetKey | null>(() => getAccessContext().allowedDatasets[0] || null)
+  const ambito = String(cfg.ambito || 'tutti')
+  const [access, setAccess] = React.useState<AccessContext>(() => getAccessContext(ambito))
+  const [activeDataset, setActiveDataset] = React.useState<DatasetKey | null>(() => getAccessContext(ambito).allowedDatasets[0] || null)
   const [rows, setRows] = React.useState<any[]>([])
+  const [selectedRowKey, setSelectedRowKey] = React.useState<any>(null)
   const [form, setForm] = React.useState<any>(emptyForm())
   const [editing, setEditing] = React.useState(false)
 
@@ -694,7 +722,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       const viewW = Math.max(0, win.innerWidth || doc.documentElement?.clientWidth || 0)
       const viewH = Math.max(0, win.innerHeight || doc.documentElement?.clientHeight || 0)
       const next: GiiEditLockRect[] = []
-      for (const id of ['widget_840', 'widget_1082', 'widget_1111']) {
+      for (const id of getGiiLockWidgetIds()) {
         const el = findGiiWidgetElement(doc, id)
         const rect = el ? getGiiVisibleLockRect(el, id, viewW, viewH, win) : null
         if (rect) next.push(rect)
@@ -723,7 +751,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       if (typeof ResizeObserver !== 'undefined') {
         ro = new ResizeObserver(schedule)
         const observed = new Set<Element>()
-        for (const id of ['widget_840', 'widget_1082', 'widget_1111']) {
+        for (const id of getGiiLockWidgetIds()) {
           const el = findGiiWidgetElement(doc, id)
           if (el && !observed.has(el)) { observed.add(el); ro.observe(el) }
         }
@@ -790,14 +818,14 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
 
   React.useEffect(() => {
     const refresh = () => {
-      const next = getAccessContext()
+      const next = getAccessContext(ambito)
       setAccess(next)
       setActiveDataset((current) => current && next.allowedDatasets.includes(current) ? current : (next.allowedDatasets[0] || null))
     }
     refresh()
     window.addEventListener('gii:userLoaded', refresh)
     return () => window.removeEventListener('gii:userLoaded', refresh)
-  }, [])
+  }, [ambito])
 
   const load = React.useCallback(async () => {
     if (!resolvedUrl) { setRows([]); return }
@@ -1109,7 +1137,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
               <tbody>
                 {rows.length === 0 && <tr><td colSpan={(definition.hasCategory ? 10 : 9) + (showParameterCode ? 1 : 0) - (definition.key === 'attrezzature' ? 1 : 0)} className="gns-empty">Nessun parametro presente</td></tr>}
                 {rows.map((row, index) => (
-                  <tr key={row.objectid || index}>
+                  <tr key={row.objectid || index} className={selectedRowKey === (row.objectid || index) || (editing && form.objectid != null && form.objectid === row.objectid) ? 'gns-row-sel' : ''} onClick={() => setSelectedRowKey(row.objectid || index)}>
                     {showParameterCode && <td>{formatCell(row.codice_parametro, 'text')}</td>}
                     {definition.hasCategory && <td>{categoryLabel(row.categoria_parametro)}</td>}
                     <td>{formatCell(row.descrizione, 'text')}</td>

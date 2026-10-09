@@ -606,11 +606,16 @@ const styles = `
 .gpw-warning { background:#b45f06; color:#fff; }
 .gpw-danger { background:#c00; color:#fff; }
 .gpw-table-wrap { flex:1; min-height:0; overflow:auto; border:1px solid #c5d9f1; border-radius:6px; background:var(--gpw-records-card-background, #f5f9ff); }
-.gpw-table { width:100%; border-collapse:collapse; font-size:12px; }
+.gpw-table { width:100%; border-collapse:collapse; font-size:15px; font-weight:500; } /* come il Regolamento irriguo */
 .gpw-table th { background:#1F4E79; color:#fff; padding:7px 8px; text-align:left; position:sticky; top:0; z-index:1; white-space:nowrap; }
 .gpw-table td { padding:6px 8px; border-bottom:1px solid #e0eaf4; vertical-align:middle; }
 .gpw-table tbody tr:nth-child(odd) td { background:var(--gpw-records-card-background, #f5f9ff); }
 .gpw-table tbody tr:nth-child(even) td { background:linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), var(--gpw-records-card-background, #f5f9ff); }
+/* Righe come la Rubrica: selezionabili, hover e riga selezionata evidenziata */
+.gpw-table tbody tr { cursor:pointer; }
+.gpw-table tbody tr:hover > td { background:#ddeeff !important; }
+.gpw-table tbody tr.gpw-row-sel > td { background:#cfe6ff !important; color:#08233f; }
+.gpw-table tbody tr.gpw-row-sel > td:first-child { box-shadow:inset 4px 0 0 #1F4E79; font-weight:700; }
 .gpw-msg { padding:7px 12px; border-radius:4px; font-size:12px; font-weight:700; }
 .gpw-msg-ok { background:#e2efda; color:#375623; border:1px solid #b8d4b0; }
 .gpw-msg-err { background:#fce4e4; color:#c00; border:1px solid #f5b8b8; }
@@ -629,6 +634,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const detailCardBackgroundColor = String(cfg.detailCardBackgroundColor || '#f5f9ff')
   const recordsCardBackgroundColor = String(cfg.recordsCardBackgroundColor || '#f5f9ff')
   const [rows, setRows] = React.useState<ImportRow[]>([])
+  const [selectedRowId, setSelectedRowId] = React.useState<any>(null)
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [msg, setMsg] = React.useState<{ text: string; ok: boolean } | null>(null)
@@ -869,7 +875,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
             <thead><tr><th>Anno</th><th>Tipo</th><th>Descrizione</th><th>Stato</th><th>File</th><th>Articoli</th><th>Analisi</th><th>Importato il</th><th>Azioni</th></tr></thead>
             <tbody>
               {rows.length === 0 ? <tr><td colSpan={9} style={{ padding: 16, textAlign: 'center', color: '#6b7280' }}>{loading ? 'Caricamento…' : 'Nessun import registrato.'}</td></tr> : rows.map((r) => (
-                <tr key={r.objectid}>
+                <tr key={r.objectid} className={selectedRowId === r.objectid ? 'gpw-row-sel' : ''} onClick={() => setSelectedRowId(r.objectid)}>
                   <td>{num(r.anno_prezzario) || ''}</td>
                   <td>{importTypeLabel(r.tipo_prezzario)}</td>
                   <td>{r.descrizione_import || ''}</td>

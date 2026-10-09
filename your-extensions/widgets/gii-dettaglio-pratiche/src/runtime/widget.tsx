@@ -2169,8 +2169,10 @@ function MapTabContent (props: {
     btn.setAttribute('aria-disabled', enabled ? 'false' : 'true')
     btn.setAttribute('tabindex', enabled ? '0' : '-1')
     btn.title = enabled ? 'Centra sul punto' : 'Centra sul punto (nessun punto nella pratica)'
+    // Grafica degli strumenti ExB: attivo bianco/nero, disabilitato grigio con icona chiara.
     btn.style.cursor = enabled ? 'pointer' : 'not-allowed'
-    btn.style.opacity = enabled ? '1' : '0.45'
+    btn.style.backgroundColor = enabled ? 'rgb(255, 255, 255)' : 'rgb(229, 226, 225)'
+    btn.style.color = enabled ? 'rgb(0, 0, 0)' : 'rgb(173, 171, 170)'
   }
   const setCenterPoint = (pt: any | null) => {
     centerPointRef.current = pt
@@ -2195,10 +2197,9 @@ function MapTabContent (props: {
           loadEsriModule<any>('esri/WebMap')
         ])
         if (cancelled || !containerRef.current) return
+        // Zoom e Bussola non sono componenti predefiniti: vengono posizionati come nella mappa di editing-tec.
         const uiComponents: string[] = []
-        if (mc.showZoom) uiComponents.push('zoom')
         if (mc.showAttribution) uiComponents.push('attribution')
-        if (mc.showCompass) uiComponents.push('compass')
         const map = mc.webMapItemId
           ? new WebMap({ portalItem: { id: String(mc.webMapItemId) } })
           : new Map({ basemap: mc.basemap || 'topo-vector' })
@@ -2238,55 +2239,280 @@ function MapTabContent (props: {
           }
         } catch {}
         if (cancelled) { view.destroy(); return }
-        if (mc.showHome) {
-          try {
-            const Home = await loadEsriModule<any>('esri/widgets/Home')
-            const home = new Home({ view })
-            if (defaultViewpointRef.current) { try { home.viewpoint = defaultViewpointRef.current.clone() } catch {} }
-            view.ui.add(home, 'top-left')
-          } catch {}
+        // Pulsanti con la grafica degli strumenti ExB (valori letti dalla mappa di editing-tec):
+        // 32x32, sfondo bianco e icona nera; hover rgb(229,226,225); disabilitato rgb(229,226,225) con icona rgb(173,171,170).
+        const EXB_BG = 'rgb(255, 255, 255)'
+        const EXB_FG = 'rgb(0, 0, 0)'
+        const EXB_HOVER_BG = 'rgb(229, 226, 225)'
+        const EXB_DISABLED_FG = 'rgb(173, 171, 170)'
+        const EXB_SELECTED_BG = 'rgb(0, 71, 134)'
+        const SEP_SHADOW = 'inset 0 1px 0 rgba(0,0,0,0.28)'
+        const paintToolBtn = (b: HTMLElement, hover = false) => {
+          const disabled = b.getAttribute('aria-disabled') === 'true'
+          const selected = b.getAttribute('aria-pressed') === 'true'
+          b.style.backgroundColor = disabled ? EXB_HOVER_BG : (selected ? EXB_SELECTED_BG : (hover ? EXB_HOVER_BG : EXB_BG))
+          b.style.color = disabled ? EXB_DISABLED_FG : (selected ? 'rgb(255, 255, 255)' : EXB_FG)
+          b.style.cursor = disabled ? 'not-allowed' : 'pointer'
         }
-        // Pulsante "Centra sul punto" (stesso zoom del punto da impostazioni) sotto Home; disabilitato senza punto.
+        const makeToolBtn = (label: string, svg: string, onClick: () => void): HTMLDivElement => {
+          const b = document.createElement('div')
+          b.setAttribute('role', 'button')
+          b.setAttribute('tabindex', '0')
+          b.setAttribute('aria-label', label)
+          b.title = label
+          b.style.cssText = 'width:32px;height:32px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;box-sizing:border-box'
+          b.innerHTML = svg
+          const run = () => { if (b.getAttribute('aria-disabled') !== 'true') onClick() }
+          b.addEventListener('click', run)
+          b.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); run() } })
+          b.addEventListener('mouseenter', () => paintToolBtn(b, true))
+          b.addEventListener('mouseleave', () => paintToolBtn(b, false))
+          paintToolBtn(b)
+          return b
+        }
+        const setToolBtnEnabled = (b: HTMLDivElement, enabled: boolean) => {
+          b.setAttribute('aria-disabled', enabled ? 'false' : 'true')
+          b.setAttribute('tabindex', enabled ? '0' : '-1')
+          paintToolBtn(b)
+        }
+        // Icone ExB (viewBox 16x16), copiate dalla mappa di editing-tec.
+        const exbIcon = (d: string, fillRule: 'nonzero' | 'evenodd' = 'nonzero') => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="${fillRule}" clip-rule="${fillRule}" d="${d}"></path></svg>`
+        const ICON_BASEMAP = 'M.1 6.9h6.8V.1H.1zm6-.8H3.985c.077-.403.25-.78.506-1.102a4.6 4.6 0 0 0 1.609.805zm0-1.128a3.8 3.8 0 0 1-1.006-.523c.31-.203.65-.358 1.006-.459zM6.1.9v2.266a4.2 4.2 0 0 0-1.613.73 6 6 0 0 1-1.1-1.767l.002-.004-.004-.001A8 8 0 0 1 2.99.9zM.9.9h1.266a9 9 0 0 0 .359 1.249A1.93 1.93 0 0 1 .9 3.188zm0 3.09a2.83 2.83 0 0 0 2.006-.966c.262.519.594 1 .987 1.428A3.37 3.37 0 0 0 3.17 6.1H.9zM9.1.1v6.8h6.8V.1zm.8.8h4.063a.37.37 0 0 1-.045.2.6.6 0 0 1-.438.176 1.64 1.64 0 0 0-1.175.49.9.9 0 0 0-.203.708c-.001.007-.114.736-.607.742a.74.74 0 0 0-.719.384.83.83 0 0 0-.026.6H9.9zm5.2 5.2H9.9V5h2.296l-.474-.639a1.6 1.6 0 0 1-.192-.346c1.041-.03 1.37-1.188 1.365-1.587a.2.2 0 0 1 .028-.154c.031-.037.166-.162.624-.2.419 0 .81-.205 1.049-.549a1.13 1.13 0 0 0 .16-.625h.344zm-15 9.8h6.8V9.1H.1zm.8-6h5.2v.46l-2 1.973v.867l-3.2-.089zm0 4.01 4 .112v-1.355l1.2-1.182V15.1H.9zm8.2 1.99h6.8V9.1H9.1zm6-.8h-1.792l-1.27-1.572 1.468-1.468 1.594 1.605zm0-5.2v2.628L12.49 9.9zm-5.2 0h1.46l1.581 1.592-1.978 1.98 1.316 1.628H9.9z'
+        const ICON_MEASURE = 'M0 9v6h16V9zm15 3h-1v2h-1v-3h-1v3h-1v-2h-1v2H9v-3H8v3H7v-2H6v2H5v-3H4v3H3v-2H2v2H1v-4h14zm.18-7.5-2.85 2.85-.71-.7L13.23 5H9V4h4.32l-1.7-1.69.71-.7zM2.68 4H7v1H2.77l1.61 1.65-.71.7L.82 4.5l2.85-2.85.71.7z'
+        const ICON_LAYERS = 'M8 1 .5 4.75 8 8.5l7.5-3.75zm0 1.12 5.26 2.63L8 7.38 2.74 4.75zM1.62 7.38.5 7.94 8 11.69l7.5-3.75-1.12-.56L8 10.57zm0 3.19-1.12.56L8 14.88l7.5-3.75-1.12-.56L8 13.76z'
+        // Schermo intero ExB: angoli verso l'esterno per entrare, verso l'interno per uscire.
+        const ICON_FULLSCREEN = 'M1 11v4.001L5 15v1H0v-5zm15 0v5h-5v-1l4 .001V11zM5 0v1L1 .999V5H0V0zm11 0v5h-1V.999L11 1V0z'
+        const ICON_FULLSCREEN_EXIT = 'M5 11v5H4v-4.001L0 12v-1zm11 0v1l-4-.001V16h-1v-5zM5 0v5H0V4l4 .001V0zm7 0v4.001L16 4v1h-5V0z'
+        const ICON_PREV = 'M.4 8 8 1.92V5.5h7v5H8v3.58zM7 9.5h7v-3H7V4L2 8l5 4z'
+        const ICON_NEXT = 'm16 8-7.6 6.08V10.5h-7v-5h7V1.92zM9.4 6.5h-7v3h7V12l5-4-5-4z'
+        // Centra sul punto: icona GII nello stesso tratto (1px) delle icone ExB.
+        const CENTER_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="4.5"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><path d="M8 .5v3M8 12.5v3M.5 8h3M12.5 8h3"/></svg>'
+
+        // ── Strumenti disposti come nella mappa di editing-tec (Luoghi e dati) ──
+        // In alto a sinistra, in riga: Mappa di base, Misura (+ Elenco layer). In alto a destra: Schermo intero.
+        // Colonna in basso a destra: Bussola, Posizione, Estensione prec./succ., Zoom, Home + Centra sul punto.
+        // Bussola, Posizione, Zoom e Home usano gli stessi componenti ArcGIS della mappa ExB, se caricati nella pagina.
         try {
-          const btn = document.createElement('div')
-          btn.className = 'esri-widget--button esri-widget esri-interactive'
-          btn.setAttribute('role', 'button')
-          btn.setAttribute('aria-label', 'Centra sul punto')
-          btn.style.cssText = 'display:flex;align-items:center;justify-content:center'
-          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor"/><line x1="12" y1="1" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="1" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="23" y2="12"/></svg>'
-          const centerOnPoint = () => {
+          const loadSafe = (path: string) => loadEsriModule<any>(path).catch(() => null)
+          const [ZoomW, CompassW, LocateW, HomeW, BasemapGalleryW, MeasurementW, LayerListW, reactiveUtils] = await Promise.all([
+            loadSafe('esri/widgets/Zoom'), loadSafe('esri/widgets/Compass'), loadSafe('esri/widgets/Locate'),
+            loadSafe('esri/widgets/Home'), loadSafe('esri/widgets/BasemapGallery'), loadSafe('esri/widgets/Measurement'),
+            mc.showLayerList ? loadSafe('esri/widgets/LayerList') : Promise.resolve(null), loadSafe('esri/core/reactiveUtils')
+          ])
+          if (cancelled) { view.destroy(); return }
+          const hasComponent = (tag: string) => { try { return !!window.customElements?.get?.(tag) } catch { return false } }
+          // Componente ArcGIS (come ExB) collegato alla vista; se non disponibile, widget equivalente.
+          const makeArcgisTool = (tag: string, WidgetCtor: any, extra?: (el: any) => void, height = 32): HTMLElement | null => {
+            const box = document.createElement('div')
+            box.style.cssText = `width:32px;height:${height}px;flex:0 0 auto`
+            try {
+              if (hasComponent(tag)) {
+                const el: any = document.createElement(tag)
+                el.view = view
+                if (extra) extra(el)
+                box.appendChild(el)
+                return box
+              }
+              if (WidgetCtor) {
+                const inner = document.createElement('div')
+                box.appendChild(inner)
+                const w = new WidgetCtor({ view, container: inner })
+                if (extra) extra(w)
+                return box
+              }
+            } catch {}
+            return null
+          }
+
+          // In alto a sinistra: riga con pannelli a comparsa (uno aperto alla volta).
+          const tlWrap = document.createElement('div')
+          tlWrap.style.cssText = 'position:relative'
+          const tlRow = document.createElement('div')
+          tlRow.style.cssText = 'display:flex;flex-direction:row;align-items:flex-start'
+          tlWrap.appendChild(tlRow)
+          const panel = document.createElement('div')
+          panel.className = 'esri-widget'
+          panel.style.cssText = 'position:absolute;top:42px;left:0;display:none;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);padding:8px;width:260px;max-height:320px;overflow:auto;z-index:2'
+          tlWrap.appendChild(panel)
+          let openKey = ''
+          const panelBtns: Record<string, HTMLDivElement> = {}
+          const panelContents: Record<string, HTMLElement> = {}
+          const togglePanel = (key: string) => {
+            openKey = openKey === key ? '' : key
+            Object.entries(panelBtns).forEach(([k, b]) => { b.setAttribute('aria-pressed', k === openKey ? 'true' : 'false'); paintToolBtn(b) })
+            Object.entries(panelContents).forEach(([k, el]) => { el.style.display = k === openKey ? '' : 'none' })
+            panel.style.display = openKey ? 'block' : 'none'
+          }
+          const addPanelTool = (key: string, label: string, icon: string, content: HTMLElement) => {
+            const b = makeToolBtn(label, exbIcon(icon), () => togglePanel(key))
+            b.style.marginRight = '10px'
+            panelBtns[key] = b
+            content.style.display = 'none'
+            panelContents[key] = content
+            panel.appendChild(content)
+            tlRow.appendChild(b)
+          }
+          if (BasemapGalleryW) {
+            try {
+              const c = document.createElement('div')
+              const inner = document.createElement('div')
+              c.appendChild(inner)
+              new BasemapGalleryW({ view, container: inner })
+              addPanelTool('basemap', 'Basemap', ICON_BASEMAP, c)
+            } catch {}
+          }
+          if (MeasurementW) {
+            try {
+              const c = document.createElement('div')
+              c.style.cssText = 'display:flex;flex-direction:column;gap:6px'
+              const bar = document.createElement('div')
+              bar.style.cssText = 'display:flex;gap:6px'
+              const measDiv = document.createElement('div')
+              const measurement = new MeasurementW({ view, container: measDiv, linearUnit: 'metric', areaUnit: 'metric' })
+              const mkBtn = (text: string, fn: () => void) => {
+                const b = document.createElement('button')
+                b.type = 'button'
+                b.textContent = text
+                b.className = 'esri-button esri-button--secondary'
+                b.style.cssText = 'flex:1 1 auto;padding:4px 6px;font-size:12px'
+                b.addEventListener('click', fn)
+                return b
+              }
+              bar.appendChild(mkBtn('Distanza', () => { try { measurement.activeTool = 'distance' } catch {} }))
+              bar.appendChild(mkBtn('Area', () => { try { measurement.activeTool = 'area' } catch {} }))
+              bar.appendChild(mkBtn('Cancella', () => { try { measurement.clear() } catch {} }))
+              c.appendChild(bar)
+              c.appendChild(measDiv)
+              addPanelTool('measure', 'Misura', ICON_MEASURE, c)
+            } catch {}
+          }
+          if (LayerListW) {
+            try {
+              const c = document.createElement('div')
+              const inner = document.createElement('div')
+              c.appendChild(inner)
+              new LayerListW({ view, container: inner })
+              addPanelTool('layers', 'Elenco layer', ICON_LAYERS, c)
+            } catch {}
+          }
+          if (tlRow.childElementCount) view.ui.add(tlWrap, 'top-left')
+
+          // Colonna in basso a destra.
+          const brCol = document.createElement('div')
+          brCol.style.cssText = 'display:flex;flex-direction:column;align-items:flex-end'
+          const pushCol = (el: HTMLElement | null) => {
+            if (!el) return
+            if (brCol.childElementCount) el.style.marginTop = '10px'
+            brCol.appendChild(el)
+          }
+          if (mc.showCompass) {
+            const compass = makeArcgisTool('arcgis-compass', CompassW)
+            if (compass) { compass.style.borderRadius = '50%'; compass.style.overflow = 'hidden' }
+            pushCol(compass)
+          }
+          pushCol(makeArcgisTool('arcgis-locate', LocateW))
+
+          // Estensione precedente / successiva (cronologia delle viste, come lo strumento ExB).
+          try {
+            const history: any[] = []
+            let histIdx = -1
+            let navigating = false
+            const syncNav = () => {
+              setToolBtnEnabled(prevBtn, histIdx > 0)
+              setToolBtnEnabled(nextBtn, histIdx >= 0 && histIdx < history.length - 1)
+            }
+            const prevBtn = makeToolBtn('Estensione precedente', exbIcon(ICON_PREV, 'evenodd'), () => {
+              if (histIdx <= 0) return
+              histIdx -= 1; navigating = true
+              view.goTo(history[histIdx], { duration: 400 }).catch(() => { navigating = false })
+              syncNav()
+            })
+            const nextBtn = makeToolBtn('Estensione successiva', exbIcon(ICON_NEXT, 'evenodd'), () => {
+              if (histIdx >= history.length - 1) return
+              histIdx += 1; navigating = true
+              view.goTo(history[histIdx], { duration: 400 }).catch(() => { navigating = false })
+              syncNav()
+            })
+            nextBtn.style.boxShadow = SEP_SHADOW
+            const sameVp = (a: any, b: any) => {
+              try {
+                const ca = a?.targetGeometry, cb = b?.targetGeometry
+                return Math.abs(Number(a?.scale) - Number(b?.scale)) < 0.5 && Math.abs(Number(ca?.x) - Number(cb?.x)) < 0.5 && Math.abs(Number(ca?.y) - Number(cb?.y)) < 0.5
+              } catch { return false }
+            }
+            const record = () => {
+              if (navigating) { navigating = false; return }
+              const vp = view.viewpoint?.clone?.()
+              if (!vp || (histIdx >= 0 && sameVp(history[histIdx], vp))) return
+              history.splice(histIdx + 1)
+              history.push(vp)
+              if (history.length > 50) history.shift()
+              histIdx = history.length - 1
+              syncNav()
+            }
+            record()
+            syncNav()
+            if (reactiveUtils) {
+              const h = reactiveUtils.when(() => view.stationary, () => record())
+              try { view.addHandles?.(h) } catch {}
+            }
+            const nav = document.createElement('div')
+            nav.style.cssText = 'display:flex;flex-direction:column'
+            nav.appendChild(prevBtn)
+            nav.appendChild(nextBtn)
+            pushCol(nav)
+          } catch {}
+
+          if (mc.showZoom) pushCol(makeArcgisTool('arcgis-zoom', ZoomW, (el: any) => { try { el.layout = 'vertical' } catch {} }, 64))
+
+          // Home + Centra sul punto (stesso zoom del punto da impostazioni), attaccati; Centra disabilitato senza punto.
+          const centerBtn = makeToolBtn('Centra sul punto', CENTER_SVG, () => {
             const pt = centerPointRef.current
             if (!pt) return
             view.goTo({ target: pt, zoom: mc.pointZoom || 19 }, { duration: 600 }).catch(() => {})
+          })
+          centerPointBtnRef.current = centerBtn
+          setCenterPointBtnEnabled(centerBtn, !!centerPointRef.current)
+          const homeGroup = document.createElement('div')
+          homeGroup.style.cssText = 'display:flex;flex-direction:column'
+          if (mc.showHome) {
+            const homeBox = makeArcgisTool('arcgis-home', HomeW, (el: any) => {
+              if (defaultViewpointRef.current) { try { el.viewpoint = defaultViewpointRef.current.clone() } catch {} }
+            })
+            if (homeBox) { homeGroup.appendChild(homeBox); centerBtn.style.boxShadow = SEP_SHADOW }
           }
-          btn.addEventListener('click', centerOnPoint)
-          btn.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); centerOnPoint() } })
-          centerPointBtnRef.current = btn
-          setCenterPointBtnEnabled(btn, !!centerPointRef.current)
-          view.ui.add(btn, { position: 'top-left', index: mc.showHome ? 1 : 0 })
+          homeGroup.appendChild(centerBtn)
+          pushCol(homeGroup)
+          view.ui.add(brCol, 'bottom-right')
         } catch {}
-        let FullscreenCtor: any = null
+        // Schermo intero con la stessa grafica dello strumento ExB, in alto a destra.
+        const isDocFullscreen = () => !!((document as any).fullscreenElement || (document as any).webkitFullscreenElement)
         const recreateFullscreenWidget = () => {
           try {
             if (!mc.showFullscreen) return
-            if (!FullscreenCtor) return
             const current = fullscreenWidgetRef.current
             if (current) {
               try { view.ui.remove(current) } catch {}
               try { current.destroy?.() } catch {}
+              try { current.remove?.() } catch {}
               fullscreenWidgetRef.current = null
             }
-            const fs = new FullscreenCtor({ view, element: wrapperRef.current || containerRef.current })
-            fullscreenWidgetRef.current = fs
-            view.ui.add(fs, 'top-left')
+            const inFs = isDocFullscreen()
+            const fsBtn = makeToolBtn(
+              inFs ? 'Esci da schermo intero' : 'Schermo Intero',
+              exbIcon(inFs ? ICON_FULLSCREEN_EXIT : ICON_FULLSCREEN),
+              () => {
+                const el: any = wrapperRef.current || containerRef.current
+                const d: any = document
+                if (isDocFullscreen()) { (d.exitFullscreen || d.webkitExitFullscreen)?.call(d) }
+                else if (el) { (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el) }
+              }
+            )
+            fullscreenWidgetRef.current = fsBtn
+            view.ui.add(fsBtn, { position: 'top-right', index: 0 })
           } catch {}
         }
-        if (mc.showFullscreen) {
-          try {
-            FullscreenCtor = await loadEsriModule<any>('esri/widgets/Fullscreen')
-            recreateFullscreenWidget()
-          } catch {}
-        }
+        if (mc.showFullscreen) recreateFullscreenWidget()
 
         const syncViewAfterFullscreenChange = () => {
           try {
@@ -2301,6 +2527,7 @@ function MapTabContent (props: {
             try { window.requestAnimationFrame(doResize) } catch { doResize() }
             window.setTimeout(doResize, 60)
             window.setTimeout(doResize, 180)
+            if (inFs) window.setTimeout(() => { try { recreateFullscreenWidget() } catch {} }, 40)
             if (!inFs) {
               window.setTimeout(() => {
                 try { setMapInstanceKey(k => k + 1) } catch {}
@@ -2328,23 +2555,6 @@ function MapTabContent (props: {
           document.addEventListener('webkitfullscreenchange' as any, syncViewAfterFullscreenChange as any)
           ;(view as any).__giiFullscreenSync = syncViewAfterFullscreenChange
         } catch {}
-        if (mc.showLayerList) {
-          try {
-            const [LayerList, Expand] = await Promise.all([
-              loadEsriModule<any>('esri/widgets/LayerList'),
-              loadEsriModule<any>('esri/widgets/Expand')
-            ])
-            const layerList = new LayerList({ view })
-            const expand = new Expand({
-              view,
-              content: layerList,
-              expandIconClass: 'esri-icon-layer-list',
-              mode: 'floating',
-              expanded: false
-            })
-            view.ui.add(expand, 'top-right')
-          } catch {}
-        }
         if (mc.showScaleBar) {
           try {
             const ScaleBar = await loadEsriModule<any>('esri/widgets/ScaleBar')
@@ -2377,6 +2587,7 @@ function MapTabContent (props: {
         if (fs) {
           try { viewRef.current?.ui?.remove?.(fs) } catch {}
           try { fs.destroy?.() } catch {}
+          try { fs.remove?.() } catch {}
           fullscreenWidgetRef.current = null
         }
       } catch {}
@@ -2577,17 +2788,17 @@ function MapTabContent (props: {
     <div key={mapInstanceKey} ref={wrapperRef} style={{ width: '100%', flex: '1 1 auto', minHeight: 0, position: 'relative', borderRadius: 8, overflow: 'hidden' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }}/>
       {status === 'loading' && props.hasSel && (
-        <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(255,255,255,0.9)', borderRadius: 6, padding: '4px 10px', fontSize: 11, color: '#374151' }}>
+        <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', background: 'rgba(255,255,255,0.9)', borderRadius: 6, padding: '4px 10px', fontSize: 11, color: '#374151' }}>
           Caricamento posizione…
         </div>
       )}
       {status === 'nogeom' && (
-        <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(255,255,255,0.9)', borderRadius: 6, padding: '4px 10px', fontSize: 11, color: '#b45309' }}>
+        <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', background: 'rgba(255,255,255,0.9)', borderRadius: 6, padding: '4px 10px', fontSize: 11, color: '#b45309' }}>
           Nessun punto impostato per questo rapporto.
         </div>
       )}
       {status === 'error' && (
-        <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(255,255,255,0.9)', borderRadius: 6, padding: '4px 10px', fontSize: 11, color: '#b42318' }}>
+        <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', background: 'rgba(255,255,255,0.9)', borderRadius: 6, padding: '4px 10px', fontSize: 11, color: '#b42318' }}>
           Errore caricamento mappa.
         </div>
       )}

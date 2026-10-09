@@ -25,7 +25,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const recordsCardBackgroundColor = String(cfg.recordsCardBackgroundColor || '#f5f9ff')
   const tableHeaderBackgroundColor = String(cfg.tableHeaderBackgroundColor || '#1F4E79')
   const tableHeaderTextColor = String(cfg.tableHeaderTextColor || '#ffffff')
-  const tableFontSize = Number(cfg.tableFontSize || 12)
+  const tableFontSize = Number(cfg.tableFontSize || 15)
 
   const set = (key: string, value: any) => props.onSettingChange({
     id: props.id,
@@ -134,7 +134,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         </div>
 
         <label style={lbl}>Dimensione testo tabella (px)</label>
-        <input style={inp} type='number' min={9} max={22} step={0.5} value={tableFontSize} onChange={(e) => set('tableFontSize', Number(e.target.value || 12))} />
+        <input style={inp} type='number' min={9} max={22} step={0.5} value={tableFontSize} onChange={(e) => set('tableFontSize', Number(e.target.value || 15))} />
       </div>
 
       <div style={section}>

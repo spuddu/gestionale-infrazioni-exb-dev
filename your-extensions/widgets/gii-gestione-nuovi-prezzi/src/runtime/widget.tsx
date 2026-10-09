@@ -260,11 +260,16 @@ const styles = `
 .gnp-cancel { background:var(--gnp-secondary-button-background, #e0e0e0); color:var(--gnp-secondary-button-text, #333333); }
 .gnp-danger { background:var(--gnp-danger-button-background, #c00000); color:var(--gnp-danger-button-text, #ffffff); }
 .gnp-table-wrap { flex:1; min-height:0; overflow:auto; border:1px solid var(--gnp-panel-border-color, #c5d9f1); border-radius:6px; background:var(--gnp-records-card-background, #f5f9ff); }
-.gnp-table { width:100%; border-collapse:collapse; font-size:var(--gnp-table-font-size, 12px); color:var(--gnp-table-text-color, #111827); }
+.gnp-table { width:100%; border-collapse:collapse; font-weight:500; font-size:var(--gnp-table-font-size, 15px); color:var(--gnp-table-text-color, #111827); }
 .gnp-table th { background:var(--gnp-table-header-background, #1F4E79); color:var(--gnp-table-header-text, #ffffff); padding:7px 8px; text-align:left; position:sticky; top:0; z-index:1; white-space:nowrap; }
 .gnp-table td { padding:6px 8px; border-bottom:1px solid #e0eaf4; vertical-align:top; }
 .gnp-table tbody tr:nth-child(odd) td { background:var(--gnp-records-card-background, #f5f9ff); }
 .gnp-table tbody tr:nth-child(even) td { background:linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), var(--gnp-records-card-background, #f5f9ff); }
+/* Righe come la Rubrica: selezionabili, hover e riga selezionata evidenziata */
+.gnp-table tbody tr { cursor:pointer; }
+.gnp-table tbody tr:hover > td { background:#ddeeff !important; }
+.gnp-table tbody tr.gnp-row-sel > td { background:#cfe6ff !important; color:#08233f; }
+.gnp-table tbody tr.gnp-row-sel > td:first-child { box-shadow:inset 4px 0 0 #1F4E79; font-weight:700; }
 
   .gnp.gnp-editing-lock { position: relative; }
   .gnp.gnp-editing-lock::before { content: ''; position: absolute; inset: 0; z-index: 5; background: rgba(15, 23, 42, 0.22); border-radius: 6px; pointer-events: auto; }
@@ -312,7 +317,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const tableHeaderBackgroundColor = String(cfg.tableHeaderBackgroundColor || '#1F4E79')
   const tableHeaderTextColor = String(cfg.tableHeaderTextColor || '#ffffff')
   const tableTextColor = String(cfg.tableTextColor || '#111827')
-  const tableFontSize = Number(cfg.tableFontSize || 12)
+  const tableFontSize = Number(cfg.tableFontSize || 15) // predefinito come il Regolamento irriguo
   const primaryButtonBackgroundColor = String(cfg.primaryButtonBackgroundColor || '#1F4E79')
   const primaryButtonTextColor = String(cfg.primaryButtonTextColor || '#ffffff')
   const secondaryButtonBackgroundColor = String(cfg.secondaryButtonBackgroundColor || '#e0e0e0')
@@ -321,6 +326,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const dangerButtonTextColor = String(cfg.dangerButtonTextColor || '#ffffff')
 
   const [rows, setRows] = React.useState<any[]>([])
+  const [selectedRowId, setSelectedRowId] = React.useState<any>(null)
   const [filterText, setFilterText] = React.useState('')
   const [form, setForm] = React.useState<any>(emptyForm())
   const [editing, setEditing] = React.useState(false)
@@ -610,7 +616,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
               {rows.length === 0 ? (
                 <tr><td colSpan={8} style={{ padding: 16, textAlign: 'center', color: '#6b7280' }}>{loading ? 'Caricamento…' : 'Nessun Nuovo Prezzo.'}</td></tr>
               ) : rows.map((r: any) => (
-                <tr key={r.objectid}>
+                <tr key={r.objectid} className={selectedRowId === r.objectid ? 'gnp-row-sel' : ''} onClick={() => setSelectedRowId(r.objectid)}>
                   <td><b>{r.codice_voce}</b></td>
                   <td>{modalityLabel(r.modalita_voce)}</td>
                   <td>{familyDisplay(r.famiglia)}</td>

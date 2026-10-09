@@ -339,24 +339,42 @@ function renderTextWithRefs(text: string, onJump: (id: string) => void, keyPrefi
   return nodes
 }
 
-function highlightSearch(text: string, term: string, keyPrefix: string): React.ReactNode[] {
-  const t = norm(term)
-  const nt = norm(text)
-  if (!t || !nt.includes(t)) return [text]
+// Ricerca tollerante: punti e spazi tra le parole si equivalgono ("art 8" = "art. 8" = "art.8" = "art8");
+// un numero all'inizio o alla fine del termine non si attacca ad altre cifre ("art 8" non trova "art. 80").
+function searchPatternSource(term: string): string {
+  const tokens = norm(term).replace(/\./g, ' ').replace(/([a-z])(\d)/g, '$1 $2').trim().split(/\s+/).filter(Boolean)
+  if (!tokens.length) return ''
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  let src = tokens.map(esc).join('[\\s.]*')
+  if (/^\d/.test(tokens[0])) src = '(?<!\\d)' + src
+  if (/\d$/.test(tokens[tokens.length - 1])) src = src + '(?!\\d)'
+  return src
+}
 
+function searchMatches(value: any, src: string): boolean {
+  if (!src) return true
+  try { return new RegExp(src).test(norm(String(value ?? ''))) } catch { return false }
+}
+
+function highlightSearch(text: string, term: string, keyPrefix: string): React.ReactNode[] {
+  const src = searchPatternSource(term)
+  if (!src) return [text]
+  let re: RegExp
+  try { re = new RegExp(src, 'g') } catch { return [text] }
+  const nt = norm(text)
   const out: React.ReactNode[] = []
   let cursor = 0
   let idx = 0
-  while (true) {
-    const pos = nt.indexOf(t, cursor)
-    if (pos < 0) {
-      out.push(text.slice(cursor))
-      break
-    }
+  let m: RegExpExecArray | null
+  while ((m = re.exec(nt)) !== null) {
+    if (!m[0].length) { re.lastIndex++; continue }
+    const pos = m.index
     if (pos > cursor) out.push(text.slice(cursor, pos))
-    out.push(<mark key={`${keyPrefix}-hl-${idx++}`} className='gri-mark'>{text.slice(pos, pos + term.length)}</mark>)
-    cursor = pos + term.length
+    out.push(<mark key={`${keyPrefix}-hl-${idx++}`} className='gri-mark'>{text.slice(pos, pos + m[0].length)}</mark>)
+    cursor = pos + m[0].length
   }
+  if (!idx) return [text]
+  out.push(text.slice(cursor))
   return out
 }
 
@@ -370,14 +388,15 @@ function articleFullLabel(a: Articolo): string {
 
 function articleMatchesSearch(a: Articolo, term: string): boolean {
   if (!term) return true
-  const t = norm(term)
+  const src = searchPatternSource(term)
+  if (!src) return true
   const referenceLabel = a.kind === 'rcp' ? `punto ${a.numero}` : `art. ${a.numero}`
-  return norm(a.sezione).includes(t) ||
-    norm(a.titolo).includes(t) ||
-    norm(a.testo).includes(t) ||
-    norm(referenceLabel).includes(t) ||
-    norm(a.numero).includes(t) ||
-    norm(a.codice).includes(t)
+  return searchMatches(a.sezione, src) ||
+    searchMatches(a.titolo, src) ||
+    searchMatches(a.testo, src) ||
+    searchMatches(referenceLabel, src) ||
+    searchMatches(a.numero, src) ||
+    searchMatches(a.codice, src)
 }
 
 function highlightSearch2(text: string, search: string, articleId: string, key: string, onJump: (id: string) => void, articlesById: Record<string, Articolo>): React.ReactNode[] {
@@ -490,6 +509,19 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       .filter((s) => s.articoli.length > 0)
   }, [sections, search, searchActive])
 
+  // Indice per numero: articoli generali in ordine di numero, poi i punti del Regolamento condotte private.
+  const [indexMode, setIndexMode] = useState<'argomento' | 'numero'>('argomento')
+  const numberedGroups = useMemo(() => {
+    const byNum = (a: Articolo, b: Articolo) => Number(a.numero) - Number(b.numero)
+    const visible = visibleSections.flatMap((s) => s.articoli)
+    const general = visible.filter((a) => a.kind !== 'rcp').sort(byNum)
+    const rcp = visible.filter((a) => a.kind === 'rcp').sort(byNum)
+    return [
+      ...(general.length ? [{ id: 'num-general', nome: '', articoli: general }] : []),
+      ...(rcp.length ? [{ id: 'num-rcp', nome: RCP_SECTION.nome, articoli: rcp }] : [])
+    ]
+  }, [visibleSections])
+
   const totalMatches = useMemo(() => {
     if (!searchActive) return 0
     return visibleSections.reduce((acc, s) => acc + s.articoli.length, 0)
@@ -515,7 +547,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       button.scrollIntoView({ block: 'nearest', inline: 'nearest' })
     })
     return () => window.cancelAnimationFrame(raf)
-  }, [selectedId, expandedSections, searchActive])
+  }, [selectedId, expandedSections, searchActive, indexMode])
 
   const toggleSection = (id: string) => setExpandedSections((prev) => ({ ...prev, [id]: !prev[id] }))
 
@@ -716,11 +748,15 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
               <div className='gri-panel-head-row'>
                 <span>Indice regolamento</span>
                 <div className='gri-panel-head-actions'>
+                  <div className='gri-index-mode' role='group' aria-label='Ordina indice'>
+                    <button type='button' className={indexMode === 'argomento' ? 'active' : ''} aria-pressed={indexMode === 'argomento'} onClick={() => setIndexMode('argomento')} title='Articoli raggruppati per argomento'>Argomento</button>
+                    <button type='button' className={indexMode === 'numero' ? 'active' : ''} aria-pressed={indexMode === 'numero'} onClick={() => setIndexMode('numero')} title='Articoli in ordine di numero'>Numero</button>
+                  </div>
                   <button
                     type='button'
                     className={`gri-nav-reset-btn ${indexDirty ? 'active' : ''}`}
                     onClick={resetIndex}
-                    disabled={!indexDirty}
+                    disabled={!indexDirty || indexMode !== 'argomento'}
                     title='Reimposta indice'
                     aria-label='Reimposta indice'
                   >
@@ -737,7 +773,29 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
               </div>
             </div>
             <div className='gri-panel-body gri-panel-body-pad'>
-              {visibleSections.map((s) => {
+              {indexMode === 'numero' && numberedGroups.map((g) => (
+                <div key={g.id} className='gri-sezione'>
+                  {g.nome ? <div className='gri-num-group' style={panelHeadStyle}>{g.nome}</div> : null}
+                  <div className='gri-articoli-list gri-articoli-list-num'>
+                    {g.articoli.map((a) => {
+                      const active = a.id === selectedId
+                      return (
+                        <button
+                          key={a.id}
+                          ref={(el) => { articleButtonRefs.current[a.id] = el }}
+                          className={`gri-art-btn ${active ? 'active' : ''}`}
+                          style={active ? { background: accentColor, color: '#fff' } : undefined}
+                          onClick={() => jumpTo(a.id)}
+                        >
+                          <span className='gri-art-num'>{articleShortLabel(a)}</span>
+                          <span className='gri-art-title'>{highlightSearch(a.titolo, searchActive ? search.trim() : '', `num-${a.id}`)}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+              {indexMode === 'argomento' && visibleSections.map((s) => {
                 const expanded = searchActive ? true : !!expandedSections[s.id]
                 return (
                   <div key={s.id} className='gri-sezione'>
@@ -865,6 +923,13 @@ const styles = `
 .gri-col-resizer::after { content:''; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:8px; height:56px; border-radius:999px; background:rgba(61,119,201,0.18); }
 .gri-col-resizer:hover::after, .gri-col-resizer.dragging::after { background:rgba(61,119,201,0.08); }
 .gri-sezione { margin-bottom:4px; }
+.gri-index-mode { display:inline-flex; border:var(--gri-control-border-width,1px) solid var(--gri-control-border-color,#aac4e0); border-radius:999px; overflow:hidden; background:var(--gri-control-background,#fff); }
+.gri-index-mode button { border:none; background:transparent; color:#1F4E79; font-family:inherit; font-size:calc(var(--gri-index-font-size,14px) - 2px); font-weight:700; padding:4px 10px; cursor:pointer; line-height:1.2; }
+.gri-index-mode button + button { border-left:var(--gri-control-border-width,1px) solid var(--gri-control-border-color,#aac4e0); }
+.gri-index-mode button:hover { background:var(--gri-control-hover-background,#eef5ff); }
+.gri-index-mode button.active { background:#1F4E79; color:#fff; }
+.gri-num-group { padding:8px 10px 4px; font-size:var(--gri-index-font-size,14px) !important; font-weight:700; color:#172033; }
+.gri-articoli-list.gri-articoli-list-num { margin-left:0; padding-left:0; border-left:none; }
 .gri-sezione-row { display:grid; grid-template-columns:1fr auto; gap:6px; align-items:center; }
 .gri-sezione-head { width:100%; text-align:left; border:none; background:transparent; padding:8px 10px; border-radius:var(--gri-control-radius,6px); cursor:pointer; font-family:inherit; font-size:var(--gri-index-font-size,14px) !important; color:#172033; font-weight:700; }
 .gri-sezione-head:hover { background:var(--gri-control-hover-background,#eef5ff); }

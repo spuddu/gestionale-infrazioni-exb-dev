@@ -671,7 +671,7 @@ const styles = `
 .gcp-tree-level2 { margin-left:12px; padding-left:8px; border-left:2px solid #edf3fb; display:flex; flex-direction:column; gap:4px; }
 .gcp-chip { display:inline-flex; align-items:center; padding:2px 7px; border-radius:999px; font-size:11px; font-weight:700; background:#e8f1fb; color:#1F4E79; }
 .gcp-chip.active { background:rgba(255,255,255,0.25); color:#fff; }
-.gcp-list-table { width:100%; border-collapse:collapse; font-size:12px; }
+.gcp-list-table { width:100%; border-collapse:collapse; font-size:15px; font-weight:500; } /* come il Regolamento irriguo */
 .gcp-list-table th { position:sticky; top:0; z-index:1; background:#1F4E79; color:#fff; padding:8px; text-align:left; white-space:nowrap; }
 .gcp-th-sort { cursor:pointer; user-select:none; }
 .gcp-th-sort:hover { background:#295f92; }
@@ -680,8 +680,11 @@ const styles = `
 .gcp-list-table td { padding:8px; border-bottom:1px solid #e6eef7; vertical-align:middle; }
 .gcp-list-table tbody tr:nth-child(odd) td { background:var(--gcp-records-card-background, #f5f9ff); }
 .gcp-list-table tbody tr:nth-child(even) td { background:linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), var(--gcp-records-card-background, #f5f9ff); }
-.gcp-list-table tbody tr.sel td { background:#dfeefe; }
+/* Righe come la Rubrica: hover e riga selezionata evidenziata (il verde "nel carrello" resta prevalente) */
 .gcp-list-row { cursor:pointer; }
+.gcp-list-table tbody tr.gcp-list-row:not(.gcp-row-incart):hover > td { background:#ddeeff !important; }
+.gcp-list-table tbody tr.sel:not(.gcp-row-incart) > td { background:#cfe6ff !important; }
+.gcp-list-table tbody tr.sel > td:first-child { box-shadow:inset 4px 0 0 #1F4E79; font-weight:700; }
 .gcp-desc-short { display:block; white-space:nowrap; overflow:hidden; text-overflow:clip; line-height:1.25; }
 .gcp-row-inactive td { color:#c00000; }
 .gcp-row-inactive td .gcp-muted { color:#c00000 !important; opacity:0.95; }
