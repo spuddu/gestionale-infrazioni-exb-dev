@@ -996,10 +996,9 @@ Ditta “${trasgressore}”.`)
   }
 
   drawSectionTitle(ctx, 'Istruttoria tecnica')
-  const settoreUfficio = [v(m, 'settore'), v(m, 'ufficio_zona')].filter(Boolean).join(' · ')
   drawKeyValueGrid(ctx, compactRows([
     ['Area', v(m, 'area')],
-    ['Settore / Ufficio', settoreUfficio]
+    ['Settore', v(m, 'settore')]
   ]))
   drawKeyValueGrid(ctx, [
     ['N. rilevazione', v(m, 'n_rilevazione') || '-'],

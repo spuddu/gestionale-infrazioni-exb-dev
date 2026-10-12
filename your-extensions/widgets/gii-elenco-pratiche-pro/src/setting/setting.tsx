@@ -82,7 +82,6 @@ const VIRTUAL_FIELDS: FieldOpt[] = [
 const FALLBACK_LAYER_FIELDS: FieldOpt[] = [
   { name:'objectid', alias:'ObjectID', type:'esriFieldTypeOID' },
   { name:'data_rilevazione', alias:'Data rilevazione', type:'esriFieldTypeDate' },
-  { name:'ufficio_zona', alias:'Ufficio origine', type:'esriFieldTypeString' },
   { name:'numero_rapporto_tecnico', alias:'Numero rapporto tecnico', type:'esriFieldTypeString' },
   { name:'data_rapporto_tecnico', alias:'Data rapporto tecnico', type:'esriFieldTypeDate' },
   { name:'accertamento_numero', alias:'Numero atto', type:'esriFieldTypeString' },
@@ -117,7 +116,6 @@ function mergeLayerFieldOptions (schemaFields: FieldOpt[], cfg: any, columns: Co
   const configuredFieldNames: FieldOpt[] = [
     cfg?.fieldPratica,
     cfg?.fieldDataRilevazione,
-    cfg?.fieldUfficio,
     cfg?.orderByField,
     ...(columns || []).map(c => c?.field)
   ]

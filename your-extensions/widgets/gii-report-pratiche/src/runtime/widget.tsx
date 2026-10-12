@@ -57,7 +57,6 @@ type GiiAssignment = {
   areaCod: 'AMM' | 'AGR' | 'TEC' | ''
   settore: number | null
   settoreCod: string
-  ufficio?: number | null
 }
 
 type GiiUserInfo = {
@@ -273,10 +272,9 @@ function readGiiUser (): GiiUserInfo | null {
     area: toNumberOrNull(a?.area),
     areaCod: normalizeAreaCode(a?.areaCod ?? a?.area_cod ?? a?.area),
     settore: toNumberOrNull(a?.settore),
-    settoreCod: normalizeSettoreCode(a?.settoreCod ?? a?.settore_cod ?? a?.settore),
-    ufficio: toNumberOrNull(a?.ufficio)
+    settoreCod: normalizeSettoreCode(a?.settoreCod ?? a?.settore_cod ?? a?.settore)
   })).filter((a: GiiAssignment) => !!a.ruoloCod)
-  if (!assignments.length) assignments.push({ ruoloCod: ruoloLabel, area: toNumberOrNull(cached.area), areaCod, settore: toNumberOrNull(cached.settore), settoreCod, ufficio: toNumberOrNull(cached.ufficio) })
+  if (!assignments.length) assignments.push({ ruoloCod: ruoloLabel, area: toNumberOrNull(cached.area), areaCod, settore: toNumberOrNull(cached.settore), settoreCod })
   return {
     username: String(cached.username || '').trim(),
     fullName: String(cached.fullName || cached.full_name || cached.nome || cached.displayName || cached.username || '').trim(),

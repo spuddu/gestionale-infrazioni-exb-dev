@@ -123,8 +123,6 @@ interface UserInfo {
   areaFull: string
   settoreCod: string
   settoreFull: string
-  ufficio: number | null
-  ufficioLabel: string
   roleCodes: string[]
   isAdmin: boolean
 }
@@ -170,8 +168,6 @@ async function loadUser(): Promise<UserInfo | null> {
     baseRuoloCod === 'RIA' ? 'RIA' :
     baseRuoloCod
   const settoreCod = normalizeSettoreCode(cached.settoreCod ?? cached.settore_cod ?? cached.settoreLabel, cached.settore)
-  const ufficioRaw = cached.ufficio ?? cached.id_ufficio ?? cached.ufficio_id
-  const ufficio = ufficioRaw != null && ufficioRaw !== '' ? Number(ufficioRaw) : null
   const roleCodes = new Set<string>()
   if (ruoloCod) roleCodes.add(ruoloCod)
   const assignments = Array.isArray(cached.assignments) ? cached.assignments : []
@@ -193,28 +189,23 @@ async function loadUser(): Promise<UserInfo | null> {
     areaFull: String(cached.areaFull || cached.area_full || (areaCod ? AREA_FULL[areaCod] || areaCod : '')),
     settoreCod,
     settoreFull: String(cached.settoreFull || cached.settore_full || (settoreCod ? SETTORE_FULL[settoreCod] || settoreCod : '')),
-    ufficio: Number.isFinite(ufficio) ? ufficio : null,
-    ufficioLabel: String(cached.ufficioLabel || cached.ufficio_label || cached.ufficioZona || cached.ufficio_zona || ''),
     roleCodes: Array.from(roleCodes),
     isAdmin: ruoloCod === 'ADMIN' || !!cached.isAdmin
   }
 }
 
-function getOrgContext(user: UserInfo | null): { area: string; settore: string; ufficio: string; title: string } {
-  if (!user) return { area: '', settore: '', ufficio: '', title: '' }
+function getOrgContext(user: UserInfo | null): { area: string; settore: string; title: string } {
+  if (!user) return { area: '', settore: '', title: '' }
 
   const area = String(user.areaFull || (user.areaCod ? AREA_FULL[user.areaCod] || user.areaCod : '')).trim()
   const settore = String(user.settoreFull || (user.settoreCod ? SETTORE_FULL[user.settoreCod] || user.settoreCod : '')).trim()
-  const ufficio = String(user.ufficioLabel || '').trim()
   const areaText = area ? `Area ${area}` : ''
   const settoreText = settore ? (/^Settore\b/i.test(settore) ? settore : `Settore ${settore}`) : ''
-  const ufficioText = ufficio ? (/^Ufficio\b/i.test(ufficio) ? ufficio : `Ufficio di ${ufficio}`) : ''
 
   return {
     area: areaText,
     settore: settoreText,
-    ufficio: ufficioText,
-    title: [areaText, settoreText, ufficioText].filter(Boolean).join(' · ')
+    title: [areaText, settoreText].filter(Boolean).join(' · ')
   }
 }
 

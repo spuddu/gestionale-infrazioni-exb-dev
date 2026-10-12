@@ -115,11 +115,6 @@ function formatSettoreLabel (raw: any): string {
   return SETTORE_LABEL[code] || String(raw)
 }
 
-function formatUfficioLabel (raw: any): string {
-  if (raw == null || raw === '') return '—'
-  return String(raw)
-}
-
 function normalizeLogFieldNameSet (fields: any[]): Set<string> {
   return new Set((fields || []).map((f: any) => String(f?.name || '').trim()).filter(Boolean))
 }
@@ -1961,7 +1956,6 @@ function GeneralCompactRow (props: { label: string; value: any; dateLabel?: stri
 function GeneralCompactPanel (props: {
   area: string
   settore: string
-  ufficio: string
   numeroRilevazione: string
   dataRilevazione: string
   numeroRapporto: string
@@ -1975,7 +1969,6 @@ function GeneralCompactPanel (props: {
         <div style={{ display: 'grid', gap: 0 }}>
           <GeneralCompactRow label="Area" value={props.area} singleValue />
           <GeneralCompactRow label="Settore" value={props.settore} singleValue />
-          <GeneralCompactRow label="Ufficio" value={props.ufficio} singleValue />
           <GeneralCompactRow label="Rilevazione n." value={props.numeroRilevazione} dateLabel="Data e ora:" dateValue={props.dataRilevazione} />
           <GeneralCompactRow label="Rapporto n." value={props.numeroRapporto} dateLabel="Data e ora:" dateValue={props.dataRapporto} />
           <GeneralCompactRow label="Atto n." value={props.numeroVerbale} dateLabel="Data e ora:" dateValue={props.dataVerbale} />
@@ -5392,14 +5385,12 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
   const generalSummary = React.useMemo(() => {
     const areaRaw = pickAttrCI(data, ['area_cod', 'Area_cod', 'AREA_COD', 'area'])
     const settoreRaw = pickAttrCI(data, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'cod_settore'])
-    const ufficioRaw = pickAttrCI(data, ['ufficio_zona', 'Ufficio_zona', 'UFFICIO_ZONA', 'ufficio'])
     const dataRil = pickRilevazioneDateValueForDisplay(data)
     const dataRap = pickAttrCI(data, ['data_rapporto_tecnico', 'Data_rapporto_tecnico', 'DATA_RAPPORTO_TECNICO'])
     const dataVerb = pickAttrCI(data, ['accertamento_data'])
     return {
       area: formatAreaLabel(getFieldLabel('area_cod', areaRaw)),
       settore: formatSettoreLabel(getFieldLabel('settore_cod', settoreRaw)),
-      ufficio: formatUfficioLabel(getFieldLabel('ufficio_zona', ufficioRaw)),
       numeroRilevazione: numeroRilevazione || '—',
       dataRilevazione: formatDateTimeSafe(dataRil),
       numeroRapporto: numeroRapportoTecnico || '—',
@@ -5945,7 +5936,6 @@ return (
             <GeneralCompactPanel
               area={generalSummary.area}
               settore={generalSummary.settore}
-              ufficio={generalSummary.ufficio}
               numeroRilevazione={generalSummary.numeroRilevazione}
               dataRilevazione={generalSummary.dataRilevazione}
               numeroRapporto={generalSummary.numeroRapporto}

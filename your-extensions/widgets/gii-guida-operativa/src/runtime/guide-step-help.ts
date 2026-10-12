@@ -115,9 +115,9 @@ const exactHelp: Record<string, GuideStepHelp> = {
     ],
     figure: 'Figura – Dashboard operativa'
   },
-  'Usare Statistiche quando serve leggere il fenomeno per periodo, ufficio o tipologia di infrazione.': {
+  'Usare Statistiche quando serve leggere il fenomeno per periodo, Settore o tipologia di infrazione.': {
     paragraphs: [
-      'Nella parte superiore della Dashboard selezionare Statistiche. La vista mostra il quadro dinamico delle pratiche e mette a disposizione i periodi predefiniti e i filtri interattivi per ufficio e tipologia di infrazione.',
+      'Nella parte superiore della Dashboard selezionare Statistiche. La vista mostra il quadro dinamico delle pratiche e mette a disposizione i periodi predefiniti e i filtri interattivi per Settore e tipologia di infrazione.',
       'Selezionando una voce nei riquadri di analisi, gli altri indicatori vengono aggiornati in base alla selezione.'
     ],
     figure: 'Figura – Dashboard statistiche'
@@ -564,7 +564,7 @@ function getReviewedStepHelp(text: string, sectionTitle = '', chapterTitle = '')
   if (chapter.startsWith('21. dashboard')) {
     if (section.includes('usare la dashboard') && lower.startsWith('selezionare i filtri interattivi')) {
       return { paragraphs: [
-        'Nella sezione Statistiche selezionare un Ufficio o una tipologia di Infrazione dai filtri interattivi. Gli indicatori e i grafici della pagina si aggiornano in base alla selezione corrente.',
+        'Nella sezione Statistiche selezionare un Settore o una tipologia di Infrazione dai filtri interattivi. Gli indicatori e i grafici della pagina si aggiornano in base alla selezione corrente.',
         'È possibile combinare le selezioni disponibili; utilizzare Azzera filtri per ripristinare l’intero insieme di dati visibile al proprio profilo.'
       ] }
     }
@@ -687,7 +687,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('verificare i dati generali')) {
       return {
         paragraphs: [
-          'Nella nuova pratica, che si apre sulla scheda Trasgressore, aprire la scheda Dati generali e controllare i valori compilati automaticamente dal sistema per Area, Settore, Ufficio di zona, Tecnico rilevatore, Istruttore tecnico e Data rilevazione. I campi sono in sola lettura.',
+          'Nella nuova pratica, che si apre sulla scheda Trasgressore, aprire la scheda Dati generali e controllare i valori compilati automaticamente dal sistema per Area, Settore, Tecnico rilevatore, Istruttore tecnico e Data rilevazione. I campi sono in sola lettura.',
           'Se l’Istruttore tecnico è assegnato a più settori e, controllando i Dati generali, si accorge di aver selezionato quello errato, può utilizzare l’azione Elimina pratica e generarne una nuova nel settore corretto, purché non l’abbia ancora trasmessa al Capo Settore. Se si accorge dell’errore dopo la trasmissione, la pratica potrà essere eliminata dal Capo Settore.'
         ]
       }
@@ -1356,7 +1356,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('nella sezione assegnazione gestionale')) {
       return {
         paragraphs: [
-          'Dopo avere selezionato il membro, scendere alla sezione Assegnazione gestionale e scegliere il Ruolo. In base al ruolo il sistema abilita o precompila i campi di Area, Settore e Ufficio necessari.',
+          'Dopo avere selezionato il membro, scendere alla sezione Assegnazione gestionale e scegliere il Ruolo. In base al ruolo il sistema abilita o precompila i campi di Area e Settore necessari.',
           'Controllare sempre l’ambito assegnato prima del salvataggio, perché determina le pratiche e le viste che l’utente potrà utilizzare.'
         ]
       }
@@ -2094,7 +2094,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('cliccare i filtri interattivi')) {
       return {
         paragraphs: [
-          'Nella sezione Statistiche selezionare una voce nei riquadri Ufficio o Infrazione per applicarla come filtro. Gli altri indicatori della pagina vengono ricalcolati in base alla selezione.',
+          'Nella sezione Statistiche selezionare una voce nei riquadri Settori o Infrazione per applicarla come filtro. Gli altri indicatori della pagina vengono ricalcolati in base alla selezione.',
           'Utilizzare Azzera filtri per rimuovere tutte le selezioni interattive e tornare al quadro completo.'
         ],
         figure: 'Figura – Dashboard statistiche'
@@ -2220,10 +2220,10 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
         ]
       }
     }
-    if (lower.startsWith('compilare area, settore e ufficio')) {
+    if (lower.startsWith('compilare area e settore')) {
       return {
         paragraphs: [
-          'Dopo la scelta del Ruolo compilare soltanto i campi organizzativi che il modulo rende disponibili. Area, Settore e Ufficio possono cambiare in base al ruolo e alcune combinazioni vengono impostate automaticamente.',
+          'Dopo la scelta del Ruolo compilare soltanto i campi organizzativi che il modulo rende disponibili. Area e Settore possono cambiare in base al ruolo e alcune combinazioni vengono impostate automaticamente.',
           'Controllare l’ambito completo prima del Salva perché determina visibilità e competenze dell’assegnazione.'
         ]
       }
@@ -2232,7 +2232,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
       return {
         paragraphs: [
           'Nel riepilogo dell’assegnazione controllare il Gruppo proposto dal gestionale. Il gruppo deriva dal ruolo e dall’ambito selezionati e, quando previsto, sarà utilizzato anche per aggiornare l’appartenenza dell’utente in ArcGIS Online.',
-          'Se il gruppo non è quello atteso, ricontrollare ruolo, Area, Settore e Ufficio prima di salvare.'
+          'Se il gruppo non è quello atteso, ricontrollare ruolo, Area e Settore prima di salvare.'
         ]
       }
     }
@@ -2271,7 +2271,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('scegliere il nuovo ruolo e il relativo ambito')) {
       return {
         paragraphs: [
-          'Nel pannello Nuova assegnazione aprire Ruolo e scegliere il nuovo incarico. Compilare quindi Area, Settore e Ufficio secondo i campi resi disponibili per quel ruolo.',
+          'Nel pannello Nuova assegnazione aprire Ruolo e scegliere il nuovo incarico. Compilare quindi Area e Settore secondo i campi resi disponibili per quel ruolo.',
           'Controllare che la nuova combinazione sia diversa dalle assegnazioni già presenti per lo stesso utente.'
         ]
       }

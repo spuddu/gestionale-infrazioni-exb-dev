@@ -49,7 +49,6 @@ export interface GiiUserProfileForAlerts {
   roleCod?: string
   areaCod?: string
   settoreCod?: string
-  ufficio?: number | string | null
   isAdmin?: boolean
 }
 
@@ -1262,14 +1261,12 @@ function buildCurrentActivityWhere (user?: GiiUserProfileForAlerts, extraWhere?:
     const area = activityAreaForUser(user)
     const username = String(user?.username || '').trim()
     const settore = String(user?.settoreCod || '').trim()
-    const ufficioRaw = (user as any)?.ufficio
-    const ufficioNum = Number(ufficioRaw)
 
     if (role) clauses.push(`destinatario_ruolo = '${giiSqlString(role)}'`)
     if (area) clauses.push(`destinatario_area = '${giiSqlString(area)}'`)
 
     // Se una riga è indirizzata a uno username specifico, deve coincidere.
-    // Se il campo è vuoto/null, vale per tutto il ruolo/area/settore/ufficio.
+    // Se il campo è vuoto/null, vale per tutto il ruolo/area/settore.
     if (username) {
       clauses.push(`(destinatario_username IS NULL OR destinatario_username = '' OR UPPER(destinatario_username) = '${giiSqlString(username.toUpperCase())}')`)
     }
@@ -1285,10 +1282,6 @@ function buildCurrentActivityWhere (user?: GiiUserProfileForAlerts, extraWhere?:
       // precedente fallback NULL/vuoto faceva arrivare, ad esempio, attività di
       // CS_D1 anche a CS_D2 durante il polling.
       clauses.push(`UPPER(destinatario_settore) = '${giiSqlString(settore.toUpperCase())}'`)
-    }
-
-    if (Number.isFinite(ufficioNum)) {
-      clauses.push(`(destinatario_ufficio_id IS NULL OR destinatario_ufficio_id = ${ufficioNum})`)
     }
   }
 
@@ -1475,8 +1468,7 @@ export async function queryGiiCurrentActivities (options: GiiCurrentActivityQuer
     String(options.user?.username || '').trim().toLowerCase(),
     String(options.user?.roleCod || options.user?.role || '').trim().toUpperCase(),
     String(options.user?.areaCod || '').trim().toUpperCase(),
-    String(options.user?.settoreCod || '').trim().toUpperCase(),
-    String((options.user as any)?.ufficio ?? '').trim().toUpperCase()
+    String(options.user?.settoreCod || '').trim().toUpperCase()
   ])
 
   return await runLatestGiiQuery(giiCurrentActivityQuerySlots, scope, async () => {

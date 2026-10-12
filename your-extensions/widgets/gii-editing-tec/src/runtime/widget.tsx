@@ -1454,7 +1454,7 @@ function readSelectedOperationalRole (): string {
   return ''
 }
 
-function readGiiUserContext (useOperationalRole = false): { username: string, role: string, area: string, settore: string, areaRaw: any, settoreRaw: any, ufficio: number | null, ufficioLabel: string, gruppo: string } {
+function readGiiUserContext (useOperationalRole = false): { username: string, role: string, area: string, settore: string, areaRaw: any, settoreRaw: any, gruppo: string } {
   const w: any = window as any
   const roleObj: any = w.__giiUserRole || {}
   const userObj: any = w.__giiUser || {}
@@ -1504,17 +1504,9 @@ function readGiiUserContext (useOperationalRole = false): { username: string, ro
   const settore = settoreFromPrimary
   const settoreRaw = settoreFromPrimary || settoreRawPrimary
 
-  const ufficio = normalizeIntOrNull(firstMeaningfulValue(
-    roleObj.ufficio, roleObj.id_ufficio, roleObj.ufficio_id,
-    userObj.ufficio, userObj.id_ufficio, userObj.ufficio_id
-  ))
-  const ufficioLabel = String(firstMeaningfulValue(
-    roleObj.ufficioLabel, roleObj.ufficio_label, roleObj.ufficioZona, roleObj.ufficio_zona,
-    userObj.ufficioLabel, userObj.ufficio_label, userObj.ufficioZona, userObj.ufficio_zona
-  ) || '').trim()
   const gruppo = String(firstMeaningfulValue(roleObj.gruppo, userObj.gruppo) || '').trim()
 
-  return { username, role, area, settore, areaRaw, settoreRaw, ufficio, ufficioLabel, gruppo }
+  return { username, role, area, settore, areaRaw, settoreRaw, gruppo }
 }
 
 type GiiUserContext = ReturnType<typeof readGiiUserContext>
@@ -1525,8 +1517,6 @@ type CreateItAssignment = {
   areaFull: string
   settore: string
   settoreFull: string
-  ufficio: number | null
-  ufficioLabel: string
   gruppo: string
 }
 
@@ -1550,25 +1540,19 @@ function readCreateItAssignments (): CreateItAssignment[] {
       const settore = normalizeSettoreCode(area, firstMeaningfulValue(assignment?.settoreCod, assignment?.settore_cod, assignment?.settore))
       if (!area || !settore) continue
 
-      const ufficio = normalizeIntOrNull(firstMeaningfulValue(assignment?.ufficio, assignment?.id_ufficio, assignment?.ufficio_id))
-      const ufficioLabel = String(firstMeaningfulValue(
-        assignment?.ufficioLabel, assignment?.ufficio_label, assignment?.ufficioZona, assignment?.ufficio_zona
-      ) || '').trim()
       const gruppo = String(assignment?.gruppo || '').trim()
       const areaFull = String(firstMeaningfulValue(assignment?.areaFull, assignment?.area_full, area) || area).trim()
       const settoreFull = String(firstMeaningfulValue(assignment?.settoreFull, assignment?.settore_full, settore) || settore).trim()
-      const key = [area, settore, ufficio ?? '', gruppo].join('|')
+      const key = [area, settore, gruppo].join('|')
       if (seen.has(key)) continue
       seen.add(key)
-      out.push({ key, area, areaFull, settore, settoreFull, ufficio, ufficioLabel, gruppo })
+      out.push({ key, area, areaFull, settore, settoreFull, gruppo })
     }
 
     return out.sort((a, b) => {
       const byArea = a.area.localeCompare(b.area)
       if (byArea) return byArea
-      const bySector = a.settore.localeCompare(b.settore, undefined, { numeric: true })
-      if (bySector) return bySector
-      return String(a.ufficioLabel || '').localeCompare(String(b.ufficioLabel || ''))
+      return a.settore.localeCompare(b.settore, undefined, { numeric: true })
     })
   } catch {
     return []
@@ -1605,8 +1589,6 @@ function giiUserContextIdentityKey (ctx: GiiUserContext): string {
     String(ctx?.settore || '').trim().toUpperCase(),
     String(ctx?.areaRaw ?? '').trim().toUpperCase(),
     String(ctx?.settoreRaw ?? '').trim().toUpperCase(),
-    String(ctx?.ufficio ?? ''),
-    String(ctx?.ufficioLabel || '').trim().toUpperCase(),
     String(ctx?.gruppo || '').trim().toUpperCase()
   ].join('|')
 }
@@ -1678,21 +1660,13 @@ function getCurrentGiiUserDisplayName (usernameFallback: any): string {
   ) || '').trim()
 }
 
-async function resolveCreateSurveyLikeDefaults (_layer: any, ctx: GiiUserContext): Promise<{ tecnicoRilevatore: string, ufficioZona: string, idUfficio: number | null }> {
+async function resolveCreateSurveyLikeDefaults (_layer: any, ctx: GiiUserContext): Promise<{ tecnicoRilevatore: string }> {
   const roleShort = shortRoleLabel(ctx.role)
   const tecnicoFromRole = roleShort && ctx.settore ? `${roleShort} ${ctx.settore}` : (roleShort || String(ctx.username || '').trim())
   const tecnicoRilevatore = getCurrentGiiUserDisplayName(ctx.username) || String(ctx.username || '').trim() || tecnicoFromRole
-  const ufficioZona = String(ctx.ufficioLabel || '').trim()
-  const idUfficio = normalizeIntOrNull(ctx.ufficio)
-
-  if (!ufficioZona || idUfficio == null) {
-    throw new Error('Profilo GII non coerente: l’Ufficio di competenza non è valorizzato nell’assegnazione autorizzata dell’utente.')
-  }
 
   return {
-    tecnicoRilevatore: tecnicoRilevatore || String(ctx.username || '').trim(),
-    ufficioZona,
-    idUfficio
+    tecnicoRilevatore: tecnicoRilevatore || String(ctx.username || '').trim()
   }
 }
 
@@ -2060,7 +2034,7 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
   // Normalizza hideEmpty per tab (retrocompatibilità)
   // Inietta dati_generali come primo tab se mancante
   if (!result.find(t => t.id === 'dati_generali')) {
-    result = [{ id: 'dati_generali', label: 'Dati generali', fields: ['area_cod', 'settore_cod', 'ufficio_zona', 'tecnico_rilevatore', 'data_rilevazione', 'it_assegnato_nome', 'dt_trasmissione_capo_settore'], hideEmpty: false }, ...result]
+    result = [{ id: 'dati_generali', label: 'Dati generali', fields: ['area_cod', 'settore_cod', 'tecnico_rilevatore', 'data_rilevazione', 'it_assegnato_nome', 'dt_trasmissione_capo_settore'], hideEmpty: false }, ...result]
   }
   return result.map(tab => {
     const normalizedHideEmpty =
@@ -2084,7 +2058,6 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
 
 const CHOICES = {
   tipo_soggetto: [{ v: 'PF', l: 'Persona fisica' }, { v: 'PG', l: 'Persona giuridica' }],
-  ufficio: ['Cagliari','Fluminimaggiore','Iglesias','Masainas','Quartucciu','San Gavino Monreale','San Giovanni Suergiu','San Sperate','Senorbì','Serramanna'].map(v=>({v,l:v})),
   tipo_abuso: [{ v: 'parziale', l: 'Parziale' }, { v: 'totale', l: 'Totale' }],
   art15_parziale: [{ v: 'Art15.1', l: 'Prima contestazione' }, { v: 'Art15.2', l: 'Recidiva' }],
   art15_totale:   [{ v: 'Art15.3', l: 'Prima contestazione' }, { v: 'Art15.4', l: 'Recidiva' }],
@@ -5254,7 +5227,6 @@ function NuovaPraticaForm (p: {
     if (mode !== 'create') return
     const giiCtx = currentUserContext
     const roleShort = shortRoleLabel(giiCtx.role)
-    const createOfficeLabel = String(giiCtx.ufficioLabel || '').trim()
     const currentUserDisplayName = getCurrentGiiUserDisplayName(giiCtx.username)
     const today = toDraftDate(Date.now())
     const withCreateDefaults = (prev: NpDraft): NpDraft => {
@@ -5265,9 +5237,6 @@ function NuovaPraticaForm (p: {
       if (!String(next.tecnico_rilevatore || '').trim()) {
         const label = roleShort && giiCtx.settore ? `${roleShort} ${giiCtx.settore}` : (roleShort || String(giiCtx.username || '').trim())
         if (label) next.tecnico_rilevatore = label
-      }
-      if (!String(next.ufficio_zona || '').trim() && createOfficeLabel) {
-        next.ufficio_zona = createOfficeLabel
       }
       if (!String(next.data_rilevazione || '').trim()) {
         next.data_rilevazione = today
@@ -6292,7 +6261,7 @@ React.useEffect(() => {
     if (k === 'objectid' || k === 'globalid') return false
     if (k === 'creationdate' || k === 'creator' || k === 'editdate' || k === 'editor') return false
     if (k === 'origine_pratica' || k === 'utente_loggato' || k === 'area_cod' || k === 'settore_cod' || k === 'req_point') return false
-    if (k === 'id_ufficio' || k === 'start' || k === 'end') return false
+    if (k === 'start' || k === 'end') return false
     if (k.startsWith('stato_') || k.startsWith('dt_stato_')) return false
     if (k.startsWith('presa_in_carico_') || k.startsWith('dt_presa_in_carico_')) return false
     if (k.startsWith('esito_') || k.startsWith('dt_esito_')) return false
@@ -7055,8 +7024,6 @@ React.useEffect(() => {
         area_cod: String((mode === 'create' ? roleAreaLabel : initialAreaLabel) || ''),
         settore_cod: String((mode === 'create' ? roleSettoreLabel : initialSettoreLabel) || ''),
         tecnico_rilevatore: mode === 'create' ? (currentGiiUserDisplayName || createSurveyDefaults?.tecnicoRilevatore || g('tecnico_rilevatore') || null) : (g('tecnico_rilevatore') || null),
-        ufficio_zona: mode === 'create' ? (createSurveyDefaults?.ufficioZona || g('ufficio_zona') || null) : (g('ufficio_zona') || null),
-        id_ufficio: mode === 'create' ? (createSurveyDefaults?.idUfficio ?? null) : (normalizeIntOrNull(p.initialData?.id_ufficio ?? p.initialData?.['ID ufficio'] ?? p.initialData?.ID_UFFICIO)),
         data_rilevazione: mode === 'create' ? nowTs : toTs(g('data_rilevazione')),
         tipologia_soggetto: tipoSogg || null,
         nome: (tipoSogg === 'PF' ? g('nome') : null) || null,
@@ -7948,7 +7915,6 @@ ${e?.message || String(e)}`
       case 'area_cod': { const areaCode = normalizeAreaCode(g('area_cod') || g('area')); return { label: 'Area', el: <NpText value={AREA_LABELS[areaCode] || areaCode || g('area_cod')} onChange={() => {}} disabled/> } }
       case 'settore_cod': { const areaCode = normalizeAreaCode(g('area_cod') || g('area')); const settoreCode = normalizeSettoreCode(areaCode, g('settore_cod') || g('settore')); return { label: 'Settore', el: <NpText value={SETTORE_LABELS[settoreCode] || settoreCode || g('settore_cod')} onChange={() => {}} disabled/> } }
       case 'tecnico_rilevatore': return { label: 'Tecnico rilevatore', el: <NpText value={g('tecnico_rilevatore')} onChange={() => {}} disabled/> }
-      case 'ufficio_zona': return { label: 'Ufficio di zona', el: <NpText value={g('ufficio_zona')} onChange={() => {}} disabled/> }
       case 'data_rilevazione': return { label: 'Data rilevazione', el: <NpText value={fmtDateDMY(g('data_rilevazione'))} onChange={() => {}} disabled/> }
       case 'it_assegnato_nome': return { label: 'Istruttore tecnico', el: <NpText value={g('it_assegnato_nome')} onChange={() => {}} disabled/> }
       case 'dt_trasmissione_capo_settore': return { label: 'Data trasmissione al Capo Settore', el: <NpText value={fmtDateDMY(getItTransmissionToCapoSettoreDate()) || '—'} onChange={() => {}} disabled/> }
@@ -11326,8 +11292,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       settore: selectedCreateItAssignment.settore,
       areaRaw: selectedCreateItAssignment.area,
       settoreRaw: selectedCreateItAssignment.settore,
-      ufficio: selectedCreateItAssignment.ufficio,
-      ufficioLabel: selectedCreateItAssignment.ufficioLabel,
       gruppo: selectedCreateItAssignment.gruppo
     }
   }, [isCreatePage, createAsAdmin, selectedCreateItAssignment?.key, giiUserContextIdentityKey(baseUserContext)])
@@ -12143,7 +12107,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                       <span style={{ fontSize: 16, fontWeight: 800 }}>Settore {item.settoreFull || item.settore}</span>
                       <span style={{ fontSize: 14, color: '#374151' }}>
                         Area {item.areaFull || item.area} · Settore {item.settoreFull || item.settore}
-                        {item.ufficioLabel ? ` · Ufficio di ${item.ufficioLabel}` : ''}
                       </span>
                     </button>
                   ))}

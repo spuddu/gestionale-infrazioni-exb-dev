@@ -166,7 +166,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
 
   const FIELD_OPTS: Record<string, Opt[]> = {
     dati_generali: [
-      {v:'area_cod',l:'Area'}, {v:'settore_cod',l:'Settore'}, {v:'ufficio_zona',l:'Ufficio di zona'},
+      {v:'area_cod',l:'Area'}, {v:'settore_cod',l:'Settore'},
       {v:'tecnico_rilevatore',l:'Tecnico rilevatore'}, {v:'data_rilevazione',l:'Data rilevazione'}, {v:'it_assegnato_nome',l:'Istruttore tecnico'}, {v:'data_firma',l:'Data compilazione'}
     ],
     trasgressore: [

@@ -85,7 +85,6 @@ export interface Config {
   // --- Campi base
   fieldPratica: string
   fieldDataRilevazione: string
-  fieldUfficio: string
 
   // --- Domini presa in carico
   presaDaPrendereVal: number
@@ -253,7 +252,6 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'col_numero',             label: 'N. rapporto',    field: '__numero_pratica__',      width: 140 },
   { id: 'col_accertamento_numero',  label: 'N. atto',       field: '__accertamento_numero_display__', width: 120 },
   { id: 'col_data',            label: 'Data rilevazione', field: 'data_rilevazione',           width: 140 },
-  { id: 'col_ufficio',         label: 'Ufficio origine',  field: 'ufficio_zona',               width: 190 },
   { id: 'col_stato',           label: 'Il mio stato',     field: '__stato_sint__',             width: 170 },
   { id: 'col_fase',            label: 'Fase istruttoria', field: '__fase_istruttoria__',        width: 150 },
   { id: 'col_causale',         label: 'Stato pratica',    field: '__causale__',                width: 250 },
@@ -272,7 +270,6 @@ export const defaultConfig: IMConfig = {
   // Campi base
   fieldPratica: 'objectid',
   fieldDataRilevazione: 'data_rilevazione',
-  fieldUfficio: 'ufficio_zona',
 
   // Domini presa
   presaDaPrendereVal: 1,

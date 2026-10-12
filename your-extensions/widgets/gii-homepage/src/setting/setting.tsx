@@ -856,7 +856,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       {/* ═══ PROFILO ORGANIZZATIVO ═══ */}
       <Acc id='orgctx' label='🏢 Profilo organizzativo'/>
       {openSec==='orgctx' && <div>
-        <Check value={cfg.showOrgContext??true} onChange={v=>set('showOrgContext',v)} label='Mostra area, settore e ufficio'/>
+        <Check value={cfg.showOrgContext??true} onChange={v=>set('showOrgContext',v)} label='Mostra area e Settore'/>
         {(cfg.showOrgContext??true) && <>
           <TextStyleControls cfg={cfg} set={set} title='Testo profilo' fontKey='orgContextFont' sizeKey='orgContextSize' colorKey='orgContextColor' weightKey='orgContextWeight' italicKey='orgContextItalic' letterSpacingKey='orgContextLetterSpacing' minSize={8} maxSize={22}/>
           <label style={P.lbl}>Allineamento</label>

@@ -19,7 +19,6 @@ export interface TabFields {
 export const DETAIL_GENERAL_FIELDS: string[] = [
   'area_cod',
   'settore_cod',
-  'ufficio_zona',
   'data_rilevazione',
   'numero_rapporto_tecnico',
   'data_rapporto_tecnico',
@@ -84,8 +83,6 @@ export const DETAIL_NEVER_SHOW_FIELDS: string[] = [
   'origine_pratica',
   'Origine_pratica',
   'ORIGINE_PRATICA',
-  'id_ufficio',
-  'ID_UFFICIO',
   'creationdate',
   'CreationDate',
   'created_user',

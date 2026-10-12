@@ -757,12 +757,6 @@ function pdfDateTimeValue (data: any, names: string[], fallbackTimeNames: string
   return ''
 }
 
-function ammOfficeLabelForPdf (value: string): string {
-  const clean = String(value || '').trim()
-  if (!clean) return ''
-  return /^ufficio\s+di\s+/i.test(clean) ? clean : `Ufficio di ${clean}`
-}
-
 function joinParts (...parts: string[]): string {
   return parts.map(p => String(p || '').trim()).filter(Boolean).join(' ')
 }
@@ -877,7 +871,6 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
     data_approvazione_rapporto: dataApprovazioneRapporto,
     area,
     settore,
-    ufficio_zona: ammOfficeLabelForPdf(pdfFieldValue(d, fields, 'ufficio_zona')),
     tecnico_rilevatore: String(pickAttrCI(d, ['tecnico_rilevatore']) || ''),
     ia: String(pickAttrCI(d, ['ia_assegnato_nome', 'ia_assegnato_username']) || ''),
     trasgressore_tipo: isPg ? 'PG' : 'PF',

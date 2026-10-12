@@ -65,23 +65,23 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "rows": [
           [
             "Tecnico rilevatore",
-            "Effettua la rilevazione sul territorio tramite l’applicazione Esri Survey123, utilizzando il rilevamento \"Infrazioni\" predisposto per smartphone e tablet: sceglie l’Ufficio di zona soltanto se è assegnato a più uffici, localizza sulla mappa il punto dell’infrazione e può aggiungere annotazioni tecniche; i Dati tecnici rilevati, cioè gli elementi di rete e i manufatti individuati entro 2 m dal punto, vengono acquisiti automaticamente. La rilevazione confluisce quindi nel gestionale, che ne ricava automaticamente i dati catastali dalla posizione, e viene successivamente gestita dal Capo Settore."
+            "Effettua la rilevazione sul territorio tramite l’applicazione Esri Survey123, utilizzando il rilevamento \"Infrazioni\" predisposto per smartphone e tablet. Indica sulla mappa il punto dell’infrazione e può aggiungere annotazioni tecniche. I Dati tecnici rilevati, cioè il distretto in cui ricade il punto e gli elementi di rete e i manufatti individuati entro 2 m, vengono acquisiti automaticamente e determinano il Settore di competenza. Se dai Dati tecnici risultano più Settori, il Tecnico rilevatore sceglie quello a cui inviare la rilevazione. Se non risulta alcun Settore, cioè il punto ricade fuori dal comprensorio e non ci sono reti o manufatti consortili entro 2 m, la rilevazione non può essere inviata. Nel caso in cui il Settore di destinazione sia stato acquisito correttamente, la rilevazione confluisce nel gestionale, che ne ricava automaticamente i dati catastali dalla posizione, e viene gestita dal Capo Settore competente."
           ],
           [
             "Istruttore tecnico",
-            "Lavora le pratiche assegnate, può creare una nuova pratica, svolge l’istruttoria tecnica e risponde alle eventuali richieste di integrazione."
+            "Lavora le pratiche assegnate, può creare una nuova pratica, svolge l’istruttoria tecnica, la trasmette al Capo Settore e risponde alle eventuali richieste di integrazione."
           ],
           [
             "Capo Settore",
-            "Assegna le rilevazioni provenienti dal Tecnico rilevatore, verifica le istruttorie del settore di competenza, può richiedere integrazioni e, nei casi previsti, respingere la pratica."
+            "Assegna le rilevazioni provenienti dal Tecnico rilevatore, verifica le istruttorie del Settore di competenza e le trasmette al Responsabile dell’istruttoria tecnica; può richiedere integrazioni e, nei casi previsti, respingere la pratica."
           ],
           [
             "Responsabile dell’istruttoria tecnica",
-            "Valida l’istruttoria tecnica, può richiedere integrazioni e, quando previsto, interviene su Occorrenza e Grado di gravità."
+            "Valida l’istruttoria tecnica e la trasmette al Direttore tecnico, può richiedere integrazioni e, quando previsto, interviene su Occorrenza e Grado di gravità."
           ],
           [
             "Direttore tecnico",
-            "È il direttore competente per la pratica nella fase tecnica. Approva l’istruttoria tecnica e può richiedere integrazioni o respingere la pratica nei casi previsti."
+            "È il direttore competente per la pratica nella fase tecnica. Approva l’istruttoria tecnica trasmettendola al Responsabile dell’istruttoria amministrativa e può richiedere integrazioni o respingere la pratica nei casi previsti."
           ],
           [
             "Istruttore amministrativo",
@@ -568,7 +568,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "Una rilevazione effettuata dal Tecnico rilevatore tramite l’applicazione Esri Survey123, utilizzando il rilevamento \"Infrazioni\", entra nel gestionale e viene indirizzata al Capo Settore. All’arrivo il gestionale ricava automaticamente dalla posizione rilevata i dati catastali (Comune, Sezione, Foglio e Mappale). Il Capo Settore riceve l’allarme “Nuova rilevazione ricevuta”. In questo caso la pratica non è ancora assegnata a un Istruttore tecnico."
+        "text": "Una rilevazione effettuata dal Tecnico rilevatore tramite l’applicazione Esri Survey123, utilizzando il rilevamento \"Infrazioni\", entra nel gestionale e viene indirizzata al Capo Settore del Settore individuato dalla posizione del punto. All’arrivo il gestionale ricava automaticamente dalla posizione rilevata i dati catastali (Comune, Sezione, Foglio e Mappale). Il Capo Settore riceve l’allarme “Nuova rilevazione ricevuta”. In questo caso la pratica non è ancora assegnata a un Istruttore tecnico."
       },
       {
         "type": "heading3",
@@ -723,7 +723,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "rows": [
           [
             "Dati generali",
-            "Area, Settore, Ufficio di zona; riferimenti del Tecnico rilevatore; data rilevazione; Istruttore tecnico; data di trasmissione al Capo Settore."
+            "Area, Settore; riferimenti del Tecnico rilevatore; data rilevazione; Istruttore tecnico; data di trasmissione al Capo Settore."
           ],
           [
             "Trasgressore",
@@ -2973,7 +2973,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "bullet",
-        "text": "Statistiche: consente di scegliere un periodo, filtrare per Ufficio e Tipologia di infrazione e analizzare Uffici di zona, tipologie, andamento temporale, distribuzione per fase, ruolo competente, pratiche critiche e sintesi operativa."
+        "text": "Statistiche: consente di scegliere un periodo, filtrare per Settore e Tipologia di infrazione e analizzare Settori, tipologie, andamento temporale, distribuzione per fase, ruolo competente, pratiche critiche e sintesi operativa."
       },
       {
         "type": "bullet",
@@ -2999,13 +2999,13 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 3,
-        "text": "Usare Statistiche quando serve leggere il fenomeno per periodo, ufficio o tipologia di infrazione.",
+        "text": "Usare Statistiche quando serve leggere il fenomeno per periodo, Settore o tipologia di infrazione.",
         "label": "Aprire le Statistiche"
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Selezionare i filtri interattivi di Ufficio/Infrazione per restringere l’analisi e usare Azzera filtri per tornare all’insieme completo dei dati disponibili.",
+        "text": "Selezionare i filtri interattivi di Settore/Infrazione per restringere l’analisi e usare Azzera filtri per tornare all’insieme completo dei dati disponibili.",
         "label": "Filtrare le statistiche"
       },
       {
@@ -3267,7 +3267,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 6,
-        "text": "Compilare Area, Settore e Ufficio quando richiesti. Alcune combinazioni sono automatiche/fisse in base al ruolo.",
+        "text": "Compilare Area e Settore quando richiesti. Alcune combinazioni sono automatiche o fisse in base al ruolo. Il Tecnico rilevatore è registrato per sola Area.",
         "label": "Definire l’ambito di competenza"
       },
       {
@@ -3874,64 +3874,9 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
     ]
   },
   {
-    "id": "appendice-a-checklist-per-ruolo",
-    "order": 128,
-    "title": "Appendice A — Checklist per ruolo",
-    "roles": [
-      "*"
-    ],
-    "blocks": [
-      {
-        "type": "table",
-        "headers": [
-          "Ruolo",
-          "Checklist sintetica"
-        ],
-        "rows": [
-          [
-            "Tecnico rilevatore",
-            "Effettua la rilevazione sul territorio tramite l’applicazione Esri Survey123, utilizzando il rilevamento \"Infrazioni\": sceglie l’Ufficio di zona soltanto se è assegnato a più uffici, localizza sulla mappa il punto dell’infrazione e può aggiungere annotazioni tecniche; i Dati tecnici rilevati, cioè gli elementi di rete e i manufatti individuati entro 2 m dal punto, vengono acquisiti automaticamente. La rilevazione confluisce nel gestionale, che ne ricava i dati catastali dalla posizione, e viene successivamente gestita dal Capo Settore."
-          ],
-          [
-            "Istruttore tecnico",
-            "Prende in carico le assegnazioni; compila o corregge l’istruttoria tecnica; gestisce Nota spese e allegati; salva; trasmette al Capo Settore; risponde alle richieste di integrazione, ma non ne apre di nuove; quando consentito, usa Elimina per archiviare una propria pratica iniziale creata per errore."
-          ],
-          [
-            "Capo Settore",
-            "Distingue una rilevazione proveniente dal Tecnico rilevatore da una pratica creata direttamente dall’Istruttore tecnico; assegna l’Istruttore tecnico solo quando la rilevazione proveniente dal Tecnico rilevatore non è ancora assegnata; verifica; può richiedere integrazioni e, nei casi previsti, respingere la pratica; trasmette al Responsabile dell’istruttoria tecnica."
-          ],
-          [
-            "Responsabile dell’istruttoria tecnica",
-            "Prende in carico; consulta; può modificare Occorrenza e Grado; valida verso il Direttore tecnico; può richiedere integrazioni all’Istruttore tecnico; gestisce i rientri e le integrazioni tecniche richieste dal Responsabile dell’istruttoria amministrativa."
-          ],
-          [
-            "Direttore tecnico",
-            "Prende in carico; approva verso il Responsabile dell’istruttoria amministrativa; può chiedere un’integrazione all’Istruttore tecnico o al Responsabile dell’istruttoria tecnica, secondo gli aspetti da correggere; può respingere."
-          ],
-          [
-            "Responsabile dell’istruttoria amministrativa",
-            "Assegna le pratiche all’Istruttore amministrativo; verifica e valida l’istruttoria amministrativa; può richiedere e indirizzare le integrazioni; verifica l’Atto di accertamento; gestisce la riapertura; configura i parametri sanzionatori e la Rubrica."
-          ],
-          [
-            "Istruttore amministrativo",
-            "Prende in carico le pratiche assegnate; svolge l’istruttoria amministrativa; può richiedere integrazioni; esprime l’esito e, in caso di conformità, il gestionale genera o aggiorna la Proposta di contestazione mentre l’Istruttore amministrativo predispone la bozza di determinazione; cura gli adempimenti successivi relativi ad Atto di accertamento, pagoPA, protocollo, notifica, pagamento, ricorso, CdA e definizione."
-          ],
-          [
-            "Direttore amministrativo",
-            "Definisce il procedimento amministrativo mediante l’adozione del provvedimento dirigenziale; sottoscrive la notifica dell’Atto di accertamento; le indicazioni di riapertura vengono registrate dal Responsabile dell’istruttoria amministrativa."
-          ],
-          [
-            "Amministratore del sistema",
-            "Gestisce gli utenti e dispone della visibilità completa delle pratiche per le attività di controllo e assistenza."
-          ]
-        ]
-      }
-    ]
-  },
-  {
-    "id": "appendice-b-regola-pratica-per-distinguere-consultazione-e-lavorazione",
+    "id": "appendice-a-regola-pratica-per-distinguere-consultazione-e-lavorazione",
     "order": 129,
-    "title": "Appendice B — Regola pratica per distinguere consultazione e lavorazione",
+    "title": "Appendice A — Regola pratica per distinguere consultazione e lavorazione",
     "roles": [
       "*"
     ],

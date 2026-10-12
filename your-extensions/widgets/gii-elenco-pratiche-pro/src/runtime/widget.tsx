@@ -35,8 +35,6 @@ type GiiAssignment = {
   settore: number | null;
   settoreCod: string;
   settoreFull?: string;
-  ufficio: number | null;
-  ufficioLabel?: string;
   gruppo?: string;
 };
 
@@ -48,7 +46,6 @@ type GiiUserInfo = {
   areaCod: "AMM" | "AGR" | "TEC" | "";
   settore: number | null;
   settoreCod: string;
-  ufficio: number | null;
   gruppo?: string;
   isAdmin: boolean;
   isWorkflowAdmin?: boolean;
@@ -666,7 +663,6 @@ type GiiOpenPracticeIntent = {
   requestedByRole?: string;
   requestedByArea?: string;
   requestedBySettore?: string;
-  requestedByUfficio?: string;
 };
 
 function normalizeOpenPracticeScopeValue(value: any): string {
@@ -688,7 +684,6 @@ function buildOpenPracticeScopeFromUser(user: any): {
   role: string;
   area: string;
   settore: string;
-  ufficio: string;
 } {
   const role = getEffectiveRole(
     String(user?.ruoloCod || "").trim(),
@@ -705,10 +700,6 @@ function buildOpenPracticeScopeFromUser(user: any): {
     settore: normalizeOpenPracticeScopeValue(
       user?.settoreCod || normalizeSettoreCode(user?.settore),
     ),
-    ufficio:
-      user?.ufficio != null && user?.ufficio !== ""
-        ? String(user.ufficio).trim()
-        : "",
   };
 }
 
@@ -723,11 +714,6 @@ function clearOpenPracticeIntentIfStaleForUser(
     role: normalizeOpenPracticeScopeValue(intentRaw?.requestedByRole),
     area: normalizeOpenPracticeScopeValue(intentRaw?.requestedByArea),
     settore: normalizeOpenPracticeScopeValue(intentRaw?.requestedBySettore),
-    ufficio:
-      intentRaw?.requestedByUfficio != null &&
-      intentRaw?.requestedByUfficio !== ""
-        ? String(intentRaw.requestedByUfficio).trim()
-        : "",
   };
 
   // Gli intenti vecchi, privi della firma utente, non devono più produrre
@@ -745,8 +731,7 @@ function clearOpenPracticeIntentIfStaleForUser(
     requested.username !== current.username ||
     requested.role !== current.role ||
     requested.area !== current.area ||
-    requested.settore !== current.settore ||
-    requested.ufficio !== current.ufficio;
+    requested.settore !== current.settore;
 
   if (mismatch) {
     clearOpenPracticeIntent();
@@ -797,7 +782,6 @@ function readOpenPracticeIntent(
       requestedByRole: String(j?.requestedByRole || "").trim(),
       requestedByArea: String(j?.requestedByArea || "").trim(),
       requestedBySettore: String(j?.requestedBySettore || "").trim(),
-      requestedByUfficio: String(j?.requestedByUfficio || "").trim(),
     };
   } catch {
     return null;
@@ -947,8 +931,6 @@ function migrateColumns(cfg: any): ColumnDef[] {
     };
   };
 
-  const fieldUfficio = String(cfg?.fieldUfficio || "ufficio_zona");
-
   // Ordine operativo: prima identificazione/origine del rapporto, poi lettura
   // operativa per il ruolo corrente. Le colonne procedimentali sono raggruppate
   // visivamente nell'header: stato istruttoria + mittente + destinatario + ultimo agg.
@@ -982,12 +964,6 @@ function migrateColumns(cfg: any): ColumnDef[] {
       label: "Data rilevazione",
       field: "data_rilevazione",
       width: 140,
-    }),
-    take({
-      id: "col_ufficio",
-      label: "Ufficio origine",
-      field: fieldUfficio,
-      width: 190,
     }),
     take({
       id: "col_stato",
@@ -1747,7 +1723,6 @@ function pickTextSearchExtra(
     getSettoreDisplayFromRecord(d, domainLabels),
     getAreaCodeFromRecord(d),
     getSettoreCodeFromRecord(d),
-    pickField(d, "ufficio_zona"),
     // Trasgressore: la ricerca generale deve consentire di individuare
     // la pratica anche a partire dall'anagrafica del soggetto.
     pickField(d, "nome"),
@@ -2076,13 +2051,11 @@ function readGiiUserFromHeader(): GiiUserInfo | null {
       profiloLabel: String(a?.profiloLabel || a?.ruoloFull || aRuoloCod),
       area: aArea, areaCod: aAreaCod, areaFull: String(a?.areaFull || ""),
       settore: aSettore, settoreCod: resolveSettoreCode(aSettore, a?.settoreCod ?? a?.settore_cod), settoreFull: String(a?.settoreFull || ""),
-      ufficio: a?.ufficio != null ? Number(a.ufficio) : null, ufficioLabel: String(a?.ufficioLabel || ""),
       gruppo: String(a?.gruppo || ""),
     };
   });
   if (!assignments.length) assignments.push({
-    ruoloCod, ruoloLabel, area, areaCod, settore, settoreCod,
-    ufficio: cached.ufficio != null ? Number(cached.ufficio) : null, gruppo
+    ruoloCod, ruoloLabel, area, areaCod, settore, settoreCod, gruppo
   });
 
   return {
@@ -2093,7 +2066,6 @@ function readGiiUserFromHeader(): GiiUserInfo | null {
     areaCod,
     settore,
     settoreCod,
-    ufficio: cached.ufficio != null ? Number(cached.ufficio) : null,
     gruppo,
     isAdmin,
     assignments,
@@ -2662,7 +2634,7 @@ export default function Widget(props: Props) {
   const isVisibleUnderAssignment = React.useCallback((a: GiiAssignment, d: any): boolean => {
     if (!assignmentAppliesToRecord(a, d)) return false;
     const role = getAssignmentRole(a);
-    if (role === "IA") return isPracticeAssignedToCurrentIa(d, { ...(giiUser as any), ruoloCod: a.ruoloCod, area: a.area, areaCod: a.areaCod, settore: a.settore, settoreCod: a.settoreCod, ufficio: a.ufficio } as any);
+    if (role === "IA") return isPracticeAssignedToCurrentIa(d, { ...(giiUser as any), ruoloCod: a.ruoloCod, area: a.area, areaCod: a.areaCod, settore: a.settore, settoreCod: a.settoreCod } as any);
     if (role !== "IT") return true;
 
     const meUser = String(giiUser?.username || "").trim();
@@ -3182,7 +3154,6 @@ export default function Widget(props: Props) {
   // Campi base
   const fieldPratica = txt(cfg.fieldPratica || "objectid");
   const fieldDataRil = txt(cfg.fieldDataRilevazione || "data_rilevazione");
-  const fieldUfficio = txt(cfg.fieldUfficio || "ufficio_zona");
 
   // Nota: per DT/DA la presa in carico è derivata da stato_* e dt_presa_in_carico_*.
 
@@ -5706,7 +5677,6 @@ export default function Widget(props: Props) {
     giiUser?.areaCod,
     giiUser?.settore,
     giiUser?.settoreCod,
-    giiUser?.ufficio,
     forceListRefresh,
   ]);
 
@@ -6253,15 +6223,6 @@ export default function Widget(props: Props) {
     }
 
     .statoCellWrap {
-      white-space: normal;
-      overflow: visible;
-      text-overflow: clip;
-      line-height: 1.2;
-      overflow-wrap: anywhere;
-      word-break: normal;
-    }
-
-    .ufficioOrigineCell {
       white-space: normal;
       overflow: visible;
       text-overflow: clip;
@@ -7029,7 +6990,6 @@ export default function Widget(props: Props) {
                       const dataRil = formatDateOnlyIt(
                         pickRilevazioneDateMs(d, fieldDataRil),
                       );
-                      const ufficio = txt(d[fieldUfficio]);
 
                       const displaySintetico = computeDisplaySintetico(d);
                       const faseIstruttoria = computeFaseIstruttoria(d);
@@ -7571,12 +7531,10 @@ export default function Widget(props: Props) {
                               );
                             }
                             const val = txt(d[f]);
-                            const isUfficioOrigine =
-                              fl === fieldUfficio.toLowerCase();
                             return (
                               <div
                                 key={col.id}
-                                className={`${ci === 0 ? "cell first" : "cell"}${isUfficioOrigine ? " ufficioOrigineCell" : ""}`}
+                                className={ci === 0 ? "cell first" : "cell"}
                                 title={val}
                               >
                                 {val}

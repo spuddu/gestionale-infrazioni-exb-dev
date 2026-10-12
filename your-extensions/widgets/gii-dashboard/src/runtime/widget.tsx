@@ -15,7 +15,6 @@ type GiiAssignment = {
   areaCod: 'AMM' | 'AGR' | 'TEC' | ''
   settore: number | null
   settoreCod: string
-  ufficio?: number | null
 }
 
 type GiiUserInfo = {
@@ -35,7 +34,6 @@ type GiiUserInfo = {
   settore: number | null
   settoreCod: string
   settoreFull?: string
-  ufficioLabel?: string
   gruppo?: string
   isAdmin: boolean
   isWorkflowAdmin?: boolean
@@ -52,7 +50,7 @@ type TrendPoint = { label: string; value: number }
 type RecentSortKey = 'numeroRapporto' | 'comune' | 'fase' | 'lastUpdate'
 type SortDir = 'asc' | 'desc'
 type RecentSortRule = { key: RecentSortKey; dir: SortDir }
-type UfficioSortBy = 'label' | 'count'
+type SettoreSortBy = 'label' | 'count'
 type InfrazioneSortBy = 'article' | 'count'
 
 const DEFAULT_RECENT_SORT_RULES: RecentSortRule[] = [{ key: 'lastUpdate', dir: 'desc' }]
@@ -137,11 +135,10 @@ function readGiiUser (): GiiUserInfo | null {
       area: aArea,
       areaCod: normalizeAreaCode(a?.areaCod ?? a?.area_cod, aArea),
       settore: aSettore,
-      settoreCod: normalizeSettoreCode(a?.settoreCod ?? a?.settore_cod, aSettore),
-      ufficio: a?.ufficio != null && a.ufficio !== '' ? Number(a.ufficio) : null
+      settoreCod: normalizeSettoreCode(a?.settoreCod ?? a?.settore_cod, aSettore)
     }
   }).filter((a: GiiAssignment) => !!a.ruoloCod)
-  if (!assignments.length) assignments.push({ ruoloCod, area, areaCod, settore, settoreCod, ufficio: cached.ufficio != null ? Number(cached.ufficio) : null })
+  if (!assignments.length) assignments.push({ ruoloCod, area, areaCod, settore, settoreCod })
   return {
     username: String(cached.username || '').trim(),
     fullName: String(cached.fullName || cached.full_name || cached.nome || cached.displayName || cached.username || '').trim(),
@@ -159,7 +156,6 @@ function readGiiUser (): GiiUserInfo | null {
     settore,
     settoreCod,
     settoreFull: String(cached.settoreFull || cached.settore_full || '').trim(),
-    ufficioLabel: String(cached.ufficioLabel || cached.ufficio_label || '').trim(),
     gruppo: String(cached.gruppo || ''),
     isAdmin,
     isWorkflowAdmin: !!cached.isWorkflowAdmin,
@@ -471,85 +467,21 @@ function getAnalysisDateMs (d: any): number | null {
     getLastTouchMs(d)
 }
 
-const UFFICIO_LABEL_BY_ID: Record<number, string> = {
-  1: 'Cagliari',
-  2: 'Quartucciu (loc. Is Forreddus)',
-  3: 'Muravera',
-  4: 'Villaputzu',
-  5: 'San Sperate',
-  6: 'Serramanna (loc. Pimpisu)',
-  7: 'San Gavino Monreale',
-  8: 'Villacidro',
-  9: 'San Giovanni Suergiu (loc. Sa Carabia)',
-  10: 'Masainas',
-  11: 'Senorbì',
-  12: 'Iglesias (loc. Sa Stoia)',
-  13: 'Siliqua',
-  14: 'Villasor',
-  15: 'San Giovanni Suergiu (loc. Is Samis)',
-  16: 'Fluminimaggiore'
+const SETTORE_LABEL_BY_CODE: Record<string, string> = {
+  D1: 'Distretto 1 Quartu Sant’Elena',
+  D2: 'Distretto 2 Serramanna',
+  D3: 'Distretto 3 San Gavino',
+  D4: 'Distretto 4 Basso Sulcis',
+  D5: 'Distretto 5 Senorbì',
+  D6: 'Distretto 6 Cixerri',
+  D7: 'Distretto 7 San Sperate',
+  DS: 'Manutenzione opere di dreno e di scolo'
 }
 
-const UFFICIO_CANONICAL_BY_KEY: Record<string, string> = {
-  cagliari: 'Cagliari',
-  quartucciu: 'Quartucciu (loc. Is Forreddus)',
-  'quartucciu loc is forreddus': 'Quartucciu (loc. Is Forreddus)',
-  muravera: 'Muravera',
-  villaputzu: 'Villaputzu',
-  'san sperate': 'San Sperate',
-  serramanna: 'Serramanna (loc. Pimpisu)',
-  'serramanna loc pimpisu': 'Serramanna (loc. Pimpisu)',
-  'san gavino monreale': 'San Gavino Monreale',
-  villacidro: 'Villacidro',
-  masainas: 'Masainas',
-  senorbi: 'Senorbì',
-  'senorbì': 'Senorbì',
-  iglesias: 'Iglesias (loc. Sa Stoia)',
-  'iglesias loc sa stoia': 'Iglesias (loc. Sa Stoia)',
-  fluminimaggiore: 'Fluminimaggiore',
-  siliqua: 'Siliqua',
-  villasor: 'Villasor'
-}
-
-function normalizeOfficeKey (value: any): string {
-  return String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[().']/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function normalizeOfficeText (value: any): string {
-  const raw = String(value ?? '').trim()
-  if (!raw || raw === '—') return ''
-  const numeric = Number(raw)
-  if (/^\d+$/.test(raw) && UFFICIO_LABEL_BY_ID[numeric]) return UFFICIO_LABEL_BY_ID[numeric]
-  return UFFICIO_CANONICAL_BY_KEY[normalizeOfficeKey(raw)] || raw
-}
-
-function getUfficioLabel (d: any): string {
-  const textValue = getFirst(d, [
-    'ufficio_zona', 'Ufficio_zona', 'UFFICIO_ZONA',
-    'ufficioZona', 'ufficio_di_zona', 'Ufficio di Zona di competenza',
-    'ufficioLabel', 'ufficio_label', 'ufficio',
-    'ufficio_competente', 'ufficio_utente'
-  ], '')
-  const labelFromText = normalizeOfficeText(textValue)
-  if (labelFromText) return labelFromText
-
-  const idValue = getFirst(d, [
-    'id_ufficio', 'Id_ufficio', 'ID_UFFICIO',
-    'ufficio_id', 'idUfficio', 'Codice ufficio'
-  ], '')
-  const id = Number(String(idValue).trim())
-  if (Number.isFinite(id) && UFFICIO_LABEL_BY_ID[Math.trunc(id)]) {
-    return UFFICIO_LABEL_BY_ID[Math.trunc(id)]
-  }
-
-  return 'Non indicato'
+function getSettoreLabel (d: any): string {
+  const code = getRecordSettoreCode(d)
+  if (!code) return 'Non indicato'
+  return SETTORE_LABEL_BY_CODE[code] || code
 }
 
 const INFRACTION_LABEL_BY_CODE: Record<string, string> = {
@@ -654,10 +586,10 @@ function recordHasInfraction (d: any, label: string): boolean {
   return getInfractionLabels(d).some(v => v === target)
 }
 
-function buildUfficioItems (records: DashRecord[]): ChartItem[] {
+function buildSettoreItems (records: DashRecord[]): ChartItem[] {
   const map = new Map<string, number>()
   for (const r of records) {
-    const k = getUfficioLabel(r)
+    const k = getSettoreLabel(r)
     map.set(k, (map.get(k) || 0) + 1)
   }
   return Array.from(map.entries()).map(([label, value]) => ({ label, value }))
@@ -678,7 +610,7 @@ function getInfractionArticleNumber (label: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-function sortUfficioItems (items: ChartItem[], sortBy: UfficioSortBy, dir: SortDir): ChartItem[] {
+function sortSettoreItems (items: ChartItem[], sortBy: SettoreSortBy, dir: SortDir): ChartItem[] {
   const direction = dir === 'asc' ? 1 : -1
   return [...items].sort((a, b) => {
     const cmp = sortBy === 'count'
@@ -1214,10 +1146,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [recentSortRules, setRecentSortRules] = React.useState<RecentSortRule[]>(DEFAULT_RECENT_SORT_RULES)
   const [periodFilter, setPeriodFilter] = React.useState<PeriodFilter>('all')
   const [activeTab, setActiveTab] = React.useState<DashboardTab>('operativo')
-  const [selectedUfficio, setSelectedUfficio] = React.useState('')
+  const [selectedSettore, setSelectedSettore] = React.useState('')
   const [selectedInfrazione, setSelectedInfrazione] = React.useState('')
-  const [ufficioSortBy, setUfficioSortBy] = React.useState<UfficioSortBy>('label')
-  const [ufficioSortDir, setUfficioSortDir] = React.useState<SortDir>('asc')
+  const [settoreSortBy, setSettoreSortBy] = React.useState<SettoreSortBy>('label')
+  const [settoreSortDir, setSettoreSortDir] = React.useState<SortDir>('asc')
   const [infrazioneSortBy, setInfrazioneSortBy] = React.useState<InfrazioneSortBy>('article')
   const [infrazioneSortDir, setInfrazioneSortDir] = React.useState<SortDir>('asc')
 
@@ -1292,11 +1224,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [records, periodFilter])
   const statsFilteredRecords = React.useMemo(() => {
     return analysisRecords.filter(r => {
-      const ufficioOk = !selectedUfficio || getUfficioLabel(r) === selectedUfficio
+      const settoreOk = !selectedSettore || getSettoreLabel(r) === selectedSettore
       const infrazioneOk = !selectedInfrazione || recordHasInfraction(r, selectedInfrazione)
-      return ufficioOk && infrazioneOk
+      return settoreOk && infrazioneOk
     })
-  }, [analysisRecords, selectedUfficio, selectedInfrazione])
+  }, [analysisRecords, selectedSettore, selectedInfrazione])
   const displayRecords = activeTab === 'statistiche' ? statsFilteredRecords : records
   const attesaMia = displayRecords.filter(r => isAttesaMia(r, user)).length
   const attesaAltri = displayRecords.filter(r => isAttesaAltri(r, user)).length
@@ -1335,10 +1267,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return toChartItems(map, 8)
   }, [displayRecords, user])
 
-  const byUfficio = React.useMemo(() => {
+  const bySettore = React.useMemo(() => {
     const map = new Map<string, number>()
     for (const r of displayRecords) {
-      const k = getUfficioLabel(r)
+      const k = getSettoreLabel(r)
       map.set(k, (map.get(k) || 0) + 1)
     }
     return toChartItems(map, 8)
@@ -1352,23 +1284,23 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return toChartItems(map, 8)
   }, [displayRecords])
 
-  const allUffici = React.useMemo(() => {
+  const allSettori = React.useMemo(() => {
     const base = selectedInfrazione
       ? analysisRecords.filter(r => recordHasInfraction(r, selectedInfrazione))
       : analysisRecords
-    return sortUfficioItems(buildUfficioItems(base), ufficioSortBy, ufficioSortDir)
-  }, [analysisRecords, selectedInfrazione, ufficioSortBy, ufficioSortDir])
+    return sortSettoreItems(buildSettoreItems(base), settoreSortBy, settoreSortDir)
+  }, [analysisRecords, selectedInfrazione, settoreSortBy, settoreSortDir])
 
   const allInfrazioni = React.useMemo(() => {
-    const base = selectedUfficio
-      ? analysisRecords.filter(r => getUfficioLabel(r) === selectedUfficio)
+    const base = selectedSettore
+      ? analysisRecords.filter(r => getSettoreLabel(r) === selectedSettore)
       : analysisRecords
     return sortInfrazioneItems(buildInfrazioneItems(base), infrazioneSortBy, infrazioneSortDir)
-  }, [analysisRecords, selectedUfficio, infrazioneSortBy, infrazioneSortDir])
+  }, [analysisRecords, selectedSettore, infrazioneSortBy, infrazioneSortDir])
 
   React.useEffect(() => {
-    if (selectedUfficio && !allUffici.some(item => item.label === selectedUfficio)) setSelectedUfficio('')
-  }, [allUffici, selectedUfficio])
+    if (selectedSettore && !allSettori.some(item => item.label === selectedSettore)) setSelectedSettore('')
+  }, [allSettori, selectedSettore])
 
   React.useEffect(() => {
     if (selectedInfrazione && !allInfrazioni.some(item => item.label === selectedInfrazione)) setSelectedInfrazione('')
@@ -1419,7 +1351,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   React.useEffect(() => {
     setRecentPage(1)
-  }, [displayRecords.length, recentSortRules, periodFilter, activeTab, selectedUfficio, selectedInfrazione])
+  }, [displayRecords.length, recentSortRules, periodFilter, activeTab, selectedSettore, selectedInfrazione])
 
   const recentRowsPerPage = Math.max(1, Number((cfg as any).tableRows || 25))
   const recentPageCount = Math.max(1, Math.ceil(recent.length / recentRowsPerPage))
@@ -1553,7 +1485,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             <div style={{ minWidth: 0 }}>
               <div style={{ color: cfg.accentColor, fontSize: 10.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1.6, marginBottom: 5 }}>Statistiche dinamiche</div>
               <h2 style={{ margin: 0, color: cfg.textColor, fontSize: 26, lineHeight: 1.05, fontWeight: 900 }}>Cruscotto statistiche</h2>
-              <div style={{ color: cfg.mutedColor, fontSize: 13, marginTop: 7, maxWidth: 760, lineHeight: 1.42 }}>Quadro dinamico delle pratiche, degli uffici e delle tipologie di infrazione.</div>
+              <div style={{ color: cfg.mutedColor, fontSize: 13, marginTop: 7, maxWidth: 760, lineHeight: 1.42 }}>Quadro dinamico delle pratiche, dei Settori e delle tipologie di infrazione.</div>
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginTop: 11 }}>
                 {lastLoad && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Aggiornato: {new Date(lastLoad).toLocaleString('it-IT')}</div>}
                 {cfg.showTechnicalInfo && views.length > 0 && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>{views.length > 1 ? 'Ambiti dati' : 'Ambito dati'}: {viewsLabel}</div>}
@@ -1562,10 +1494,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             </div>
             <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center' }}>
               <PeriodSelector value={periodFilter} onChange={setPeriodFilter} cfg={cfg} />
-              {(selectedUfficio || selectedInfrazione) && (
+              {(selectedSettore || selectedInfrazione) && (
                 <button
                   type='button'
-                  onClick={() => { setSelectedUfficio(''); setSelectedInfrazione('') }}
+                  onClick={() => { setSelectedSettore(''); setSelectedInfrazione('') }}
                   style={{ border: `1px solid ${cfg.accentColor}`, background: 'rgba(56,189,248,0.16)', color: cfg.textColor, borderRadius: 999, padding: '9px 12px', fontWeight: 900, cursor: 'pointer' }}
                 >Azzera filtri</button>
               )}
@@ -1590,29 +1522,29 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
             <span style={{ color: cfg.mutedColor, fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1.1 }}>Filtri attivi</span>
-            <span style={{ color: selectedUfficio ? '#03111f' : cfg.mutedColor, background: selectedUfficio ? cfg.accentColor : 'rgba(148,163,184,0.12)', border: `1px solid ${selectedUfficio ? cfg.accentColor : cfg.cardBorder}`, borderRadius: 999, padding: '6px 9px', fontSize: 11.5, fontWeight: 900 }}>Ufficio: {selectedUfficio || 'Tutti'}</span>
+            <span style={{ color: selectedSettore ? '#03111f' : cfg.mutedColor, background: selectedSettore ? cfg.accentColor : 'rgba(148,163,184,0.12)', border: `1px solid ${selectedSettore ? cfg.accentColor : cfg.cardBorder}`, borderRadius: 999, padding: '6px 9px', fontSize: 11.5, fontWeight: 900 }}>Settore: {selectedSettore || 'Tutti'}</span>
             <span style={{ color: selectedInfrazione ? '#03111f' : cfg.mutedColor, background: selectedInfrazione ? '#34d399' : 'rgba(148,163,184,0.12)', border: `1px solid ${selectedInfrazione ? '#34d399' : cfg.cardBorder}`, borderRadius: 999, padding: '6px 9px', fontSize: 11.5, fontWeight: 900 }}>Infrazione: {selectedInfrazione || 'Tutte'}</span>
             <span style={{ color: cfg.mutedColor, fontSize: 11.5, marginLeft: 'auto' }}>{displayRecords.length} pratiche nel perimetro selezionato</span>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12, marginBottom: 12 }}>
             <InteractiveRanking
-              title='Uffici di zona'
+              title='Settori'
               subtitle='Elenco completo. Clic su una riga per filtrare tutta la dashboard.'
-              items={allUffici}
-              total={allUffici.reduce((sum, item) => sum + item.value, 0)}
-              selected={selectedUfficio}
+              items={allSettori}
+              total={allSettori.reduce((sum, item) => sum + item.value, 0)}
+              selected={selectedSettore}
               cfg={cfg}
               accent={cfg.accentColor}
-              sortBy={ufficioSortBy}
-              sortDir={ufficioSortDir}
+              sortBy={settoreSortBy}
+              sortDir={settoreSortDir}
               sortOptions={[
-                { value: 'label', label: 'Ufficio' },
+                { value: 'label', label: 'Settore' },
                 { value: 'count', label: 'Numero' }
               ]}
-              onSortByChange={value => setUfficioSortBy(value === 'count' ? 'count' : 'label')}
-              onSortDirChange={setUfficioSortDir}
-              onSelect={setSelectedUfficio}
+              onSortByChange={value => setSettoreSortBy(value === 'count' ? 'count' : 'label')}
+              onSortDirChange={setSettoreSortDir}
+              onSelect={setSelectedSettore}
             />
             <InteractiveRanking
               title='Tipologie di infrazione'
@@ -1668,7 +1600,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
                 {[
                   ['Fase più frequente', byFase[0]?.label || '—', byFase[0]?.value || 0],
-                  ['Ufficio più presente', byUfficio[0]?.label || '—', byUfficio[0]?.value || 0],
+                  ['Settore più presente', bySettore[0]?.label || '—', bySettore[0]?.value || 0],
                   ['Infrazione ricorrente', byInfrazione[0]?.label || '—', byInfrazione[0]?.value || 0],
                   ['Ultimo aggiornamento', formatShortDateTime(recent[0]?.t || null), recent.length]
                 ].map(([label, value, count]) => (

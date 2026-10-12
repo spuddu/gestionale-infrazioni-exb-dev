@@ -69,25 +69,6 @@ const SETTORE_FULL: Record<string, string> = {
   DS:'Manutenzione opere di dreno e di scolo'
 }
 
-const UFFICIO_LABEL: Record<number, string> = {
-  1:'Cagliari',
-  2:'Quartucciu (loc. Is Forreddus)',
-  3:'Muravera',
-  4:'Villaputzu',
-  5:'San Sperate',
-  6:'Serramanna (loc. Pimpisu)',
-  7:'San Gavino Monreale',
-  8:'Villacidro',
-  9:'San Giovanni Suergiu (loc. Sa Carabia)',
-  10:'Masainas',
-  11:'Senorbì',
-  12:'Iglesias (loc. Sa Stoia)',
-  13:'Siliqua',
-  14:'Villasor',
-  15:'San Giovanni Suergiu (loc. Is Samis)',
-  16:'Fluminimaggiore'
-}
-
 
 function resolvePageId(pageTokenRaw: string): string | null {
   const tok0 = (pageTokenRaw || '').trim()
@@ -246,8 +227,6 @@ interface GiiUserAssignment {
   settoreCod: string
   settore_cod?: string
   settoreFull?: string
-  ufficio: number | null
-  ufficioLabel?: string
   gruppo: string
   isWorkflowAdmin: boolean
 }
@@ -258,8 +237,6 @@ interface GiiActorAssignmentMeta {
   ruoloCod: string
   areaCod: string
   settoreCod: string
-  ufficio: number | null
-  ufficioLabel: string
 }
 
 interface GiiUserRole {
@@ -289,9 +266,6 @@ interface GiiUserRole {
   settore_cod?: string
   /** Etichetta settore risolta preferibilmente da dominio AGOL. */
   settoreFull?: string
-  ufficio: number | null
-  /** Etichetta ufficio risolta preferibilmente da dominio AGOL, con fallback locale. */
-  ufficioLabel?: string
   gruppo: string
   /** Backward-compat GII: TRUE se il ruolo workflow è ADMIN. */
   isAdmin: boolean
@@ -409,7 +383,6 @@ function normalizeAssignmentFromValues(values: any, domainLabels?: DomainLabelMa
   const areaCod = isWorkflowAdmin ? '' : areaResolved.code
   const settore = isWorkflowAdmin ? null : settoreResolved.num
   const settoreCod = isWorkflowAdmin ? '' : settoreResolved.code
-  const ufficio = isWorkflowAdmin ? null : toNum(values?.ufficio)
 
   const ruoloFull = String(
     values?.ruoloFull || values?.ruolo_full ||
@@ -426,12 +399,6 @@ function normalizeAssignmentFromValues(values: any, domainLabels?: DomainLabelMa
     getDomainLabelFromCandidates(domainLabels, 'settore_cod', settoreCod, 'settore', settore) ||
     SETTORE_FULL[settoreCod] || settoreCod || ''
   )
-  const ufficioLabel = isWorkflowAdmin ? '' : String(
-    values?.ufficioLabel || values?.ufficio_label ||
-    getDomainLabel(domainLabels, 'ufficio', ufficio) ||
-    getDomainLabel(domainLabels, 'id_ufficio', ufficio) ||
-    (ufficio != null ? UFFICIO_LABEL[ufficio] || String(ufficio) : '')
-  )
   const profiloCod = getProfiloCod(ruoloCod, areaCod)
 
   return {
@@ -439,7 +406,7 @@ function normalizeAssignmentFromValues(values: any, domainLabels?: DomainLabelMa
     profiloCod, profiloLabel: getProfiloLabel(profiloCod, ruoloFull, ruoloCod, areaCod),
     area, areaCod, area_cod: areaCod, areaFull,
     settore, settoreCod, settore_cod: settoreCod, settoreFull,
-    ufficio, ufficioLabel, gruppo: String(values?.gruppo || ''), isWorkflowAdmin
+    gruppo: String(values?.gruppo || ''), isWorkflowAdmin
   }
 }
 
@@ -462,8 +429,6 @@ function buildBuilderAdminUser(username: string, fullName: string, domainLabels?
     settoreCod: '',
     settore_cod: '',
     settoreFull: '',
-    ufficio: null,
-    ufficioLabel: '',
     gruppo: '',
     isAdmin: true,
     isOrgAdmin: true,
@@ -483,12 +448,11 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const areaResolved = resolveCodeAndNum(cached.area_cod ?? cached.areaCod, cached.area, AREA_LABEL, AREA_NUM)
     const settoreResolved = resolveCodeAndNum(cached.settore_cod ?? cached.settoreCod, cached.settore, SETTORE_LABEL, SETTORE_NUM)
 
-    // ADMIN trasversale: mai area/settore/ufficio (anche se presenti per errore in cache)
+    // ADMIN trasversale: mai area/settore (anche se presenti per errore in cache)
     const area = isWorkflowAdmin ? null : areaResolved.num
     const areaCod = isWorkflowAdmin ? '' : areaResolved.code
     const settore = isWorkflowAdmin ? null : settoreResolved.num
     const settoreCod = isWorkflowAdmin ? '' : settoreResolved.code
-    const ufficio = isWorkflowAdmin ? null : toNum(cached.ufficio)
 
     const fullName = String(cached.fullName || cached.full_name || cached.username)
 
@@ -530,8 +494,6 @@ async function loadUser(): Promise<GiiUserRole | null> {
       settoreCod,
       settore_cod: settoreCod,
       settoreFull: String(cached.settoreFull || cached.settore_full || (settoreCod ? SETTORE_FULL[settoreCod] || settoreCod : '')),
-      ufficio,
-      ufficioLabel: String(cached.ufficioLabel || cached.ufficio_label || (ufficio != null ? UFFICIO_LABEL[ufficio] || ufficio : '')),
       gruppo: String(cached.gruppo || ''),
       // Backward-compat GII: i vecchi widget che leggono isAdmin devono intendere ADMIN workflow.
       isAdmin: isWorkflowAdmin,
@@ -570,7 +532,7 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const domainLabels = buildDomainLabelMap((fl as any)?.fields || [])
     const qr = await fl.queryFeatures({
       where: `username = '${username.replace(/'/g,"''")}'`,
-      outFields: ['ruolo_cod','area','area_cod','settore','settore_cod','ufficio','gruppo','full_name'],
+      outFields: ['ruolo_cod','area','area_cod','settore','settore_cod','gruppo','full_name'],
       returnGeometry: false
     })
     const features: any[] = Array.isArray(qr?.features) ? qr.features : []
@@ -600,11 +562,9 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const areaCod = isWorkflowAdmin ? '' : areaResolved.code
     const settore = isWorkflowAdmin ? null : settoreResolved.num
     const settoreCod = isWorkflowAdmin ? '' : settoreResolved.code
-    const ufficio = isWorkflowAdmin ? null : toNum(a.ufficio)
     const ruoloFull = getDomainLabel(domainLabels, 'ruolo_cod', ruoloCod) || RUOLO_FULL[ruoloCod] || ruoloCod
     const areaFull = isWorkflowAdmin ? '' : (getDomainLabelFromCandidates(domainLabels, 'area_cod', areaCod, 'area', area) || AREA_FULL[areaCod] || areaCod)
     const settoreFull = isWorkflowAdmin ? '' : (getDomainLabelFromCandidates(domainLabels, 'settore_cod', settoreCod, 'settore', settore) || SETTORE_FULL[settoreCod] || settoreCod)
-    const ufficioLabel = isWorkflowAdmin ? '' : (getDomainLabel(domainLabels, 'ufficio', ufficio) || getDomainLabel(domainLabels, 'id_ufficio', ufficio) || (ufficio != null ? UFFICIO_LABEL[ufficio] || String(ufficio) : ''))
     const profiloCod = getProfiloCod(ruoloCod, areaCod)
     const profiloLabel = getProfiloLabel(profiloCod, ruoloFull, ruoloCod, areaCod)
 
@@ -617,7 +577,7 @@ async function loadUser(): Promise<GiiUserRole | null> {
       ruoloFull,
       profiloCod,
       profiloLabel,
-      // ADMIN trasversale: mai area/settore/ufficio
+      // ADMIN trasversale: mai area/settore
       area,
       areaCod,
       area_cod: areaCod,
@@ -626,8 +586,6 @@ async function loadUser(): Promise<GiiUserRole | null> {
       settoreCod,
       settore_cod: settoreCod,
       settoreFull,
-      ufficio,
-      ufficioLabel,
       gruppo: String(a.gruppo || ''),
       // Backward-compat GII: i vecchi widget che leggono isAdmin devono intendere ADMIN workflow.
       isAdmin: isWorkflowAdmin,
@@ -1308,31 +1266,6 @@ function alertPracticeRawValue (alert: GiiAlertItem | null | undefined, names: s
   return null
 }
 
-function officeLabelFromAlert (alert: GiiAlertItem | null | undefined): string {
-  const actorLabel = String(firstNonEmptyAlertRawValue(alert, ['__gii_actor_ufficio_label']) || '').trim()
-  if (actorLabel) return actorLabel
-
-  const actorOfficeRaw = firstNonEmptyAlertRawValue(alert, ['__gii_actor_ufficio_id'])
-  const actorOffice = Number(actorOfficeRaw)
-  if (Number.isFinite(actorOffice)) {
-    const resolved = String(UFFICIO_LABEL[actorOffice] || '').trim()
-    if (resolved) return resolved
-  }
-
-  const label = String(alertPracticeRawValue(alert, ['ufficio_zona', 'ufficioZona', 'ufficio_di_zona', 'destinatario_ufficio_zona']) ?? '').trim()
-  if (label && !/^\d+$/.test(label)) return label
-
-  const rawId = alertPracticeRawValue(alert, ['id_ufficio', 'ufficio_id', 'id_ufficio_zona', 'ufficio', 'destinatario_ufficio_id'])
-  const n = Number(rawId ?? label)
-  return Number.isFinite(n) ? String(UFFICIO_LABEL[n] || '').trim() : ''
-}
-
-function officeRefFromAlert (alert: GiiAlertItem | null | undefined): string {
-  const ufficio = officeLabelFromAlert(alert)
-  if (!ufficio) return ''
-  return /^Ufficio\b/i.test(ufficio) ? ufficio : `Ufficio di ${ufficio}`
-}
-
 function parseSectorCodeCandidate (value: any): string {
   const raw = String(value ?? '').trim()
   if (!raw) return ''
@@ -1522,12 +1455,11 @@ function alertSenderRoleCode (alert: GiiAlertItem | null | undefined): string {
 
 function alertActorRoleForBody (alert: GiiAlertItem | null | undefined): string {
   const role = alertSenderRoleCode(alert)
-  const office = officeRefFromAlert(alert)
   const sector = settoreFullLabelFromAlert(alert)
   const area = areaRefFromAlert(alert)
 
-  if (role === 'TR') return office ? `tecnico rilevatore dell’${office}` : 'tecnico rilevatore'
-  if (role === 'IT') return office ? `istruttore tecnico dell’${office}` : 'istruttore tecnico'
+  if (role === 'TR') return area ? `tecnico rilevatore dell’${area}` : 'tecnico rilevatore'
+  if (role === 'IT') return sector ? `istruttore tecnico del Settore ${sector}` : 'istruttore tecnico'
   if (role === 'CS') return sector ? `Capo Settore ${sector}` : 'Capo Settore'
   if (role === 'RIT') return area ? `Responsabile istruttoria tecnica dell’${area}` : 'Responsabile istruttoria tecnica'
   if (role === 'DT') return area ? `Direttore dell’${area}` : 'Direttore d’Area'
@@ -1742,14 +1674,15 @@ function alertSenderOrgLine (alert: GiiAlertItem): string {
   if (!alertIsStandardWorkflowAlert(alert)) return ''
 
   const role = alertSenderRoleCode(alert)
-  const office = officeLabelFromAlert(alert)
   const sector = settoreFullLabelFromAlert(alert)
   const area = areaShortLabelFromAlert(alert)
 
-  if (role === 'TR' || role === 'IT') {
-    if (sector && office) return `Settore - Ufficio: ${sector} - ${office}`
+  // Il TR è registrato solo per Area e rileva su tutto il comprensorio:
+  // il Settore della pratica è quello del luogo rilevato, non del mittente.
+  if (role === 'TR') return area ? `Area: ${area}` : ''
+
+  if (role === 'IT') {
     if (sector) return `Settore: ${sector}`
-    if (office) return `Ufficio: ${office}`
   }
 
   // CS, RIT e ruoli amministrativi mostrano il settore della specifica
@@ -1934,16 +1867,11 @@ function rememberGiiActorAssignment (attrs: Record<string, any>, fullName: strin
   if (!ruoloCod) return
   const areaCod = codeFromGiiUserAttrs(attrs, ['area_cod', 'areaCod'], ['area'], AREA_LABEL)
   const settoreCod = codeFromGiiUserAttrs(attrs, ['settore_cod', 'settoreCod'], ['settore'], SETTORE_LABEL)
-  const ufficioRaw = attrValueCi(attrs, ['id_ufficio', 'ufficio_id', 'ufficio'])
-  const ufficioNum = Number(ufficioRaw)
-  const ufficio = Number.isFinite(ufficioNum) ? ufficioNum : null
-  const ufficioLabelRaw = String(attrValueCi(attrs, ['ufficio_label', 'ufficioLabel', 'ufficio_zona', 'ufficioZona']) ?? '').trim()
-  const ufficioLabel = ufficioLabelRaw || (ufficio != null ? String(UFFICIO_LABEL[ufficio] || '').trim() : '')
 
-  const meta: GiiActorAssignmentMeta = { usernameKey, fullName, ruoloCod, areaCod, settoreCod, ufficio, ufficioLabel }
+  const meta: GiiActorAssignmentMeta = { usernameKey, fullName, ruoloCod, areaCod, settoreCod }
   const existing = __giiActorAssignmentsByUsername.get(usernameKey) || []
-  const signature = `${ruoloCod}|${areaCod}|${settoreCod}|${ufficio ?? ''}`
-  if (!existing.some(item => `${item.ruoloCod}|${item.areaCod}|${item.settoreCod}|${item.ufficio ?? ''}` === signature)) {
+  const signature = `${ruoloCod}|${areaCod}|${settoreCod}`
+  if (!existing.some(item => `${item.ruoloCod}|${item.areaCod}|${item.settoreCod}` === signature)) {
     existing.push(meta)
     __giiActorAssignmentsByUsername.set(usernameKey, existing)
   }
@@ -1963,9 +1891,6 @@ function actorAssignmentMetaForAlert (alert: GiiAlertItem | null | undefined): G
   const explicitSector = parseSectorCodeCandidate(tag)
   const practiceArea = parseAreaCodeCandidate(alertPracticeRawValue(alert, ['area_cod', 'areaCod', 'area', 'cod_area']))
   const practiceSector = parseSectorCodeCandidate(alertPracticeRawValue(alert, ['settore_cod', 'settoreCod', 'settore', 'cod_settore']))
-  const practiceOfficeRaw = alertPracticeRawValue(alert, ['id_ufficio', 'ufficio_id', 'id_ufficio_zona', 'ufficio'])
-  const practiceOfficeNum = Number(practiceOfficeRaw)
-  const practiceOffice = Number.isFinite(practiceOfficeNum) ? practiceOfficeNum : null
 
   for (const candidate of alertSenderUserCandidates(alert)) {
     const usernameKey = normalizeUsernameLookupKey(candidate)
@@ -1982,17 +1907,15 @@ function actorAssignmentMetaForAlert (alert: GiiAlertItem | null | undefined): G
     if (explicitArea) narrow(item => item.areaCod === explicitArea)
     if (explicitSector) narrow(item => item.settoreCod === explicitSector)
 
-    // I dati della pratica servono solo a disambiguare assegnazioni ancora equivalenti,
-    // ad esempio lo stesso IT sullo stesso settore ma su uffici differenti.
+    // I dati della pratica servono solo a disambiguare assegnazioni ancora equivalenti.
     if (matches.length > 1 && practiceArea) narrow(item => item.areaCod === practiceArea)
     if (matches.length > 1 && practiceSector) narrow(item => item.settoreCod === practiceSector)
-    if (matches.length > 1 && practiceOffice != null) narrow(item => item.ufficio === practiceOffice)
 
     if (matches.length === 1) return matches[0]
 
     // Se restano più record ma descrivono la stessa identica assegnazione organizzativa,
     // il risultato è comunque univoco ai fini del messaggio. Altrimenti non indoviniamo.
-    const signatures = new Set(matches.map(item => `${item.ruoloCod}|${item.areaCod}|${item.settoreCod}|${item.ufficio ?? ''}`))
+    const signatures = new Set(matches.map(item => `${item.ruoloCod}|${item.areaCod}|${item.settoreCod}`))
     if (signatures.size === 1 && matches.length) return matches[0]
   }
 
@@ -2041,8 +1964,7 @@ async function loadGiiUserFullNameMap (values: string[], signal?: AbortSignal): 
     const pickFields = [
       'username', 'user_name', 'agol_username',
       'full_name', 'nome', 'cognome', 'fullName', 'nome_cognome', 'nomeCompleto', 'nominativo', 'display_name', 'displayName', 'name',
-      'ruolo_cod', 'ruoloCod', 'area', 'area_cod', 'areaCod', 'settore', 'settore_cod', 'settoreCod',
-      'ufficio', 'id_ufficio', 'ufficio_id', 'ufficio_label', 'ufficioLabel', 'ufficio_zona', 'ufficioZona'
+      'ruolo_cod', 'ruoloCod', 'area', 'area_cod', 'areaCod', 'settore', 'settore_cod', 'settoreCod'
     ]
       .map(f => fieldNameByLower.get(f.toLowerCase()))
       .filter((f): f is string => !!f)
@@ -2161,9 +2083,7 @@ async function enrichAlertsWithActorFullNames (alerts: GiiAlertItem[], signal?: 
         ...(actorAssignment ? {
           __gii_actor_role_cod: actorAssignment.ruoloCod,
           __gii_actor_area_cod: actorAssignment.areaCod,
-          __gii_actor_settore_cod: actorAssignment.settoreCod,
-          __gii_actor_ufficio_id: actorAssignment.ufficio,
-          __gii_actor_ufficio_label: actorAssignment.ufficioLabel
+          __gii_actor_settore_cod: actorAssignment.settoreCod
         } : {}),
         ...(technicianResolved ? { [isIt ? '__gii_istruttore_tecnico_full_name' : '__gii_tecnico_rilevatore_full_name']: technicianResolved } : {})
       }
@@ -2317,12 +2237,6 @@ function materializeAlertDestRole (user: any): string {
   if (role.startsWith('CS')) return 'CS'
   if (role.startsWith('IT')) return 'IT'
   return role.replace(/_(AGR|TEC|AMM)$/i, '')
-}
-
-function materializeAlertOfficeId (alert: GiiAlertItem): number | null {
-  const raw = materializeAlertPick(alert, ['id_ufficio', 'ufficio_id', 'destinatario_ufficio_id'])
-  const n = Number(raw)
-  return Number.isFinite(n) ? n : null
 }
 
 function materializeAlertNumber (alert: GiiAlertItem): string {
@@ -2788,15 +2702,13 @@ async function materializeMissingTakeChargeActivities (args: {
 
       const area = materializeAlertArea(alert)
       const settore = materializeAlertSector(alert)
-      const ufficioId = materializeAlertOfficeId(alert)
-      // L'ufficio non è più un dato di instradamento: bastano area e settore.
+      // L'instradamento dipende solo da area e Settore.
       if (!area || !settore) {
         console.warn('[GII-Header] Materializzazione attività saltata: dati organizzativi della pratica incompleti.', {
           parentGlobalId,
           parentObjectId: Number.isFinite(parentObjectId) ? parentObjectId : null,
           area,
-          settore,
-          ufficioId
+          settore
         })
         continue
       }
@@ -2819,7 +2731,7 @@ async function materializeMissingTakeChargeActivities (args: {
 
       const eventMs = alertEventDateMs(alert) ?? Date.now()
       const numero = materializeAlertNumber(alert)
-      const key = `${materializeAlertNormGid(parentGlobalId)}|PRESA_IN_CARICO|NUOVA_RILEVAZIONE|${role}|${area}|${settore}|${ufficioId ?? ''}`
+      const key = `${materializeAlertNormGid(parentGlobalId)}|PRESA_IN_CARICO|NUOVA_RILEVAZIONE|${role}|${area}|${settore}`
 
       const attrs = makeAttrsForLayer({
         chiave_attivita: key,
@@ -2833,8 +2745,6 @@ async function materializeMissingTakeChargeActivities (args: {
         destinatario_ruolo: role,
         destinatario_area: area || null,
         destinatario_settore: settore || null,
-        destinatario_ufficio_id: ufficioId,
-        destinatario_ufficio_zona: materializeAlertPick(alert, ['ufficio_zona', 'destinatario_ufficio_zona']) || null,
         destinatario_username: null,
         origine_evento: 'NUOVA_RILEVAZIONE_SURVEY',
         priorita: 'INFO',
@@ -2949,7 +2859,6 @@ function storeAlertEditIntent (alert: GiiAlertItem, layerUrl: string): void {
   const requestedByRole = normCode(currentUser?.profiloCod || currentUser?.ruoloCod || currentUser?.ruolo_cod || '')
   const requestedByArea = normCode(currentUser?.areaCod || currentUser?.area_cod || '')
   const requestedBySettore = normCode(currentUser?.settoreCod || currentUser?.settore_cod || '')
-  const requestedByUfficio = currentUser?.ufficio != null && currentUser?.ufficio !== '' ? String(currentUser.ufficio).trim() : ''
 
   const intent = stampGiiPracticePayload({
     oid: alert.parentObjectId,
@@ -2966,8 +2875,7 @@ function storeAlertEditIntent (alert: GiiAlertItem, layerUrl: string): void {
     requestedByUsername,
     requestedByRole,
     requestedByArea,
-    requestedBySettore,
-    requestedByUfficio
+    requestedBySettore
   })
 
   writeGiiPracticeSelectionContext()
@@ -3525,10 +3433,9 @@ export default function Widget(props: Props) {
     user?.username,
     user?.profiloCod,
     user?.ruoloCod,
-    JSON.stringify((user?.assignments || []).map((a: any) => [a.profiloCod, a.ruoloCod, a.areaCod, a.settoreCod, a.ufficio])),
+    JSON.stringify((user?.assignments || []).map((a: any) => [a.profiloCod, a.ruoloCod, a.areaCod, a.settoreCod])),
     user?.areaCod,
     user?.settoreCod,
-    user?.ufficio,
     user?.isWorkflowAdmin,
     profileSyncError
   ])
@@ -3738,14 +3645,12 @@ export default function Widget(props: Props) {
         const key = [
           alertRoleAreaKey(contextUser),
           String(contextUser?.areaCod || ''),
-          String(contextUser?.settoreCod || ''),
-          String(contextUser?.ufficio ?? '')
+          String(contextUser?.settoreCod || '')
         ].join('|')
         return all.findIndex((other: any) => [
           alertRoleAreaKey(other),
           String(other?.areaCod || ''),
-          String(other?.settoreCod || ''),
-          String(other?.ufficio ?? '')
+          String(other?.settoreCod || '')
         ].join('|') === key) === index
       })
 
@@ -3805,7 +3710,6 @@ export default function Widget(props: Props) {
       roleCod: contextUser.profiloCod || contextUser.ruoloCod,
       areaCod: contextUser.areaCod,
       settoreCod: contextUser.settoreCod,
-      ufficio: contextUser.ufficio,
       isAdmin: !!contextUser.isWorkflowAdmin
     })
 
@@ -3847,8 +3751,7 @@ export default function Widget(props: Props) {
             __gii_current_user_role_cod: contextAlertUser.roleCod || '',
             __gii_context_practice_layer_url: selectAlertPracticeLayerUrl(cfg, contextUser),
             __gii_current_user_settore_cod: contextAlertUser.settoreCod || '',
-            __gii_current_user_area_cod: contextAlertUser.areaCod || '',
-            __gii_current_user_ufficio_id: contextAlertUser.ufficio ?? null
+            __gii_current_user_area_cod: contextAlertUser.areaCod || ''
           }
         }))
       }))
@@ -4065,10 +3968,9 @@ export default function Widget(props: Props) {
     user?.fullName,
     user?.profiloCod,
     user?.ruoloCod,
-    JSON.stringify((user?.assignments || []).map((a: any) => [a.profiloCod, a.ruoloCod, a.areaCod, a.settoreCod, a.ufficio])),
+    JSON.stringify((user?.assignments || []).map((a: any) => [a.profiloCod, a.ruoloCod, a.areaCod, a.settoreCod])),
     user?.areaCod,
     user?.settoreCod,
-    user?.ufficio,
     user?.isWorkflowAdmin,
     filterAlertsWithLocalGuards
   ])
@@ -4560,13 +4462,11 @@ export default function Widget(props: Props) {
     const parts: string[] = [role]
     const area = String(a?.areaFull || a?.areaCod || '').trim()
     const settore = String(a?.settoreFull || a?.settoreCod || '').trim()
-    const ufficio = String(a?.ufficioLabel || '').trim()
     const roleUpper = role.toUpperCase()
     const roleCode = String(a?.profiloCod || a?.ruoloCod || '').trim().toUpperCase()
     const isAreaDirector = roleCode === 'DT' || roleCode === 'DA' || roleUpper.includes('DIRETTORE AREA')
     if (area && !isAreaDirector && !roleUpper.includes(area.toUpperCase())) parts.push(`Area ${area}`)
     if (settore) parts.push(/^Settore\b/i.test(settore) ? settore : `Settore ${settore}`)
-    if (ufficio) parts.push(/^Ufficio\b/i.test(ufficio) ? ufficio : `Ufficio di ${ufficio}`)
     return parts.filter(Boolean).join(' · ')
   }
   const orderedAssignments = assignments.slice().sort((a, b) => roleRank(b) - roleRank(a))
@@ -4787,7 +4687,7 @@ export default function Widget(props: Props) {
               </div>
               <div style={{ display:'flex',flexDirection:'column',gap:6 }}>
                 {orderedAssignments.map((a, index) => (
-                  <div key={`${a.profiloCod || a.ruoloCod}-${a.areaCod}-${a.settoreCod}-${a.ufficio}-${index}`} style={{
+                  <div key={`${a.profiloCod || a.ruoloCod}-${a.areaCod}-${a.settoreCod}-${index}`} style={{
                     padding:'7px 9px',borderRadius:7,background:index === 0 ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.045)',
                     border:index === 0 ? '1px solid rgba(96,165,250,0.24)' : '1px solid rgba(255,255,255,0.06)',
                     fontSize:12,color:'rgba(226,232,240,0.96)',lineHeight:1.35

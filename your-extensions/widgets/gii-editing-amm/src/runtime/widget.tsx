@@ -5313,19 +5313,6 @@ function normalizeSectorCodeForAmm (value: any): string {
   return ''
 }
 
-function settoreCodeFromUfficioAmm (value: any): string {
-  const upper = String(value || '').toUpperCase()
-  if (!upper) return ''
-  if (/QUARTU|VILLAPUTZU|MURAVERA/.test(upper)) return 'D1'
-  if (/SAN SPERATE/.test(upper)) return 'D7'
-  if (/SERRAMANNA|PIMPISU/.test(upper)) return 'D2'
-  if (/SAN GAVINO|VILLACIDRO/.test(upper)) return 'D3'
-  if (/SAN GIOVANNI SUERGIU|MASAINAS|BASSO SULCIS/.test(upper)) return 'D4'
-  if (/SENORB/.test(upper)) return 'D5'
-  if (/IGLESIAS|SILIQUA|VILLASOR|FLUMINIMAGGIORE|CIXERRI/.test(upper)) return 'D6'
-  return ''
-}
-
 function normalizeRilevazioneCodeForAmm (data: any, oid: number | null): string {
   const d = data || {}
   const stored = cleanReportCodeText(pickAttrCI(d, ['numero_rilevazione', 'Numero_rilevazione', 'NUMERO_RILEVAZIONE', 'cod_pratica', 'Cod_pratica', 'COD_PRATICA', 'numero_rapporto', 'Numero_rapporto', 'NUMERO_RAPPORTO']))
@@ -5333,7 +5320,7 @@ function normalizeRilevazioneCodeForAmm (data: any, oid: number | null): string 
   const op = pickAttrCI(d, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
   let prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'IT') ? 'IT' : 'TR'
   let oidPart = oid != null && Number.isFinite(Number(oid)) ? String(Number(oid)) : ''
-  let settore = normalizeSectorCodeForAmm(pickAttrCI(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'SETTORE'])) || settoreCodeFromUfficioAmm(pickAttrCI(d, ['ufficio_zona', 'Ufficio_zona', 'UFFICIO_ZONA']))
+  let settore = normalizeSectorCodeForAmm(pickAttrCI(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'SETTORE']))
 
   let m = raw.match(/^(TR|IT)-?(\d+)(?:-([A-Z0-9]+))?$/i)
   if (m) {
@@ -9647,8 +9634,7 @@ function CompactPracticeHeader (props: { title: string, data: Record<string, any
       title: 'Competenza',
       rows: [
         { label: 'Area', value: compactValue(d, props.fields, 'area_cod') },
-        { label: 'Settore', value: compactValue(d, props.fields, 'settore_cod') },
-        { label: 'Ufficio di zona', value: compactValue(d, props.fields, 'ufficio_zona') }
+        { label: 'Settore', value: compactValue(d, props.fields, 'settore_cod') }
       ]
     },
     {
@@ -13583,7 +13569,6 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
               <StatusSummaryItem label='Approvazione DT' value={displayAdminFieldValue(d, props.fields, 'dt_esito_DT')} tone={hasAdminValue(pickAttrCI(d, ['dt_esito_DT'])) ? 'auto' : 'warn'} />
               <StatusSummaryItem label='Area tecnica di provenienza' value={displayAdminFieldValue(d, props.fields, 'area_cod')} tone='auto' />
               <StatusSummaryItem label='Settore' value={displayAdminFieldValue(d, props.fields, 'settore_cod')} tone='auto' />
-              <StatusSummaryItem label='Ufficio di zona' value={displayAdminFieldValue(d, props.fields, 'ufficio_zona')} tone='auto' />
               <StatusSummaryItem label='Istruttore tecnico' value={istruttoreTecnico} tone='auto' />
             </div>
           </div>
@@ -14868,6 +14853,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setPendingAmmAttachmentRotations({})
       setPaymentPendingDirty(false)
       paymentPendingActionsRef.current = null
+      setPersistentAnteprimaOid(null)
+      setActiveAmmSection(AMM_DEFAULT_SECTION)
     }
     window.addEventListener('gii-practice-context-reset', onPracticeContextReset)
     return () => window.removeEventListener('gii-practice-context-reset', onPracticeContextReset)
@@ -15063,9 +15050,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [oid])
   const hasSelection = !!data || (oid != null && Number.isFinite(Number(oid)))
   React.useEffect(() => {
-    if (activeAmmSection === 'anteprima' && oid != null && Number.isFinite(Number(oid))) {
-      setPersistentAnteprimaOid(Number(oid))
+    const currentOid = oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null
+    if (activeAmmSection === 'anteprima' && currentOid != null) {
+      setPersistentAnteprimaOid(currentOid)
+      return
     }
+    // Come in editing-tec (form rimontato al cambio pratica): l'anteprima conservata
+    // vale solo per la pratica per cui è stata generata.
+    setPersistentAnteprimaOid(prev => prev != null && prev !== currentOid ? null : prev)
   }, [activeAmmSection, oid])
   const roleAllowed = isAllowedAdminRole(profile.role)
   const title = buildPracticeTitle(cfg, data || {}, oid)
@@ -15815,8 +15807,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         destinatario_ruolo: 'RIA',
         destinatario_area: 'AMM',
         destinatario_settore: 'CR',
-        destinatario_ufficio_id: null,
-        destinatario_ufficio_zona: null,
         destinatario_username: destUsername || null,
         origine_evento: activityEvent,
         priorita: 'INFO',
@@ -15890,8 +15880,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         destinatario_ruolo: 'RIA',
         destinatario_area: 'AMM',
         destinatario_settore: 'CR',
-        destinatario_ufficio_id: null,
-        destinatario_ufficio_zona: null,
         destinatario_username: destUsername || null,
         origine_evento: activityEvent,
         priorita: 'INFO',
@@ -15965,8 +15953,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         destinatario_ruolo: 'RIA',
         destinatario_area: 'AMM',
         destinatario_settore: 'CR',
-        destinatario_ufficio_id: null,
-        destinatario_ufficio_zona: null,
         destinatario_username: destUsername || null,
         origine_evento: activityEvent,
         priorita: 'INFO',
@@ -17868,6 +17854,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const handleCloseAdmin = React.useCallback(() => {
     if (saving || isDirty) return
+    // Chiusura della pratica: come in editing-tec, lo stato legato alla pratica non sopravvive.
+    setPersistentAnteprimaOid(null)
+    setActiveAmmSection(AMM_DEFAULT_SECTION)
     try { delete (window as any).__giiEdit } catch { try { ;(window as any).__giiEdit = null } catch {} }
     try { sessionStorage.removeItem('GII_EDIT_INTENT') } catch {}
     const elencoPageId = resolvePageId('page_3') || resolvePageId('Elenco pratiche') || resolvePageId('Elenco Rapporti') || resolvePageId('elenco-pratiche') || resolvePageId('elenco-rapporti') || resolvePageId('Elenco')

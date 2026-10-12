@@ -1324,7 +1324,7 @@ function InlineEditOverlay(props: {
     !/^origine_pratica$/i.test(k)
   )
   const anagraficaRe = /ditta|denom|ragione|nome|cognome|cf|cod.*fisc|piva|partita|indir|via|cap|comune|prov|telefono|cell|mail|pec|tipologia_sogg|tipo_sogg/i
-  const violazioneRe = /viol|infraz|descr|art|norm|tipo_preliev|sanz|acqua|volume|turno|utenza|contatore|circostanz|fatti|ufficio|settore|area_cod/i
+  const violazioneRe = /viol|infraz|descr|art|norm|tipo_preliev|sanz|acqua|volume|turno|utenza|contatore|circostanz|fatti|settore|area_cod/i
   for (const k of allKeys) {
     if (anagraficaRe.test(k)) anagraficaFields.push(k)
     else if (violazioneRe.test(k)) violazioneFields.push(k)
@@ -2651,7 +2651,7 @@ function ActionsPanel (props: {
     if (k === 'objectid' || k === 'globalid') return false
     if (k === 'creationdate' || k === 'creator' || k === 'editdate' || k === 'editor') return false
     if (k === 'origine_pratica' || k === 'utente_loggato' || k === 'area_cod' || k === 'settore_cod' || k === 'req_point') return false
-    if (k === 'id_ufficio' || k === 'start' || k === 'end') return false
+    if (k === 'start' || k === 'end') return false
     if (k.startsWith('gii_')) return false
     if (k.startsWith('stato_') || k.startsWith('dt_stato_')) return false
     if (k.startsWith('presa_in_carico_') || k.startsWith('dt_presa_in_carico_')) return false
@@ -2945,7 +2945,6 @@ function ActionsPanel (props: {
     const st = String(subtipo || '').trim().toUpperCase()
     const labels: Record<string, string> = {
       NUOVO_RAPPORTO: 'Nuova rilevazione',
-      RAPPORTO_UFFICIO: 'Rilevazione',
       NUOVA_RILEVAZIONE_TRASMESSA: 'Nuova rilevazione trasmessa',
       ISTRUTTORIA_ASSEGNATA: 'Istruttoria assegnata',
       ISTRUTTORIA_TRASMESSA_VERIFICA: 'Istruttoria trasmessa per verifica',
@@ -2973,7 +2972,7 @@ function ActionsPanel (props: {
   const activityMessageForSubtype = (subtipo: string, numeroRapporto: string): string => {
     const st = String(subtipo || '').trim().toUpperCase()
     const n = String(numeroRapporto || '').trim() || '—'
-    if (st === 'NUOVO_RAPPORTO' || st === 'RAPPORTO_UFFICIO' || st === 'NUOVA_RILEVAZIONE_TRASMESSA') return `Rilevazione n. ${n} da prendere in carico.`
+    if (st === 'NUOVO_RAPPORTO' || st === 'NUOVA_RILEVAZIONE_TRASMESSA') return `Rilevazione n. ${n} da prendere in carico.`
     if (st === 'ISTRUTTORIA_ASSEGNATA' || st === 'ISTRUTTORIA_AMMINISTRATIVA_ASSEGNATA') return `Pratica n. ${n} assegnata e da prendere in carico.`
     if (st === 'ISTRUTTORIA_RIMANDATA_INTEGRAZIONE') return `Istruttoria n. ${n} rimandata per integrazione e da prendere in carico.`
     if (st === 'FASCICOLO_RIMANDATO_INTEGRAZIONE') return `Fascicolo della pratica n. ${n} rimandato per integrazione e da prendere in carico.`
@@ -3221,8 +3220,6 @@ function ActionsPanel (props: {
         destinatario_ruolo: ruoloDest,
         destinatario_area: areaDest || null,
         destinatario_settore: settoreDest || null,
-        destinatario_ufficio_id: null,
-        destinatario_ufficio_zona: null,
         destinatario_username: destUsername || null,
         origine_evento: String(logOpts?.eventoChiusura || '').trim().toUpperCase(),
         priorita: 'INFO',
