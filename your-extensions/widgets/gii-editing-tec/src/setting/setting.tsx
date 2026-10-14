@@ -414,6 +414,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       </SectionBox>
       <SectionBox title='Titolo vista'>
         <div style={P.grid2}>
+          <Toggle k='showTitleIcon' label='Mostra icona'/>
           <Toggle k='showTitleSubtitle' label='Mostra sottotitolo'/>
           <Toggle k='showTitleDivider' label='Mostra separatore'/>
         </div>

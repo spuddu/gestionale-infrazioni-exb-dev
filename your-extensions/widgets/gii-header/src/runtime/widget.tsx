@@ -2392,7 +2392,8 @@ async function normalizeSurveyUppercaseFields (args: {
 
     // Esito tecnico distinto dal risultato vuoto: null = interrogazione non riuscita
     // (la rilevazione resta da trattare); oggetto con valori null = nessuna particella
-    // o attributi legittimamente assenti (es. strada senza mappale, Comune senza sezione).
+    // o attributi legittimamente assenti (es. strada senza mappale, Comune senza sezione),
+    // oppure più particelle nel punto (la scelta spetta all'IT).
     const lookupCatasto = async (geom: any): Promise<Record<string, string | null> | null> => {
       const empty: Record<string, string | null> = {}
       GII_CATASTO_FIELDS.forEach(n => { empty[n] = null })
@@ -2406,18 +2407,23 @@ async function normalizeSurveyUppercaseFields (args: {
         pq.spatialRelationship = 'intersects'
         pq.outFields = GII_CATASTO_FIELDS
         pq.returnGeometry = false
-        pq.num = 1
         if (pl.objectIdField) pq.orderByFields = [String(pl.objectIdField)]
         const pres = await pl.queryFeatures(pq, args.signal ? { signal: args.signal } : undefined)
-        const pf = Array.isArray(pres?.features) ? pres.features[0] : null
-        if (!pf) return empty
-        const pa = pf.attributes || {}
-        const out: Record<string, string | null> = {}
-        GII_CATASTO_FIELDS.forEach(n => {
-          const key = Object.keys(pa).find(k => k.toLowerCase() === n)
-          out[n] = surveyCatastoText(key ? pa[key] : null)
+        const pfs = Array.isArray(pres?.features) ? pres.features : []
+        // Particelle distinte nel punto. Con più particelle la scelta spetta all'IT:
+        // i dati catastali restano vuoti finché non la indica in Modifica pratica.
+        const distinte = new Map<string, Record<string, string | null>>()
+        pfs.forEach((pf: any) => {
+          const pa = pf?.attributes || {}
+          const out: Record<string, string | null> = {}
+          GII_CATASTO_FIELDS.forEach(n => {
+            const key = Object.keys(pa).find(k => k.toLowerCase() === n)
+            out[n] = surveyCatastoText(key ? pa[key] : null)
+          })
+          distinte.set(GII_CATASTO_FIELDS.map(n => String(out[n] ?? '').toUpperCase()).join('|'), out)
         })
-        return out
+        if (distinte.size !== 1) return empty
+        return Array.from(distinte.values())[0]
       } catch (e) {
         if (isGiiAbortError(e)) throw e
         console.warn('[GII] Interrogazione catastale non riuscita:', e)
@@ -4178,6 +4184,18 @@ export default function Widget(props: Props) {
   }, [user, uLoad, urlTick])
 
 
+  // Lampeggio della cornice del logo: colore, intensità, ampiezza e durata da impostazioni.
+  const logoPulseOn = cfg.logoPulse !== false
+  const logoPulseRgb = (() => {
+    const h = String(cfg.logoPulseColor || '#3b82f6').trim().replace('#', '')
+    const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h.slice(0, 6)
+    return /^[0-9a-fA-F]{6}$/.test(full)
+      ? `${parseInt(full.slice(0, 2), 16)},${parseInt(full.slice(2, 4), 16)},${parseInt(full.slice(4, 6), 16)}`
+      : '59,130,246'
+  })()
+  const logoPulseAlpha = Math.min(100, Math.max(0, Number(cfg.logoPulseOpacity ?? 45))) / 100
+  const logoPulseSize = Math.min(30, Math.max(0, Number(cfg.logoPulseSize ?? 8)))
+  const logoPulseDuration = Math.min(10, Math.max(0.5, Number(cfg.logoPulseDuration ?? 3) || 3))
   const logoBg = cfg.logoBgGradient
     ? `linear-gradient(135deg,${cfg.logoBgColor},${cfg.logoBgGradEnd || '#0048ad'})`
     : cfg.logoBgColor
@@ -4488,9 +4506,9 @@ export default function Widget(props: Props) {
         @import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=Source+Sans+3:wght@300;400;600;700&display=swap');
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes pulse-ring {
-          0%   { box-shadow: 0 0 0 0 rgba(59,130,246,0.45); }
-          70%  { box-shadow: 0 0 0 8px rgba(59,130,246,0); }
-          100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
+          0%   { box-shadow: 0 0 0 0 rgba(${logoPulseRgb},${logoPulseAlpha}); }
+          70%  { box-shadow: 0 0 0 ${logoPulseSize}px rgba(${logoPulseRgb},0); }
+          100% { box-shadow: 0 0 0 0 rgba(${logoPulseRgb},0); }
         }
         .gii-user-account-trigger:focus-visible {
           outline: 2px solid ${cfg.signInBorderColor};
@@ -4523,7 +4541,10 @@ export default function Widget(props: Props) {
       )}
 
       {/* Logo + Titoli */}
-      <div style={{ display:'flex', alignItems:'center', gap:16, flex:'1 1 auto', minWidth:0, overflow:'hidden' }}>
+      {/* overflow:hidden tronca i titoli lunghi: lo spazio interno (compensato dal margine
+          negativo) lascia visibile l'alone del lampeggio sopra, sotto e a sinistra del logo. */}
+      <div style={{ display:'flex', alignItems:'center', gap:16, flex:'1 1 auto', minWidth:0, overflow:'hidden',
+        ...(logoPulseOn && logoPulseSize > 0 ? { padding:`${logoPulseSize}px 0 ${logoPulseSize}px ${logoPulseSize}px`, margin:`-${logoPulseSize}px 0 -${logoPulseSize}px -${logoPulseSize}px` } : {}) }}>
         <div style={{ ...off('offsetLogo') }}>
           <div style={{
             width:cfg.logoSize, height:cfg.logoSize, borderRadius:cfg.logoRadius,
@@ -4531,7 +4552,7 @@ export default function Widget(props: Props) {
             display:'flex', alignItems:'center', justifyContent:'center',
             boxShadow:'0 4px 14px rgba(0,0,0,0.3)',
             padding:cfg.logoPadding ?? 4, boxSizing:'border-box',
-            animationName:'pulse-ring', animationDuration:'3s', animationIterationCount:'infinite', animationTimingFunction:'ease-out'
+            ...(logoPulseOn ? { animationName:'pulse-ring', animationDuration:`${logoPulseDuration}s`, animationIterationCount:'infinite', animationTimingFunction:'ease-out' } : {})
           }}>
             <img src={cfg.logoUrl} alt='logo' style={{ width:'100%', height:'100%', objectFit:'contain', display:'block' }} />
           </div>

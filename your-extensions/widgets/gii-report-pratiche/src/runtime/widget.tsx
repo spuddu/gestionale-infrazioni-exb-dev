@@ -1369,6 +1369,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         <GiiPageTitle
           showSubtitle={(cfg as any).showTitleSubtitle !== false}
           showDivider={(cfg as any).showTitleDivider !== false}
+          showIcon={(cfg as any).showTitleIcon !== false}
           title={cfg.title || undefined}
           subtitle={cfg.subtitle || undefined}
           fallbackIcon='report'

@@ -30,6 +30,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>): React.R
     <div style={section}>
       <div style={sectionTitle}>Intestazione</div>
       <label style={lbl}>Titolo</label><input style={inp} value={String(cfg.title || 'Guida operativa')} onChange={(e) => set('title', e.target.value)} />
+      <label style={{ ...lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={cfg.showTitleIcon !== false} onChange={e=>set('showTitleIcon',e.target.checked)}/> Mostra icona prima del titolo</label>
       <label style={{ ...lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={cfg.showTitleSubtitle !== false} onChange={e=>set('showTitleSubtitle',e.target.checked)}/> Mostra sottotitolo / descrizione</label>
       <label style={{ ...lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={cfg.showTitleDivider !== false} onChange={e=>set('showTitleDivider',e.target.checked)}/> Mostra separatore sotto il titolo</label>
       <label style={lbl}>Sottotitolo</label><textarea style={{ ...inp, minHeight: 64, resize: 'vertical' }} value={String(cfg.subtitle || '')} onChange={(e) => set('subtitle', e.target.value)} />

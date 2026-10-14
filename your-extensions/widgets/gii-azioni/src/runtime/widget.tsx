@@ -331,6 +331,9 @@ function getRootDsObj (dsOrId: any): any {
 }
 
 // Caricamento moduli ArcGIS JS API (AMD) senza dipendenze extra.
+// Layer delle particelle catastali (lo stesso usato da gii-header e gii-editing-tec).
+const GII_PARTICELLE_CATASTO_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Particelle/FeatureServer/131'
+
 function loadEsriModule<T = any> (path: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const req = (window as any).require
@@ -5142,7 +5145,37 @@ function ActionsPanel (props: {
     setTiLoadErr('')
   }
 
-  const startAction = (p: Pending, opts?: { keepActionsMenuOpen?: boolean }) => {
+  // Particelle catastali distinte nel punto della pratica (0 se il punto non è impostato).
+  // Lancia un errore se l'interrogazione non riesce.
+  const countParticelleNelPunto = async (): Promise<number> => {
+    const { layer } = await resolveLayer(active?.state?.ds)
+    if (!layer?.queryFeatures) throw new Error('Layer della pratica non disponibile.')
+    const q: any = layer.createQuery ? layer.createQuery() : {}
+    q.objectIds = [Number(oid)]
+    q.outFields = [String(layer.objectIdField || idFieldNameFromSel || 'OBJECTID')]
+    q.returnGeometry = true
+    const res = await layer.queryFeatures(q)
+    const geom = res?.features?.[0]?.geometry
+    if (!geom || (Number(geom.x) === 0 && Number(geom.y) === 0)) return 0
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const pl = new FeatureLayer({ url: GII_PARTICELLE_CATASTO_URL })
+    if (typeof pl.load === 'function') await pl.load()
+    const pq: any = pl.createQuery ? pl.createQuery() : {}
+    pq.where = '1=1'
+    pq.geometry = geom
+    pq.spatialRelationship = 'intersects'
+    pq.outFields = ['nome_comun', 'sezione', 'foglio', 'mappale']
+    pq.returnGeometry = false
+    const pres = await pl.queryFeatures(pq)
+    const distinte = new Set<string>()
+    ;(Array.isArray(pres?.features) ? pres.features : []).forEach((f: any) => {
+      const a = f?.attributes || {}
+      distinte.add(['nome_comun', 'sezione', 'foglio', 'mappale'].map(n => String(pickAttrCI(a, [n]) ?? '').trim().toUpperCase()).join('|'))
+    })
+    return distinte.size
+  }
+
+  const startAction = (p: Pending, opts?: { keepActionsMenuOpen?: boolean, particellaVerificata?: boolean }) => {
     if (!hasSel) return
     if (lockedByTransmit) return
     if (p === 'TAKE' && !canStartTakeInCharge) return
@@ -5209,6 +5242,32 @@ function ActionsPanel (props: {
         setDenyPopupMessages([
           "Impossibile trasmettere: è obbligatorio specificare se il trasgressore era presente al momento del rilevamento. Accedere alla scheda Violazione e impostare il valore."
         ])
+        return
+      }
+
+      // Dati catastali vuoti con punto su più particelle: la scelta della particella
+      // in Modifica pratica è obbligatoria anche per l'inoltro (gii-header li lascia vuoti).
+      const reqPointValue = String(pickAttrCI(data, ['req_point', 'REQ_POINT']) ?? '').trim()
+      const catastoVuoto = ['nome_comun', 'foglio', 'mappale'].every(n => !String(pickAttrCI(data, [n, n.toUpperCase()]) ?? '').trim())
+      if (!opts?.particellaVerificata && reqPointValue !== '0' && catastoVuoto) {
+        void (async () => {
+          try {
+            const n = await countParticelleNelPunto()
+            if (n > 1) {
+              setDenyPopupMessages([
+                "Impossibile trasmettere: il punto ricade su più particelle catastali. Accedere a Modifica pratica e scegliere la particella interessata dall'infrazione."
+              ])
+              return
+            }
+          } catch (e) {
+            console.warn('[GII azioni] Verifica delle particelle non riuscita:', e)
+            setDenyPopupMessages([
+              'Impossibile trasmettere: non è stato possibile verificare la particella catastale del punto. Riprovare.'
+            ])
+            return
+          }
+          startAction(p, { ...(opts || {}), particellaVerificata: true })
+        })()
         return
       }
     }

@@ -13,20 +13,21 @@ type TransferActionIconName = 'import' | 'export'
 
 function TransferActionIcon (props: { name: TransferActionIconName, size?: number }): React.ReactElement {
   const size = Number(props.size || 18)
+  // Importa: la freccia entra nel vassoio; esporta: la freccia esce dal vassoio.
   if (props.name === 'import') {
     return (
       <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
         <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
-        <path d='M17 8l-5-5-5 5'/>
-        <path d='M12 3v12'/>
+        <path d='M7 10l5 5 5-5'/>
+        <path d='M12 15V3'/>
       </svg>
     )
   }
   return (
     <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
       <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
-      <path d='M7 10l5 5 5-5'/>
-      <path d='M12 15V3'/>
+      <path d='M17 8l-5-5-5 5'/>
+      <path d='M12 3v12'/>
     </svg>
   )
 }
@@ -1271,6 +1272,58 @@ function exportCSV(utenti: UtenteRecord[], domainLabels?: DomainLabelMap): void 
   URL.revokeObjectURL(url)
 }
 
+// ── Export settori.csv ────────────────────────────────────────────────────
+// settori.csv per il Survey "Infrazioni": elenco dei Settori tra cui il TR
+// sceglie quando il punto ricade in più Settori. Codici e nomi si leggono dal
+// layer Distretti_irrigui_lordi (Codice_set, Settore), lo stesso interrogato
+// dallo script del Survey; i nomi hanno la sola iniziale maiuscola.
+const GII_DISTRETTI_LORDI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Distretti_irrigui_lordi/FeatureServer/108'
+const GII_NUMERI_ROMANI = new Set(['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'])
+const GII_VOCALI_ACCENTATE: Record<string, string> = { a: 'à', e: 'è', i: 'ì', o: 'ò', u: 'ù' }
+
+// Stesse regole dello script del Survey: apostrofo finale usato come accento
+// ("SENORBI'" -> "Senorbì"), maiuscola anche dopo trattino o apostrofo
+// ("Sant’Elena"), numeri romani in maiuscolo, apostrofo tipografico.
+function giiNomeProprio(value: any): string {
+  let t = String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
+  t = t.replace(/([aeiou])['’](?=$|[\s,.;:)\-])/g, (_m, v: string) => GII_VOCALI_ACCENTATE[v])
+  t = t.replace(/(^|[\s\-'’(])([a-zàèéìòù])/g, (_m, p: string, c: string) => p + c.toUpperCase())
+  return t.split(' ').map(w => GII_NUMERI_ROMANI.has(w.toLowerCase()) ? w.toUpperCase() : w).join(' ').replace(/'/g, '’')
+}
+
+// Contenuto di settori.csv; lancia un errore se il layer non è leggibile o non ha Settori.
+async function buildSettoriCSV(): Promise<string> {
+  const esriRequest = await loadEsriModule<any>('esri/request')
+  const response = await esriRequest(`${GII_DISTRETTI_LORDI_URL}/query`, {
+    query: { f: 'json', where: '1=1', outFields: 'Codice_set,Settore', returnGeometry: false, orderByFields: 'Codice_set' },
+    responseType: 'json'
+  })
+  const data = response?.data || {}
+  if (data?.error) throw new Error(String(data.error?.message || 'Interrogazione del layer dei distretti non riuscita.'))
+  const settori = new Map<string, string>()
+  ;(Array.isArray(data?.features) ? data.features : []).forEach((f: any) => {
+    const a = f?.attributes || {}
+    const codice = String(a.Codice_set ?? '').trim().toUpperCase()
+    const nome = String(a.Settore ?? '').trim()
+    if (codice && nome && !settori.has(codice)) settori.set(codice, `Settore ${giiNomeProprio(nome)}`)
+  })
+  if (!settori.size) throw new Error('Nel layer dei distretti non è stato trovato alcun Settore.')
+  const esc = (v: any) => {
+    const s = String(v ?? '')
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const righe = Array.from(settori.keys()).sort().map(codice => [codice, settori.get(codice)].map(esc).join(','))
+  return ['name,label', ...righe].join('\n')
+}
+
+function downloadSettoriCSV(csv: string): void {
+  const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = 'settori.csv'; a.click()
+  URL.revokeObjectURL(url)
+}
+
 function sortValue(u: UtenteRecord, field: SortField, domainLabels?: DomainLabelMap): string {
   switch (field) {
     case 'username': return u.username ?? ''
@@ -2093,6 +2146,7 @@ function RubricaWidget(props: AllWidgetProps<IMConfig>) {
         <GiiPageTitle
           showSubtitle={(cfg as any).showTitleSubtitle !== false}
           showDivider={(cfg as any).showTitleDivider !== false}
+          showIcon={(cfg as any).showTitleIcon !== false}
           title={title}
           subtitle={String((cfg as any).subtitleText || '').trim() || undefined}
           fallbackIcon='utenti'
@@ -2178,6 +2232,22 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
   const [msg, setMsg]         = useState<{ text: string; ok: boolean } | null>(null)
   const [errorPopup, setErrorPopup] = useState<string | null>(null)
   const [noticePopup, setNoticePopup] = useState<string | null>(null)
+  // Un solo pulsante per i file del Survey: prima si legge settori.csv dal layer
+  // dei distretti; solo se riesce si scaricano utenti.csv e settori.csv.
+  const [exportingSurveyFiles, setExportingSurveyFiles] = useState(false)
+  const onExportSurveyFiles = async () => {
+    if (exportingSurveyFiles || utenti.length === 0) return
+    setExportingSurveyFiles(true)
+    try {
+      const settoriCsv = await buildSettoriCSV()
+      exportCSV(utenti, domainLabels)
+      downloadSettoriCSV(settoriCsv)
+    } catch (e: any) {
+      setErrorPopup(`Esportazione dei file del Survey non riuscita: ${e?.message || String(e)}`)
+    } finally {
+      setExportingSurveyFiles(false)
+    }
+  }
   const [deleteConfirm, setDeleteConfirm] = useState<UtenteRecord | null>(null)
   const popupCloseRef = useRef<HTMLButtonElement | null>(null)
   const confirmCancelRef = useRef<HTMLButtonElement | null>(null)
@@ -3213,6 +3283,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
         <GiiPageTitle
           showSubtitle={(cfg as any).showTitleSubtitle !== false}
           showDivider={(cfg as any).showTitleDivider !== false}
+          showIcon={(cfg as any).showTitleIcon !== false}
           title={title}
           subtitle={String((cfg as any).subtitleText || '').trim() || undefined}
           fallbackIcon='utenti'
@@ -3234,7 +3305,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
             <div className="ggu-toolbar">
               <div className="ggu-toolbar-left">
                 <NewRecordButton onClick={onNew} title='Nuovo utente' />
-                <button type='button' onClick={() => exportCSV(utenti, domainLabels)} disabled={utenti.length === 0} title='Esporta utenti.csv' aria-label='Esporta utenti.csv' style={transferActionButtonStyle(utenti.length === 0)}><TransferActionIcon name='export' /></button>
+                <button type='button' onClick={onExportSurveyFiles} disabled={utenti.length === 0 || exportingSurveyFiles} title='Esporta file del Survey (utenti.csv e settori.csv)' aria-label='Esporta file del Survey (utenti.csv e settori.csv)' style={transferActionButtonStyle(utenti.length === 0 || exportingSurveyFiles)}><TransferActionIcon name='export' /></button>
               </div>
               <div className="ggu-toolbar-right">
                 <button

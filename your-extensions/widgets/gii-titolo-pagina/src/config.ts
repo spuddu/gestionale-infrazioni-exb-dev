@@ -4,6 +4,7 @@ export interface Config {
   titleOverride?: string
   descriptionOverride?: string
   showDescription?: boolean
+  showTitleIcon?: boolean
   showTitleDivider?: boolean
   titleColor?: string
   titleFontSize?: number
@@ -25,6 +26,7 @@ export const defaultConfig: Config = {
   titleOverride: '',
   descriptionOverride: '',
   showDescription: true,
+  showTitleIcon: true,
   showTitleDivider: true,
   titleColor: '#1F4E79',
   titleFontSize: 18,

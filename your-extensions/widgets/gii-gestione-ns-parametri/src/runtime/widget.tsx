@@ -71,20 +71,21 @@ type TransferActionIconName = 'import' | 'export'
 
 function TransferActionIcon (props: { name: TransferActionIconName, size?: number }): React.ReactElement {
   const size = Number(props.size || 18)
+  // Importa: la freccia entra nel vassoio; esporta: la freccia esce dal vassoio.
   if (props.name === 'import') {
     return (
       <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
         <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
-        <path d='M17 8l-5-5-5 5'/>
-        <path d='M12 3v12'/>
+        <path d='M7 10l5 5 5-5'/>
+        <path d='M12 15V3'/>
       </svg>
     )
   }
   return (
     <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
       <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
-      <path d='M7 10l5 5 5-5'/>
-      <path d='M12 15V3'/>
+      <path d='M17 8l-5-5-5 5'/>
+      <path d='M12 3v12'/>
     </svg>
   )
 }
@@ -979,6 +980,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         <GiiPageTitle
           showSubtitle={(cfg as any).showTitleSubtitle !== false}
           showDivider={(cfg as any).showTitleDivider !== false}
+          showIcon={(cfg as any).showTitleIcon !== false}
           title={title}
           subtitle={String((cfg as any).subtitleText || '').trim() || undefined}
           fallbackIcon='tabelle'

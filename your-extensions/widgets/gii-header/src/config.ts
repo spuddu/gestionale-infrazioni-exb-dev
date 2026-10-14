@@ -7,6 +7,8 @@ export interface Config {
   // Logo
   logoUrl: string; logoSize: number; logoRadius: number; logoPadding: number
   logoBgColor: string; logoBgGradient: boolean; logoBgGradEnd: string
+  // Effetto lampeggio della cornice del logo (alone che si allarga e svanisce)
+  logoPulse: boolean; logoPulseColor: string; logoPulseOpacity: number; logoPulseSize: number; logoPulseDuration: number
   // Ente
   orgName: string; orgNameFont: string; orgNameSize: number
   orgNameWeight: number; orgNameColor: string; orgNameLetterSpacing: number
@@ -80,6 +82,7 @@ const Z: GroupOffset = { x: 0, y: 0 }
 export const defaultConfig: Config = {
   logoUrl: '', logoSize: 56, logoRadius: 10, logoPadding: 4,
   logoBgColor: '#000000', logoBgGradient: true, logoBgGradEnd: '#0048ad',
+  logoPulse: true, logoPulseColor: '#3b82f6', logoPulseOpacity: 45, logoPulseSize: 8, logoPulseDuration: 3,
   orgName: 'Consorzio di Bonifica della Sardegna Meridionale',
   orgNameFont: "'Trebuchet MS', sans-serif",
   orgNameSize: 11, orgNameWeight: 700,

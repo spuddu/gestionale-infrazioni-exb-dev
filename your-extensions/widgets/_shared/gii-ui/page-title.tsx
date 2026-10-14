@@ -183,6 +183,8 @@ export interface GiiPageTitleProps {
   dividerPaddingBottom?: number
   rightContent?: React.ReactNode
   style?: React.CSSProperties
+  // false = icona nascosta: il titolo parte dal bordo sinistro
+  showIcon?: boolean
 }
 
 export function GiiPageTitle(props: GiiPageTitleProps) {
@@ -205,14 +207,17 @@ export function GiiPageTitle(props: GiiPageTitleProps) {
   const dividerPaddingBottom = Number(props.dividerPaddingBottom ?? 6)
   const showSubtitle = props.showSubtitle !== false
   const showDivider = props.showDivider !== false && dividerWidth > 0
+  const showIcon = props.showIcon !== false
 
   return (
     <div style={{ ...props.style, minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, minWidth: 0, borderBottom: showDivider ? `${dividerWidth}px solid ${dividerColor}` : 'none', paddingBottom: showDivider ? dividerPaddingBottom : 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: iconGap, minWidth: 0, color: titleColor }}>
-          <span aria-hidden='true' style={{ width: iconSize, height: iconSize, flex: `0 0 ${iconSize}px`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: titleColor, overflow: 'visible' }}>
-            <span style={{ width: '100%', height: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transform: `scale(${iconOpticalScale})`, transformOrigin: '50% 50%' }} dangerouslySetInnerHTML={{ __html: icon }} />
-          </span>
+          {showIcon ? (
+            <span aria-hidden='true' style={{ width: iconSize, height: iconSize, flex: `0 0 ${iconSize}px`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: titleColor, overflow: 'visible' }}>
+              <span style={{ width: '100%', height: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', transform: `scale(${iconOpticalScale})`, transformOrigin: '50% 50%' }} dangerouslySetInnerHTML={{ __html: icon }} />
+            </span>
+          ) : null}
           <div style={{ fontSize: titleFontSize, lineHeight: 1.25, fontWeight: titleFontWeight, color: titleColor, minWidth: 0 }}>{title}</div>
         </div>
         {props.rightContent ? <div style={{ flex: '0 0 auto', minWidth: 0 }}>{props.rightContent}</div> : null}

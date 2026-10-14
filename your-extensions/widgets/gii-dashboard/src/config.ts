@@ -2,6 +2,7 @@ import { type ImmutableObject, Immutable } from 'jimu-core'
 
 export interface Config {
   showTitleSubtitle: boolean
+  showTitleIcon: boolean
   showTitleDivider: boolean
   title: string
   subtitle: string
@@ -34,6 +35,7 @@ export interface Config {
 
 export const defaultConfig: Config = {
   showTitleSubtitle: true,
+  showTitleIcon: true,
   showTitleDivider: true,
   title: 'Cruscotto operativo',
   subtitle: 'Sintesi delle attività, delle pratiche ferme e dell’avanzamento delle lavorazioni.',

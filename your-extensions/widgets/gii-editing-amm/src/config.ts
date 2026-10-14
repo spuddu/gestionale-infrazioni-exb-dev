@@ -23,6 +23,7 @@ export interface Config {
 
   // Intestazione vista
   showTitleSubtitle?: boolean
+  showTitleIcon?: boolean
   showTitleDivider?: boolean
   /** Titolo personalizzato. Vuoto = titolo automatico della pratica. */
   titleText?: string
@@ -276,6 +277,7 @@ export const defaultConfig: Config = {
   dividerColor: '#e5e7eb',
 
   showTitleSubtitle: true,
+  showTitleIcon: true,
   showTitleDivider: true,
   titleText: '',
   titleColor: '#1F4E79',

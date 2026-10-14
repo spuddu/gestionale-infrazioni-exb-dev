@@ -488,6 +488,9 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
 
   const [selectedId, setSelectedId] = useState<string>('')
   const [search, setSearch] = useState('')
+  // Dimensione del testo dell'articolo, come nella Guida operativa: 80%–140%, passo 10%.
+  const [textScale, setTextScale] = useState(1)
+  const changeTextScale = (delta: number) => setTextScale(prev => Math.min(1.4, Math.max(0.8, Math.round((prev + delta) * 10) / 10)))
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
   const contentRef = useRef<HTMLDivElement>(null)
   const articleButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
@@ -510,7 +513,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   }, [sections, search, searchActive])
 
   // Indice per numero: articoli generali in ordine di numero, poi i punti del Regolamento condotte private.
-  const [indexMode, setIndexMode] = useState<'argomento' | 'numero'>('argomento')
+  const [indexMode, setIndexMode] = useState<'argomento' | 'numero'>('numero')
   const numberedGroups = useMemo(() => {
     const byNum = (a: Articolo, b: Articolo) => Number(a.numero) - Number(b.numero)
     const visible = visibleSections.flatMap((s) => s.articoli)
@@ -602,6 +605,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     ['--gri-article-padding-bottom' as any]: `${articlePaddingBottom}px`,
     ['--gri-article-padding-left' as any]: `${articlePaddingLeft}px`,
     ['--gri-body-font-size' as any]: `${bodyFontSize}px`,
+    ['--gri-article-font-size' as any]: `${bodyFontSize * textScale}px`,
     ['--gri-index-font-size' as any]: `${indexFontSize}px`
   }
 
@@ -663,6 +667,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         <GiiPageTitle
           showSubtitle={(cfg as any).showTitleSubtitle !== false}
           showDivider={(cfg as any).showTitleDivider !== false}
+          showIcon={(cfg as any).showTitleIcon !== false}
           title={title}
           subtitle={String((cfg as any).subtitleText || '').trim() || undefined}
           fallbackIcon='regolamento'
@@ -738,6 +743,11 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                 </svg>
               </button>
               <span className='gri-toolbar-counter' title={toolbarCounter}>{toolbarCounter}</span>
+              <div role='group' aria-label='Dimensione testo del regolamento' style={{ display: 'inline-flex', alignItems: 'stretch', border: `1px solid ${controlBorderColor}`, borderRadius: 6, overflow: 'hidden', background: '#fff', flexShrink: 0 }}>
+                <button type='button' aria-label='Riduci dimensione testo' title='Riduci dimensione testo' disabled={textScale <= 0.8} onClick={() => changeTextScale(-0.1)} style={{ border: 0, borderRight: `1px solid ${controlBorderColor}`, minWidth: 34, height: 31, padding: '0 7px', background: '#fff', color: textScale <= 0.8 ? '#94a3b8' : titleColor, cursor: textScale <= 0.8 ? 'default' : 'pointer', fontSize: 12, fontWeight: 800, fontFamily: 'inherit' }}>A−</button>
+                <button type='button' aria-label='Ripristina dimensione testo' title='Ripristina dimensione testo (100%)' aria-pressed={textScale === 1} onClick={() => setTextScale(1)} style={{ border: 0, borderRight: `1px solid ${controlBorderColor}`, minWidth: 34, height: 31, padding: '0 7px', background: textScale === 1 ? `${accentColor}12` : '#fff', color: titleColor, cursor: 'pointer', fontSize: 13, fontWeight: 800, fontFamily: 'inherit' }}>A</button>
+                <button type='button' aria-label='Aumenta dimensione testo' title='Aumenta dimensione testo' disabled={textScale >= 1.4} onClick={() => changeTextScale(0.1)} style={{ border: 0, minWidth: 34, height: 31, padding: '0 7px', background: '#fff', color: textScale >= 1.4 ? '#94a3b8' : titleColor, cursor: textScale >= 1.4 ? 'default' : 'pointer', fontSize: 15, fontWeight: 800, fontFamily: 'inherit' }}>A+</button>
+              </div>
             </div>
           </div>
         </div>
@@ -749,8 +759,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                 <span>Indice regolamento</span>
                 <div className='gri-panel-head-actions'>
                   <div className='gri-index-mode' role='group' aria-label='Ordina indice'>
+                    <button type='button' className={indexMode === 'numero' ? 'active' : ''} aria-pressed={indexMode === 'numero'} onClick={() => setIndexMode('numero')} title='Articoli in ordine di numero'>Articolo</button>
                     <button type='button' className={indexMode === 'argomento' ? 'active' : ''} aria-pressed={indexMode === 'argomento'} onClick={() => setIndexMode('argomento')} title='Articoli raggruppati per argomento'>Argomento</button>
-                    <button type='button' className={indexMode === 'numero' ? 'active' : ''} aria-pressed={indexMode === 'numero'} onClick={() => setIndexMode('numero')} title='Articoli in ordine di numero'>Numero</button>
                   </div>
                   <button
                     type='button'
@@ -944,11 +954,11 @@ const styles = `
 .gri-art-title { font-size:var(--gri-index-font-size,14px); line-height:1.4; color:inherit; font-weight:600; }
 .gri-empty { padding:16px; color:#475569; text-align:center; font-size:var(--gri-index-font-size,14px); font-weight:600; }
 .gri-article { width:100%; box-sizing:border-box; padding:var(--gri-article-padding-top,12px) var(--gri-article-padding-right,12px) var(--gri-article-padding-bottom,12px) var(--gri-article-padding-left,12px); display:flex; flex-direction:column; gap:10px; }
-.gri-breadcrumb { font-size:calc(var(--gri-body-font-size,15px) - 2px); text-transform:uppercase; letter-spacing:0.03em; color:#475569; font-weight:800; }
+.gri-breadcrumb { font-size:calc(var(--gri-article-font-size,15px) - 2px); text-transform:uppercase; letter-spacing:0.03em; color:#475569; font-weight:800; }
 .gri-article-head { display:flex; flex-direction:column; gap:2px; padding-bottom:10px; border-bottom:var(--gri-separator-width,1px) solid var(--gri-separator-color,#dbe7f4); }
-.gri-article-num { font-size:calc(var(--gri-body-font-size,15px) - 1px); font-weight:800; opacity:1; color:#334155; }
-.gri-article-title { font-size:calc(var(--gri-body-font-size,15px) + 4px); font-weight:800; line-height:1.3; }
-.gri-article-body { font-size:var(--gri-body-font-size,15px); line-height:1.6; color:#172033; font-weight:500; }
+.gri-article-num { font-size:calc(var(--gri-article-font-size,15px) - 1px); font-weight:800; opacity:1; color:#334155; }
+.gri-article-title { font-size:calc(var(--gri-article-font-size,15px) + 4px); font-weight:800; line-height:1.3; }
+.gri-article-body { font-size:var(--gri-article-font-size,15px); line-height:1.6; color:#172033; font-weight:500; }
 .gri-article-body p { margin:0 0 12px; }
 .gri-list { margin:0 0 14px; padding-left:20px; }
 .gri-list li { margin-bottom:8px; }

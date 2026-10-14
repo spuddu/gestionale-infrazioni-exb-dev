@@ -5281,6 +5281,16 @@ function NuovaPraticaForm (p: {
   const catastoAutoAppliedRef = React.useRef(false)
   // Ultimo testo "Dati tecnici rilevati" calcolato dal punto (null = nessun calcolo in sessione)
   const datiTecniciAutoRef = React.useRef<string | null>(null)
+  // Particelle distinte nel punto quando sono più di una: l'IT deve scegliere quella
+  // interessata dall'infrazione (i dati catastali restano vuoti finché non sceglie).
+  const [particelleCandidate, setParticelleCandidate] = React.useState<GiiCatastoValues[]>([])
+  // Settori rilevati nel punto impostato o spostato in questa sessione:
+  // null = punto non modificato; 'error' = interrogazione non riuscita.
+  const [puntoSettori, setPuntoSettori] = React.useState<GiiDatiTecniciLookup | 'error' | null>(null)
+  // Settore della pratica, letto dall'effetto sul punto senza dipendere dalla bozza.
+  const praticaSettoreCorrente = normalizeSettoreCode(normalizeAreaCode(g('area_cod') || g('area')), g('settore_cod') || g('settore'))
+  const praticaSettoreRef = React.useRef('')
+  praticaSettoreRef.current = praticaSettoreCorrente
 
   // Prepara il layer Particelle della mappa: i campi catastali vengono caricati lato client
   // insieme alle feature, così la lettura al clic è immediata come il popup.
@@ -5320,6 +5330,8 @@ function NuovaPraticaForm (p: {
           setDraft(prev => String(prev.dati_tecnici ?? '') === autoText ? { ...prev, dati_tecnici: String(baselineDraft.dati_tecnici ?? '') } : prev)
           datiTecniciAutoRef.current = null
         }
+        setPuntoSettori(null)
+        setParticelleCandidate([])
         setSpatialLookupState(prev => prev.running || prev.text ? { running: false, text: '', kind: 'idle' } : prev)
       }
       return
@@ -5339,23 +5351,27 @@ function NuovaPraticaForm (p: {
         if (cancelled || seq !== spatialLookupSeqRef.current) return res
         // Dati catastali sempre coerenti con il punto corrente: vuoti se la particella o
         // l'attributo mancano, o se l'interrogazione non è riuscita.
+        // Con più particelle i valori restano vuoti e l'IT sceglie tra le candidate.
         setDraft(prev => {
           const next: NpDraft = { ...prev }
           GII_CATASTO_FIELDS.forEach(key => { next[key] = res ? res.values[key] : '' })
           return next
         })
+        setParticelleCandidate(res && res.candidates.length > 1 ? res.candidates : [])
         catastoAutoAppliedRef.current = true
         return res
       })
       // Dati tecnici rilevati: stessa logica e stesso formato del Survey, applicati appena disponibili.
       // Sostituiscono i vecchi campi Distretto/Comizio/Idrante.
       // lookupDatiTecniciAtPoint non lancia eccezioni: null = interrogazione non riuscita.
-      const datiTecniciPromise = lookupDatiTecniciAtPoint(view, point).then(text => {
-        if (cancelled || seq !== spatialLookupSeqRef.current) return text
-        const autoText = text ?? ''
+      const datiTecniciPromise = lookupDatiTecniciAtPoint(view, point, [praticaSettoreRef.current]).then(res => {
+        if (cancelled || seq !== spatialLookupSeqRef.current) return res
+        const autoText = res ? res.text : ''
         setDraft(prev => ({ ...prev, dati_tecnici: autoText }))
         datiTecniciAutoRef.current = autoText
-        return text
+        // Settori del punto per il controllo del Settore della pratica.
+        setPuntoSettori(res || 'error')
+        return res
       })
       try {
         const [catastoRes, datiTecniciRes] = await Promise.all([catastoPromise, datiTecniciPromise])
@@ -5363,7 +5379,7 @@ function NuovaPraticaForm (p: {
 
         const found: string[] = []
         if (catastoRes?.found) found.push('dati catastali')
-        if (datiTecniciRes) found.push('dati tecnici')
+        if (datiTecniciRes?.text) found.push('dati tecnici')
         const completedText = found.length
           ? `Rilevazione automatica completata: ${found.join(', ')}.`
           : 'Nessun elemento catastale o tecnico rilevato nel punto.'
@@ -6155,6 +6171,60 @@ React.useEffect(() => {
     attrezzature_risarcimento_dettaglio: g('attrezzature_risarcimento_dettaglio')
   }), [n3parziale, n3totale, draft.norma_violata3, draft.attrezzature_risarcimento_dettaglio])
 
+  // Pratica aperta senza spostare il punto, con dati catastali vuoti: se il punto
+  // ricade su più particelle (gii-header le lascia vuote), l'IT deve scegliere.
+  const baselineCatastoVuoto = GII_CATASTO_FIELDS.every(key => !String(baselineDraft[key] ?? '').trim())
+  const existingPointX = p.existingGeomWgs84 ? Number(p.existingGeomWgs84.x) : 0
+  const existingPointY = p.existingGeomWgs84 ? Number(p.existingGeomWgs84.y) : 0
+  React.useEffect(() => {
+    const view = p.mapView
+    const hasExisting = isFiniteNum(existingPointX) && isFiniteNum(existingPointY) && (existingPointX !== 0 || existingPointY !== 0)
+    if (mode !== 'edit' || reqPoint !== 1 || p.clickedPointWgs84 || !hasExisting || !baselineCatastoVuoto || !view || isReadOnly || isRitAgrTecLimitedEdit) return
+    let cancelled = false
+    void lookupCatastoAtPoint(view, { x: existingPointX, y: existingPointY }).then(res => {
+      if (!cancelled) setParticelleCandidate(res && res.candidates.length > 1 ? res.candidates : [])
+    })
+    return () => { cancelled = true }
+  }, [mode, reqPoint, p.clickedPointWgs84, existingPointX, existingPointY, baselineCatastoVuoto, p.mapView, isReadOnly, isRitAgrTecLimitedEdit])
+
+  // Scelta della particella tra quelle del punto: compila i quattro campi catastali.
+  const particellaSceltaKey = catastoValuesKey(GII_CATASTO_FIELDS.reduce((acc, key) => { acc[key] = String(g(key) || ''); return acc }, emptyCatastoValues()))
+  const particellaDaScegliere = particelleCandidate.length > 1 && !particelleCandidate.some(c => catastoValuesKey(c) === particellaSceltaKey)
+  const scegliParticella = (index: string) => {
+    const scelta = particelleCandidate[Number(index)]
+    setDraft(prev => {
+      const next: NpDraft = { ...prev }
+      GII_CATASTO_FIELDS.forEach(key => { next[key] = scelta ? scelta[key] : '' })
+      return next
+    })
+    catastoAutoAppliedRef.current = true
+  }
+
+  // Controllo del Settore: il punto impostato o spostato deve ricadere nel Settore della pratica.
+  const settoreDiversoMessaggio = ((): { title: string, text: string } | null => {
+    if (!puntoSettori || puntoSettori === 'error' || !praticaSettoreCorrente) return null
+    if (!puntoSettori.settori.length || puntoSettori.settori.includes(praticaSettoreCorrente)) return null
+    const nomeSettore = (codice: string) => `Settore ${puntoSettori.nomiSettori[codice] || codice}`
+    const distrettiFuori = puntoSettori.distretti.filter(d => d.settore && d.settore !== praticaSettoreCorrente)
+    let dove = ''
+    if (distrettiFuori.length === 1 && puntoSettori.settori.length === 1) {
+      dove = `nel Distretto ${distrettiFuori[0].nome} del ${nomeSettore(distrettiFuori[0].settore)}`
+    } else if (puntoSettori.settori.length === 1) {
+      dove = `nel ${nomeSettore(puntoSettori.settori[0])}`
+    } else {
+      const nomi = puntoSettori.settori.map(codice => puntoSettori.nomiSettori[codice] || codice)
+      dove = `nei Settori ${nomi.slice(0, -1).join(', ')} e ${nomi[nomi.length - 1]}`
+    }
+    const origineTr = mode === 'edit' && Number(pickAttrCI(p.initialData || {}, ['origine_pratica', 'ORIGINE_PRATICA'])) === 1
+    const azione = origineTr
+      ? 'Spostare il punto all’interno del Settore della pratica oppure, se la violazione riguarda un altro Settore, annullare lo spostamento del punto e trasmettere l’istruttoria al Capo Settore segnalando l’errore in Ulteriori annotazioni.'
+      : 'Spostare il punto all’interno del Settore della pratica.'
+    return {
+      title: 'Settore diverso da quello della pratica.',
+      text: `Il punto indicato ricade ${dove}, mentre la pratica appartiene al ${nomeSettore(praticaSettoreCorrente)}.\n${azione}`
+    }
+  })()
+
   const ritGradoSelectedArts = React.useMemo(() => getRitGradoSelectedArts(draft), [draft])
   const ritGradiViolazioniMap = React.useMemo(() => parseGradiViolazioni(g('gradi_violazioni')), [draft.gradi_violazioni])
   const ritGradoTriggerViolations = ritGradoSelectedArts.length > 0
@@ -6763,6 +6833,7 @@ React.useEffect(() => {
   const performCancel = () => {
     catastoAutoAppliedRef.current = false
     datiTecniciAutoRef.current = null
+    setPuntoSettori(null)
     spatialLookupPointKeyRef.current = ''
     spatialLookupRunningRef.current = false
     setSpatialLookupState({ running: false, text: '', kind: 'idle' })
@@ -6953,6 +7024,28 @@ React.useEffect(() => {
         text: 'Indicare se il trasgressore era presente al momento del rilevamento.'
       })
       return
+    }
+
+    if (reqPoint === 1 && !isRitAgrTecLimitedEdit) {
+      // Punto impostato o spostato: il Settore deve essere verificabile e coincidere con quello della pratica.
+      if (p.clickedPointWgs84 && puntoSettori === 'error') {
+        setValidationPopup({
+          title: 'Settore del punto non verificato',
+          text: 'Non è stato possibile verificare il Settore in cui ricade il punto (interrogazione non riuscita). Riposizionare il punto per riprovare.'
+        })
+        return
+      }
+      if (settoreDiversoMessaggio) {
+        setValidationPopup(settoreDiversoMessaggio)
+        return
+      }
+      if (particellaDaScegliere) {
+        setValidationPopup({
+          title: 'Particella catastale obbligatoria',
+          text: 'Il punto indicato ricade su più particelle catastali: scegliere la particella interessata dall’infrazione.'
+        })
+        return
+      }
     }
 
     const hasValidExistingMapPoint = !!(p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0))
@@ -8245,6 +8338,27 @@ ${e?.message || String(e)}`
                 <NpField label='Mappale'><NpText value={g('mappale')} onChange={() => {}} disabled/></NpField>
               </div>
             )}
+            {reqPoint === 1 && !isRitAgrTecLimitedEdit && particelleCandidate.length > 1 && (
+              // Più particelle nel punto: la scelta dell'IT compila i dati catastali.
+              <div style={{ marginTop: 8, minWidth: 0, maxWidth: '100%' }}>
+                <NpField label='Particella catastale'>
+                  <NpSel
+                    value={String(particelleCandidate.findIndex(c => catastoValuesKey(c) === particellaSceltaKey) >= 0 ? particelleCandidate.findIndex(c => catastoValuesKey(c) === particellaSceltaKey) : '')}
+                    onChange={scegliParticella}
+                    options={particelleCandidate.map((c, i) => ({ v: String(i), l: catastoCandidateLabel(c) }))}
+                    disabled={saving || isReadOnly}
+                    attention={particellaDaScegliere}
+                    attentionTitle='Il punto ricade su più particelle: scegliere quella interessata dall’infrazione'
+                  />
+                </NpField>
+              </div>
+            )}
+            {reqPoint === 1 && !!settoreDiversoMessaggio && (
+              <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 6, background: '#fef2f2', border: '1px solid #fecaca', color: '#b42318', fontSize: 12, lineHeight: 1.5, whiteSpace: 'pre-line' }}>
+                <div style={{ fontWeight: 800 }}>{settoreDiversoMessaggio.title}</div>
+                {settoreDiversoMessaggio.text}
+              </div>
+            )}
             {reqPoint === 1 && (
               <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 {!p.mapClickEnabled ? (
@@ -9343,6 +9457,7 @@ ${e?.message || String(e)}`
               icon={toolbarTitleInfo.icon}
               showSubtitle={false}
               showDivider={false}
+              showIcon={(cfg as any).showTitleIcon !== false}
               titleFontSize={formStyle.titleFontSize}
               titleFontWeight={800}
               titleColor={formStyle.titleColor}
@@ -10474,7 +10589,7 @@ ${e?.message || String(e)}`
               {validationPopup.title}
             </div>
             <div style={{ fontSize: popupBodyFontSize, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
-              <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d' }}>
+              <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d', whiteSpace: 'pre-line' }}>
                 {validationPopup.text}
               </div>
               <div>Correggi il valore e riprova.</div>
@@ -10771,8 +10886,51 @@ const GII_PARTICELLE_CATASTO_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGO
 const GII_CATASTO_FIELDS = ['nome_comun', 'sezione', 'foglio', 'mappale'] as const
 type GiiCatastoValues = Record<typeof GII_CATASTO_FIELDS[number], string>
 
-async function queryCatastoAtPoint (wgs84: any): Promise<{ found: boolean, values: GiiCatastoValues }> {
-  const values = { nome_comun: '', sezione: '', foglio: '', mappale: '' } as GiiCatastoValues
+// Esito dell'interrogazione catastale: tutte le particelle distinte che contengono il punto.
+// Con una sola particella i valori sono quelli della particella; con più particelle
+// i valori restano vuoti e la scelta spetta all'IT (candidates).
+type GiiCatastoLookup = { found: boolean, values: GiiCatastoValues, candidates: GiiCatastoValues[] }
+
+function emptyCatastoValues (): GiiCatastoValues {
+  return { nome_comun: '', sezione: '', foglio: '', mappale: '' } as GiiCatastoValues
+}
+
+function catastoValuesFromAttributes (attrs: any): GiiCatastoValues {
+  const values = emptyCatastoValues()
+  GII_CATASTO_FIELDS.forEach(name => {
+    const key = Object.keys(attrs || {}).find(k => k.toLowerCase() === name)
+    const raw = key ? attrs[key] : null
+    values[name] = spatialValueIsMeaningful(raw) ? String(raw).trim() : ''
+  })
+  return values
+}
+
+function catastoValuesKey (v: GiiCatastoValues): string {
+  return GII_CATASTO_FIELDS.map(name => String(v[name] || '').toUpperCase()).join('|')
+}
+
+function catastoLookupFromFeatures (features: any[]): GiiCatastoLookup {
+  const distinte = new Map<string, GiiCatastoValues>()
+  features.forEach((f: any) => {
+    const v = catastoValuesFromAttributes(f?.attributes || {})
+    distinte.set(catastoValuesKey(v), v)
+  })
+  const candidates = Array.from(distinte.values())
+  if (candidates.length === 0) return { found: false, values: emptyCatastoValues(), candidates: [] }
+  if (candidates.length === 1) return { found: true, values: candidates[0], candidates }
+  return { found: true, values: emptyCatastoValues(), candidates }
+}
+
+// Etichetta di una particella nella scelta dell'IT.
+function catastoCandidateLabel (v: GiiCatastoValues): string {
+  const parti = [v.nome_comun || 'Comune n.d.']
+  if (v.sezione) parti.push(`Sez. ${v.sezione}`)
+  parti.push(`Fg. ${v.foglio || 'n.d.'}`)
+  parti.push(`Mapp. ${v.mappale || 'n.d.'}`)
+  return parti.join(' – ')
+}
+
+async function queryCatastoAtPoint (wgs84: any): Promise<GiiCatastoLookup> {
   const layer = await getFeatureLayerByUrl(GII_PARTICELLE_CATASTO_URL)
   const geometry = await toLayerPoint(wgs84, layer)
   if (!geometry) throw new Error('Punto non valido per l\'interrogazione catastale.')
@@ -10782,18 +10940,9 @@ async function queryCatastoAtPoint (wgs84: any): Promise<{ found: boolean, value
   q.spatialRelationship = 'intersects'
   q.outFields = [...GII_CATASTO_FIELDS]
   q.returnGeometry = false
-  q.num = 1
   if (layer?.objectIdField) q.orderByFields = [String(layer.objectIdField)]
   const res = await layer.queryFeatures(q)
-  const feature = Array.isArray(res?.features) ? res.features[0] : null
-  if (!feature) return { found: false, values }
-  const attrs = feature.attributes || {}
-  GII_CATASTO_FIELDS.forEach(name => {
-    const key = Object.keys(attrs).find(k => k.toLowerCase() === name)
-    const raw = key ? attrs[key] : null
-    values[name] = spatialValueIsMeaningful(raw) ? String(raw).trim() : ''
-  })
-  return { found: true, values }
+  return catastoLookupFromFeatures(Array.isArray(res?.features) ? res.features : [])
 }
 
 // Lettura catastale "come il popup": usa le feature del layer Particelle già caricate
@@ -10818,7 +10967,7 @@ function ensureCatastoOutFields (layer: any): void {
 
 // null = lettura lato client non possibile (layer assente, spento o fuori scala):
 // in quel caso si ripiega sulla query al servizio.
-async function queryCatastoFromMapView (view: any, wgs84: any): Promise<{ found: boolean, values: GiiCatastoValues } | null> {
+async function queryCatastoFromMapView (view: any, wgs84: any): Promise<GiiCatastoLookup | null> {
   const layer = findCatastoLayerInView(view)
   if (!layer || typeof view?.whenLayerView !== 'function') return null
   try {
@@ -10841,18 +10990,10 @@ async function queryCatastoFromMapView (view: any, wgs84: any): Promise<{ found:
     q.outFields = [...GII_CATASTO_FIELDS]
     q.returnGeometry = false
     const res = await layerView.queryFeatures(q)
-    const feature = Array.isArray(res?.features) ? res.features[0] : null
-    const values = { nome_comun: '', sezione: '', foglio: '', mappale: '' } as GiiCatastoValues
-    if (!feature) return { found: false, values }
-    const attrs = feature.attributes || {}
+    const features = Array.isArray(res?.features) ? res.features : []
     // Campi non ancora disponibili lato client: meglio la query al servizio che valori vuoti.
-    if (!GII_CATASTO_FIELDS.every(name => Object.keys(attrs).some(k => k.toLowerCase() === name))) return null
-    GII_CATASTO_FIELDS.forEach(name => {
-      const key = Object.keys(attrs).find(k => k.toLowerCase() === name)
-      const raw = key ? attrs[key] : null
-      values[name] = spatialValueIsMeaningful(raw) ? String(raw).trim() : ''
-    })
-    return { found: true, values }
+    if (!features.every((f: any) => GII_CATASTO_FIELDS.every(name => Object.keys(f?.attributes || {}).some(k => k.toLowerCase() === name)))) return null
+    return catastoLookupFromFeatures(features)
   } catch (e) {
     console.warn('[GII catasto] Lettura dalla mappa non riuscita, uso il servizio:', e)
     return null
@@ -10860,7 +11001,7 @@ async function queryCatastoFromMapView (view: any, wgs84: any): Promise<{ found:
 }
 
 // Catasto: prima la mappa (immediato), poi il servizio. null = interrogazione non riuscita.
-async function lookupCatastoAtPoint (view: any, wgs84: any): Promise<{ found: boolean, values: GiiCatastoValues } | null> {
+async function lookupCatastoAtPoint (view: any, wgs84: any): Promise<GiiCatastoLookup | null> {
   const fromMap = await queryCatastoFromMapView(view, wgs84)
   if (fromMap) return fromMap
   try {
@@ -10872,11 +11013,16 @@ async function lookupCatastoAtPoint (view: any, wgs84: any): Promise<{ found: bo
 }
 
 // ── Dati tecnici rilevati: stessa logica e stesso formato dello script Survey
-//    gii_dati_tecnici.js (tutti gli elementi di rete e manufatti entro 2 m dal punto). ──
+//    gii_dati_tecnici.js (reti attive e manufatti entro 2 m dal punto, distretti
+//    che contengono il punto, Settori da Codice_set, nomi da Distretti_irrigui_lordi). ──
 const GII_RETE_IRRIGUA_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Rete_irrigua_CBS/FeatureServer/9'
 const GII_MANUFATTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Manufatti_rete_irrigua_CBSM/FeatureServer/8'
 const GII_DISTRETTI_LORDI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Distretti_irrigui_lordi/FeatureServer/108'
 const GII_DATI_TECNICI_BUFFER_M = 2
+const GII_ORDINE_RETE = ['canale adduttore', 'canale di presa', 'condotta principale', 'condotta comiziale', 'canaletta']
+const GII_ORDINE_MANUFATTI = ['opera di presa comiziale', 'idrante']
+const GII_NUMERI_ROMANI = new Set(['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'])
+const GII_VOCALI_ACCENTATE: Record<string, string> = { a: 'à', e: 'è', i: 'ì', o: 'ò', u: 'ù' }
 
 function datiTecniciText (value: any): string {
   if (value === null || value === undefined) return ''
@@ -10895,9 +11041,73 @@ function datiTecniciAddUnique (list: string[], value: any): void {
   list.push(v)
 }
 
+function datiTecniciCodice (value: any): string {
+  const c = datiTecniciText(value).toUpperCase()
+  return /^[A-Z0-9_]{1,10}$/.test(c) ? c : ''
+}
+
+// Nomi con la sola iniziale maiuscola (stesse regole dello script del Survey).
+function datiTecniciNomeProprio (value: any): string {
+  let t = datiTecniciText(value).replace(/\s+/g, ' ').toLowerCase()
+  t = t.replace(/([aeiou])['’](?=$|[\s,.;:)\-])/g, (_m, v: string) => GII_VOCALI_ACCENTATE[v])
+  t = t.replace(/(^|[\s\-'’(])([a-zàèéìòù])/g, (_m, p: string, c: string) => p + c.toUpperCase())
+  return t.split(' ').map(w => GII_NUMERI_ROMANI.has(w.toLowerCase()) ? w.toUpperCase() : w).join(' ').replace(/'/g, '’')
+}
+
+function datiTecniciSenzaZeri (value: any): string {
+  const t = datiTecniciText(value)
+  return /^[0-9]+$/.test(t) ? t.replace(/^0+(?=[0-9])/, '') : t
+}
+
+function datiTecniciNumeroOrdinamento (value: any): number {
+  const t = datiTecniciText(value)
+  if (t === '') return Infinity
+  const n = Number(t)
+  return isFinite(n) ? n : Infinity
+}
+
+function datiTecniciOrdina (features: any[], ordineTipi: string[]): any[] {
+  const chiave = (f: any) => {
+    const a = f?.attributes || {}
+    const tipo = datiTecniciText(datiTecniciAttr(a, 'Tipo')).toLowerCase()
+    const rango = ordineTipi.indexOf(tipo)
+    return {
+      rango: rango === -1 ? ordineTipi.length : rango,
+      tipo,
+      comizio: datiTecniciNumeroOrdinamento(datiTecniciAttr(a, 'Comizio')),
+      comizioTesto: datiTecniciText(datiTecniciAttr(a, 'Comizio')),
+      numero: datiTecniciNumeroOrdinamento(datiTecniciAttr(a, 'ID')),
+      numeroTesto: datiTecniciText(datiTecniciAttr(a, 'ID'))
+    }
+  }
+  return [...features].sort((fa, fb) => {
+    const a = chiave(fa); const b = chiave(fb)
+    if (a.rango !== b.rango) return a.rango - b.rango
+    if (a.tipo !== b.tipo) return a.tipo < b.tipo ? -1 : 1
+    if (a.comizio !== b.comizio) return a.comizio < b.comizio ? -1 : 1
+    if (a.comizioTesto !== b.comizioTesto) return a.comizioTesto < b.comizioTesto ? -1 : 1
+    if (a.numero !== b.numero) return a.numero < b.numero ? -1 : 1
+    if (a.numeroTesto !== b.numeroTesto) return a.numeroTesto < b.numeroTesto ? -1 : 1
+    return 0
+  })
+}
+
+function datiTecniciDescriviElemento (tipo: any, diametro: any, numero: any, comizio: any, distretto: string): string {
+  let testo = datiTecniciText(tipo)
+  const d = Number(datiTecniciText(diametro))
+  if (datiTecniciText(diametro) !== '' && isFinite(d) && d > 0) testo += ` Ø ${datiTecniciText(diametro)} mm`
+  const dettagli: string[] = []
+  if (datiTecniciText(numero) !== '') dettagli.push(`n. ${datiTecniciSenzaZeri(numero)}`)
+  if (datiTecniciText(comizio) !== '') dettagli.push(`Comizio ${datiTecniciSenzaZeri(comizio)}`)
+  if (distretto) dettagli.push(distretto)
+  if (dettagli.length > 0) testo += `: ${dettagli.join(' – ')}`
+  return testo
+}
+
 // Interroga un layer sul punto: prima le feature già caricate nella mappa (come il popup),
 // poi il servizio con gli stessi parametri del Survey (punto WGS84, intersects, distanza in metri).
-async function queryLayerAtPointForDatiTecnici (view: any, url: string, fields: string[], wgs84: any, distanceMeters: number | null, maxRecords?: number): Promise<any[]> {
+// keep: filtro lato client equivalente alla where del servizio (es. solo reti attive).
+async function queryLayerAtPointForDatiTecnici (view: any, url: string, fields: string[], wgs84: any, distanceMeters: number | null, where?: string, keep?: (attrs: any) => boolean): Promise<any[]> {
   const sortByOid = (layer: any, features: any[]): any[] => {
     const oidField = String(layer?.objectIdField || 'FID')
     return [...features].sort((a, b) => Number(datiTecniciAttr(a?.attributes, oidField)) - Number(datiTecniciAttr(b?.attributes, oidField)))
@@ -10936,8 +11146,8 @@ async function queryLayerAtPointForDatiTecnici (view: any, url: string, fields: 
           // Usa il risultato locale solo se i campi richiesti sono già disponibili lato client.
           const complete = features.every((f: any) => fields.every(name => Object.keys(f?.attributes || {}).some(k => k.toLowerCase() === name.toLowerCase())))
           if (complete) {
-            const sorted = sortByOid(mapLayer, features)
-            return maxRecords ? sorted.slice(0, maxRecords) : sorted
+            const filtered = keep ? features.filter((f: any) => keep(f?.attributes || {})) : features
+            return sortByOid(mapLayer, filtered)
           }
         }
       }
@@ -10948,78 +11158,128 @@ async function queryLayerAtPointForDatiTecnici (view: any, url: string, fields: 
   const layer = await getFeatureLayerByUrl(url)
   const oidField = String(layer?.objectIdField || 'FID')
   const q: any = typeof layer.createQuery === 'function' ? layer.createQuery() : {}
-  q.where = '1=1'
+  q.where = where || '1=1'
   q.geometry = await toLayerPoint(wgs84, { spatialReference: { wkid: 4326 } })
   q.spatialRelationship = 'intersects'
   q.outFields = Array.from(new Set([oidField, ...fields]))
   q.returnGeometry = false
   if (distanceMeters != null && distanceMeters > 0) { q.distance = distanceMeters; q.units = 'meters' }
   q.orderByFields = [oidField]
-  if (maxRecords) q.num = maxRecords
   const res = await layer.queryFeatures(q)
   return Array.isArray(res?.features) ? res.features : []
 }
 
-// Testo "Dati tecnici rilevati" identico a quello prodotto dal Survey.
-// Ritorna null solo se l'interrogazione di rete/manufatti non riesce.
-async function lookupDatiTecniciAtPoint (view: any, wgs84: any): Promise<string | null> {
-  try {
-    const [rete, manufatti] = await Promise.all([
-      queryLayerAtPointForDatiTecnici(view, GII_RETE_IRRIGUA_URL, ['Distretto', 'Comizio', 'Tipo', 'Diametro'], wgs84, GII_DATI_TECNICI_BUFFER_M),
-      queryLayerAtPointForDatiTecnici(view, GII_MANUFATTI_URL, ['Distretto', 'Comizio', 'ID', 'Tipo', 'Diametro'], wgs84, GII_DATI_TECNICI_BUFFER_M)
-    ])
+// Nomi dei distretti e dei Settori dal layer dei distretti (interrogazione non spaziale).
+async function queryDistrettiAnagrafica (codici: string[], settori: string[]): Promise<any[]> {
+  const parti: string[] = []
+  if (codici.length) parti.push(`Codice IN ('${codici.join("','")}')`)
+  if (settori.length) parti.push(`Codice_set IN ('${settori.join("','")}')`)
+  if (!parti.length) return []
+  const layer = await getFeatureLayerByUrl(GII_DISTRETTI_LORDI_URL)
+  const q: any = typeof layer.createQuery === 'function' ? layer.createQuery() : {}
+  q.where = parti.join(' OR ')
+  q.outFields = ['Codice', 'Nome', 'Codice_set', 'Settore']
+  q.returnGeometry = false
+  const res = await layer.queryFeatures(q)
+  return Array.isArray(res?.features) ? res.features : []
+}
 
-    const distretti: string[] = []
-    rete.forEach((f: any) => datiTecniciAddUnique(distretti, datiTecniciAttr(f?.attributes, 'Distretto')))
-    manufatti.forEach((f: any) => datiTecniciAddUnique(distretti, datiTecniciAttr(f?.attributes, 'Distretto')))
-    if (distretti.length === 0) {
-      // Come nel Survey: il distretto dal poligono è un ripiego e un suo errore non blocca il resto.
-      try {
-        const d = await queryLayerAtPointForDatiTecnici(view, GII_DISTRETTI_LORDI_URL, ['Nome'], wgs84, null, 1)
-        if (d.length) datiTecniciAddUnique(distretti, datiTecniciAttr(d[0]?.attributes, 'Nome'))
-      } catch {}
+type GiiDatiTecniciLookup = {
+  text: string
+  settori: string[]                 // Settori rilevati nel punto (Codice_set)
+  nomiSettori: Record<string, string>
+  distretti: Array<{ nome: string, settore: string }> // distretti rilevati (poligoni ed elementi non interdistrettuali)
+}
+
+// Testo "Dati tecnici rilevati" identico a quello prodotto dal Survey, più i Settori
+// rilevati per il controllo del Settore della pratica.
+// settoriExtra: Settori di cui serve il nome (es. quello della pratica).
+// Ritorna null solo se l'interrogazione non riesce.
+async function lookupDatiTecniciAtPoint (view: any, wgs84: any, settoriExtra: string[] = []): Promise<GiiDatiTecniciLookup | null> {
+  try {
+    const [reteRaw, manufattiRaw, poligoni] = await Promise.all([
+      queryLayerAtPointForDatiTecnici(view, GII_RETE_IRRIGUA_URL, ['Cod_Distre', 'Distretto', 'Comizio', 'Tipo', 'Diametro', 'Codice_set', 'Stato'], wgs84, GII_DATI_TECNICI_BUFFER_M,
+        "Stato = 'Attivo'", (a: any) => datiTecniciText(datiTecniciAttr(a, 'Stato')) === 'Attivo'),
+      queryLayerAtPointForDatiTecnici(view, GII_MANUFATTI_URL, ['Cod_Distre', 'Distretto', 'Comizio', 'ID', 'Tipo', 'Diametro', 'Codice_set'], wgs84, GII_DATI_TECNICI_BUFFER_M),
+      queryLayerAtPointForDatiTecnici(view, GII_DISTRETTI_LORDI_URL, ['Codice', 'Nome', 'Codice_set', 'Settore'], wgs84, null)
+    ])
+    const rete = datiTecniciOrdina(reteRaw, GII_ORDINE_RETE)
+    const manufatti = datiTecniciOrdina(manufattiRaw, GII_ORDINE_MANUFATTI)
+
+    const settori: string[] = []
+    const nomiDistretti: Record<string, string> = {}
+    const settoreDistretto: Record<string, string> = {}
+    const nomiSettori: Record<string, string> = {}
+    const registra = (a: any) => {
+      const c = datiTecniciCodice(datiTecniciAttr(a, 'Codice'))
+      const s = datiTecniciCodice(datiTecniciAttr(a, 'Codice_set'))
+      if (c && !nomiDistretti[c]) { nomiDistretti[c] = datiTecniciNomeProprio(datiTecniciAttr(a, 'Nome')); settoreDistretto[c] = s }
+      if (s && !nomiSettori[s] && datiTecniciText(datiTecniciAttr(a, 'Settore'))) nomiSettori[s] = datiTecniciNomeProprio(datiTecniciAttr(a, 'Settore'))
+    }
+    poligoni.forEach((f: any) => {
+      const a = f?.attributes || {}
+      registra(a)
+      datiTecniciAddUnique(settori, datiTecniciCodice(datiTecniciAttr(a, 'Codice_set')))
+    })
+
+    const elementi = [...rete, ...manufatti]
+    const codiciDaCercare: string[] = []
+    const settoriDaCercare: string[] = []
+    elementi.forEach((f: any) => {
+      const a = f?.attributes || {}
+      const ce = datiTecniciCodice(datiTecniciAttr(a, 'Cod_Distre'))
+      const se = datiTecniciCodice(datiTecniciAttr(a, 'Codice_set'))
+      datiTecniciAddUnique(settori, se)
+      if (ce && !nomiDistretti[ce] && datiTecniciText(datiTecniciAttr(a, 'Distretto')).toUpperCase() !== 'INTERDISTRETTUALE') datiTecniciAddUnique(codiciDaCercare, ce)
+      if (se && !nomiSettori[se]) datiTecniciAddUnique(settoriDaCercare, se)
+    })
+    settoriExtra.map(datiTecniciCodice).forEach(s => { if (s && !nomiSettori[s]) datiTecniciAddUnique(settoriDaCercare, s) })
+    ;(await queryDistrettiAnagrafica(codiciDaCercare, settoriDaCercare)).forEach((f: any) => registra(f?.attributes || {}))
+
+    const codaSettore = (codice: string) => codice ? ` – Settore ${nomiSettori[codice] || codice}` : ''
+    const distretti: Array<{ nome: string, settore: string }> = []
+    const aggiungiDistretto = (codice: string) => {
+      if (codice && nomiDistretti[codice] && !distretti.some(d => d.nome === nomiDistretti[codice])) distretti.push({ nome: nomiDistretti[codice], settore: settoreDistretto[codice] || '' })
+    }
+    const distrettoElemento = (a: any): string => {
+      const c = datiTecniciCodice(datiTecniciAttr(a, 'Cod_Distre'))
+      if (datiTecniciText(datiTecniciAttr(a, 'Distretto')).toUpperCase() === 'INTERDISTRETTUALE' || !c || !nomiDistretti[c]) return 'Interdistrettuale'
+      aggiungiDistretto(c)
+      return `Distretto ${nomiDistretti[c]}`
     }
 
-    const righe: string[] = []
-    if (distretti.length === 1) righe.push(`DISTRETTO: ${distretti[0]}`)
-    else if (distretti.length > 1) righe.push(`DISTRETTI: ${distretti.join(', ')}`)
+    const righe: string[] = ['DISTRETTO IN CUI RICADE IL PUNTO']
+    const nomiPoligoni: string[] = []
+    poligoni.forEach((f: any) => {
+      const a = f?.attributes || {}
+      const cp = datiTecniciCodice(datiTecniciAttr(a, 'Codice'))
+      if (cp) {
+        aggiungiDistretto(cp)
+        datiTecniciAddUnique(nomiPoligoni, `${nomiDistretti[cp]}${codaSettore(datiTecniciCodice(datiTecniciAttr(a, 'Codice_set')))}`)
+      }
+    })
+    if (nomiPoligoni.length === 0) righe.push('• FUORI COMPRENSORIO')
+    nomiPoligoni.forEach(n => righe.push(`• ${n}`))
 
+    const testoElementi: string[] = []
     if (rete.length > 0) {
-      if (righe.length > 0) righe.push('')
-      righe.push('RETE')
+      testoElementi.push('RETE')
       rete.forEach((f: any) => {
         const a = f?.attributes || {}
-        const tipo = datiTecniciText(datiTecniciAttr(a, 'Tipo'))
-        const comizio = datiTecniciText(datiTecniciAttr(a, 'Comizio'))
-        const nomeDistretto = datiTecniciText(datiTecniciAttr(a, 'Distretto'))
-        const diametro = datiTecniciText(datiTecniciAttr(a, 'Diametro'))
-        let testo = tipo || 'Rete'
-        if (tipo.toLowerCase().includes('comiziale')) {
-          if (comizio) testo += ` – Comizio ${comizio}`
-        } else if (nomeDistretto) {
-          testo += ` – ${nomeDistretto}`
-        }
-        if (diametro) testo += ` – Ø ${diametro} mm`
-        righe.push(`• ${testo}`)
+        testoElementi.push(`• ${datiTecniciDescriviElemento(datiTecniciAttr(a, 'Tipo') || 'Rete', datiTecniciAttr(a, 'Diametro'), '', datiTecniciAttr(a, 'Comizio'), distrettoElemento(a))}${codaSettore(datiTecniciCodice(datiTecniciAttr(a, 'Codice_set')))}`)
       })
     }
-
     if (manufatti.length > 0) {
-      if (righe.length > 0) righe.push('')
-      righe.push('MANUFATTI')
+      if (testoElementi.length > 0) testoElementi.push('')
+      testoElementi.push('MANUFATTI')
       manufatti.forEach((f: any) => {
         const a = f?.attributes || {}
-        const tipoM = datiTecniciText(datiTecniciAttr(a, 'Tipo'))
-        const idM = datiTecniciText(datiTecniciAttr(a, 'ID'))
-        const diametroM = datiTecniciText(datiTecniciAttr(a, 'Diametro'))
-        let testoM = tipoM || 'Manufatto'
-        if (idM) testoM += ` – ID ${idM}`
-        if (diametroM) testoM += ` – Ø ${diametroM} mm`
-        righe.push(`• ${testoM}`)
+        testoElementi.push(`• ${datiTecniciDescriviElemento(datiTecniciAttr(a, 'Tipo') || 'Manufatto', datiTecniciAttr(a, 'Diametro'), datiTecniciAttr(a, 'ID'), datiTecniciAttr(a, 'Comizio'), distrettoElemento(a))}${codaSettore(datiTecniciCodice(datiTecniciAttr(a, 'Codice_set')))}`)
       })
     }
-
-    return righe.join('\n')
+    if (testoElementi.length > 0) righe.push('')
+    settori.sort()
+    return { text: [...righe, ...testoElementi].join('\n'), settori, nomiSettori, distretti }
   } catch (e) {
     console.warn('[GII dati tecnici] Rilevazione non riuscita:', e)
     return null

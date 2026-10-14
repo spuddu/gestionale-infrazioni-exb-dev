@@ -18,6 +18,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
     <div style={hint}>Per impostazione predefinita titolo e icona vengono letti automaticamente dalla card della Home associata alla pagina corrente.</div>
     <label style={lbl}>Titolo personalizzato (opzionale)</label>
     <input style={inp} value={String(cfg.titleOverride||'')} onChange={e=>set('titleOverride',e.target.value)} placeholder='Vuoto = usa il titolo della card Home'/>
+    <label style={{ ...lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={cfg.showTitleIcon !== false} onChange={e=>set('showTitleIcon',e.target.checked)}/> Mostra icona prima del titolo</label>
     <label style={{ ...lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={cfg.showDescription !== false} onChange={e=>set('showDescription',e.target.checked)}/> Mostra sottotitolo / descrizione</label>
     <label style={lbl}>Descrizione personalizzata (opzionale)</label>
     <input style={inp} value={String(cfg.descriptionOverride||'')} onChange={e=>set('descriptionOverride',e.target.value)} placeholder='Vuoto = usa la descrizione della card Home'/>

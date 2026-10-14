@@ -98,7 +98,7 @@ const exactHelp: Record<string, GuideStepHelp> = {
   'Aprire Nuova pratica dalla Home o dal menu.': {
     paragraphs: [
       'Dalla Home selezionare la card Nuova pratica. Se ci si trova già in un’altra vista, utilizzare la voce Nuova pratica nel navigatore laterale.',
-      'La vista si apre direttamente sulla scheda Trasgressore; se l’Istruttore tecnico è assegnato a più settori, il sistema richiede prima di scegliere quello della nuova pratica. Con un solo settore la scelta non è richiesta.'
+      'La vista si apre direttamente sulla scheda Trasgressore; se l’Istruttore tecnico è assegnato a più Settori, il sistema richiede prima di scegliere quello della nuova pratica. Con un solo Settore la scelta non è richiesta.'
     ]
   },
   'Aprire Mappa e selezionare Dati catastali.': {
@@ -662,7 +662,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('avviare una nuova pratica')) {
       return {
         paragraphs: [
-          'Aprire Nuova pratica dalla Home oppure dal navigatore laterale. Se l’Istruttore tecnico è assegnato a più settori, selezionare prima il settore cui appartiene la pratica da creare; se è assegnato a un solo settore, la scelta non è richiesta.',
+          'Aprire Nuova pratica dalla Home oppure dal navigatore laterale. Se l’Istruttore tecnico è assegnato a più Settori, selezionare prima il Settore cui appartiene la pratica da creare; se è assegnato a un solo Settore, la scelta non è richiesta.',
           'La nuova pratica si apre sulla scheda Trasgressore, con i Dati generali già compilati automaticamente dal sistema.'
         ]
       }
@@ -688,7 +688,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
       return {
         paragraphs: [
           'Nella nuova pratica, che si apre sulla scheda Trasgressore, aprire la scheda Dati generali e controllare i valori compilati automaticamente dal sistema per Area, Settore, Tecnico rilevatore, Istruttore tecnico e Data rilevazione. I campi sono in sola lettura.',
-          'Se l’Istruttore tecnico è assegnato a più settori e, controllando i Dati generali, si accorge di aver selezionato quello errato, può utilizzare l’azione Elimina pratica e generarne una nuova nel settore corretto, purché non l’abbia ancora trasmessa al Capo Settore. Se si accorge dell’errore dopo la trasmissione, la pratica potrà essere eliminata dal Capo Settore.'
+          'Se l’Istruttore tecnico è assegnato a più Settori e, controllando i Dati generali, si accorge di aver selezionato quello errato, può utilizzare l’azione Elimina pratica e generarne una nuova nel Settore corretto, purché non l’abbia ancora trasmessa al Capo Settore. Se si accorge dell’errore dopo la trasmissione, la pratica potrà essere eliminata dal Capo Settore.'
         ]
       }
     }

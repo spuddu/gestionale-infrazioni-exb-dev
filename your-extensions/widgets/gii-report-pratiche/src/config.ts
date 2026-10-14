@@ -2,6 +2,7 @@ import { type ImmutableObject, Immutable } from 'jimu-core'
 
 export interface Config {
   showTitleSubtitle: boolean
+  showTitleIcon: boolean
   showTitleDivider: boolean
   title: string
   subtitle: string
@@ -35,6 +36,7 @@ export interface Config {
 
 export const defaultConfig: Config = {
   showTitleSubtitle: true,
+  showTitleIcon: true,
   showTitleDivider: true,
   title: 'Report pratiche',
   subtitle: 'Quadro di sintesi delle fasi procedimentali delle pratiche di competenza.',

@@ -18277,6 +18277,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 icon='modifica'
                 showSubtitle={false}
                 showDivider={false}
+                showIcon={(cfg as any).showTitleIcon !== false}
                 titleFontSize={Number(adminStyle.titleFontSize || 18)}
                 titleFontWeight={Number(cfg.titleFontWeight || 700)}
                 titleColor={headerTitleColor}

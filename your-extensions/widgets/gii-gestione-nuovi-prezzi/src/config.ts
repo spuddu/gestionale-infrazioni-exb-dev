@@ -2,6 +2,7 @@ import { type ImmutableObject } from 'jimu-core'
 
 export interface Config {
   showTitleSubtitle?: boolean
+  showTitleIcon?: boolean
   showTitleDivider?: boolean
   serviceUrl?: string
   detailTableUrl?: string

@@ -60,6 +60,11 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         />
 
         <label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input type='checkbox' checked={cfg.showTitleIcon !== false} onChange={(e) => set('showTitleIcon', e.target.checked)} />
+          Mostra icona prima del titolo
+        </label>
+
+        <label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 8 }}>
           <input type='checkbox' checked={cfg.showTitleSubtitle !== false} onChange={(e) => set('showTitleSubtitle', e.target.checked)} />
           Mostra sottotitolo / descrizione
         </label>

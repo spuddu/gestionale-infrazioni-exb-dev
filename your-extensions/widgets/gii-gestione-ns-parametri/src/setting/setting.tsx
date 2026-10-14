@@ -47,6 +47,11 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <input style={inp} type="number" min={10} max={36} step={1} value={titleFontSize} onChange={(e) => set('titleFontSize', Number(e.target.value || 15))} />
 
         <label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input type='checkbox' checked={cfg.showTitleIcon !== false} onChange={(e) => set('showTitleIcon', e.target.checked)} />
+          Mostra icona prima del titolo
+        </label>
+
+        <label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 8 }}>
           <input type='checkbox' checked={cfg.showTitleSubtitle !== false} onChange={(e) => set('showTitleSubtitle', e.target.checked)} />
           Mostra sottotitolo / descrizione
         </label>

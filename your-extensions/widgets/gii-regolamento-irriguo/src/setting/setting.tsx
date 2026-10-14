@@ -87,6 +87,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <label style={lbl}>Dimensione icona titolo (px)</label>
         <input style={inp} type='number' min={16} max={48} step={1} value={Number(cfg.titleIconSize || 23)} onChange={(e) => set('titleIconSize', Number(e.target.value || 23))} />
 
+        <label style={{ ...lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={cfg.showTitleIcon !== false} onChange={e=>set('showTitleIcon',e.target.checked)}/> Mostra icona prima del titolo</label>
         <label style={{ ...lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={cfg.showTitleSubtitle !== false} onChange={e=>set('showTitleSubtitle',e.target.checked)}/> Mostra sottotitolo / descrizione</label>
         <label style={{ ...lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={cfg.showTitleDivider !== false} onChange={e=>set('showTitleDivider',e.target.checked)}/> Mostra separatore sotto il titolo</label>
         <label style={lbl}>Colore descrizione sotto il separatore</label>

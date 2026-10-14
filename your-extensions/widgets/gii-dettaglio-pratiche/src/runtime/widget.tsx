@@ -5886,6 +5886,7 @@ return (
     <GiiPageTitle
       showSubtitle={(ui as any).showTitleSubtitle !== false}
       showDivider={(ui as any).showTitleDivider !== false}
+      showIcon={(ui as any).showTitleIcon !== false}
       title={String(ui.detailTitlePrefix ?? 'Dettaglio pratica selezionata')}
       subtitle={String(ui.detailTitleSubtitleText ?? 'Consulta i dati della pratica selezionata')}
       icon='dettaglio'
@@ -5980,6 +5981,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
     showTitleSubtitle: (cfg as any).showTitleSubtitle !== false,
     showTitleDivider: (cfg as any).showTitleDivider !== false,
+    showTitleIcon: (cfg as any).showTitleIcon !== false,
     detailTitlePrefix: String(cfg.detailTitlePrefix ?? defaultConfig.detailTitlePrefix),
     detailTitleHeight: Number.isFinite(Number(cfg.detailTitleHeight)) ? Number(cfg.detailTitleHeight) : defaultConfig.detailTitleHeight,
     detailTitlePaddingBottom: Number.isFinite(Number(cfg.detailTitlePaddingBottom)) ? Number(cfg.detailTitlePaddingBottom) : defaultConfig.detailTitlePaddingBottom,

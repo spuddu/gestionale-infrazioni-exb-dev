@@ -183,20 +183,9 @@ export default function Setting (props: Props) {
           </div>
         </SectionBox>
         <SectionBox title='Titolo e sottotitolo' hint='Regola l’intestazione della vista amministrativa. Se il titolo personalizzato resta vuoto, viene mantenuto il titolo automatico della pratica.'>
-          <div style={P.row2}>
-            <div>
-              <label style={P.lbl}>Mostra sottotitolo</label>
-              <select value={cfgJs.showTitleSubtitle === false ? 'no' : 'si'} onChange={e => patch({ showTitleSubtitle: e.target.value === 'si' })} style={P.inp}>
-                <option value='si'>Sì</option><option value='no'>No</option>
-              </select>
-            </div>
-            <div>
-              <label style={P.lbl}>Mostra separatore</label>
-              <select value={cfgJs.showTitleDivider === false ? 'no' : 'si'} onChange={e => patch({ showTitleDivider: e.target.value === 'si' })} style={P.inp}>
-                <option value='si'>Sì</option><option value='no'>No</option>
-              </select>
-            </div>
-          </div>
+          <label style={{ ...P.lbl, display: 'flex', alignItems: 'center', gap: 8 }}><input type='checkbox' checked={cfgJs.showTitleIcon !== false} onChange={e => patch({ showTitleIcon: e.target.checked })} /> Mostra icona prima del titolo</label>
+          <label style={{ ...P.lbl, display: 'flex', alignItems: 'center', gap: 8 }}><input type='checkbox' checked={cfgJs.showTitleSubtitle !== false} onChange={e => patch({ showTitleSubtitle: e.target.checked })} /> Mostra sottotitolo / descrizione</label>
+          <label style={{ ...P.lbl, display: 'flex', alignItems: 'center', gap: 8 }}><input type='checkbox' checked={cfgJs.showTitleDivider !== false} onChange={e => patch({ showTitleDivider: e.target.checked })} /> Mostra separatore sotto il titolo</label>
           <label style={P.lbl}>Titolo personalizzato</label>
           <Inp value={cfgJs.titleText || ''} onChange={v => patch({ titleText: v })} placeholder='Vuoto = titolo automatico della pratica' />
           <label style={P.lbl}>Sottotitolo</label>

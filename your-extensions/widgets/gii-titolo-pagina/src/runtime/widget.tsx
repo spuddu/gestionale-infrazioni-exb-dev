@@ -16,6 +16,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       <GiiPageTitle
         showSubtitle={showDescription}
         showDivider={cfg.showTitleDivider !== false}
+        showIcon={cfg.showTitleIcon !== false}
         title={titleOverride || undefined}
         subtitle={showDescription ? (descriptionOverride || undefined) : ''}
         titleColor={String(cfg.titleColor || '#1F4E79')}

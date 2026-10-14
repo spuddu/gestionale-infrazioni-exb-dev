@@ -120,6 +120,7 @@ export interface Config {
 
   // --- Titolo vista e tipografia
   showTitleSubtitle?: boolean
+  showTitleIcon?: boolean
   showTitleDivider?: boolean
   /** Titolo personalizzato. Vuoto = titolo automatico della modalità corrente. */
   titleText?: string
@@ -377,6 +378,7 @@ export const defaultConfig: Config = {
   toolbarBottomGap: 15,
 
   showTitleSubtitle: true,
+  showTitleIcon: true,
   showTitleDivider: true,
   titleText: '',
   titleColor: '#1F4E79',

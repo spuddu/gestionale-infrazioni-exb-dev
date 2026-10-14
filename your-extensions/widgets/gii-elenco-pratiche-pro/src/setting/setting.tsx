@@ -671,6 +671,7 @@ export default function Setting(props: Props) {
           <div><label style={P.lbl}>Pad. left</label><NumInp value={cfg.listTitlePaddingLeft} onChange={n=>update('listTitlePaddingLeft',n)} min={0} unit='px'/></div>
           <div><label style={P.lbl}>Spazio sotto intestazione</label><NumInp value={parseNum((cfg as any).listTitleContentGap,0)} onChange={n=>update('listTitleContentGap',n)} min={0} max={80} unit='px'/></div>
         </div>
+        <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={(cfg as any).showTitleIcon !== false} onChange={e=>update('showTitleIcon',e.target.checked)}/> Mostra icona prima del titolo</label>
         <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={(cfg as any).showTitleSubtitle !== false} onChange={e=>update('showTitleSubtitle',e.target.checked)}/> Mostra sottotitolo / descrizione</label>
         <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={(cfg as any).showTitleDivider !== false} onChange={e=>update('showTitleDivider',e.target.checked)}/> Mostra separatore sotto il titolo</label>
         <label style={P.lbl}>Colore testo</label>

@@ -152,6 +152,7 @@ export interface Config {
 
   // --- Titolo pratica (sopra il pannello)
   showTitleSubtitle: boolean
+  showTitleIcon: boolean
   showTitleDivider: boolean
   detailTitlePrefix: string
   detailTitleSubtitleText: string
@@ -254,6 +255,7 @@ export const defaultConfig: Config = {
 
   // Titolo pratica
   showTitleSubtitle: true,
+  showTitleIcon: true,
   showTitleDivider: true,
   detailTitlePrefix: 'Dettaglio pratica selezionata',
   detailTitleSubtitleText: 'Consulta i dati della pratica selezionata',

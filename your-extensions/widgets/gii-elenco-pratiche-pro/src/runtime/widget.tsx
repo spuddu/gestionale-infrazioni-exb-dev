@@ -6453,6 +6453,7 @@ export default function Widget(props: Props) {
         <GiiPageTitle
           showSubtitle={(cfg as any).showTitleSubtitle !== false}
           showDivider={(cfg as any).showTitleDivider !== false}
+          showIcon={(cfg as any).showTitleIcon !== false}
           title={listTitleText}
           subtitle={listTitleSubtitleText || undefined}
           fallbackIcon="elenco"

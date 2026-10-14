@@ -132,7 +132,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           ],
           [
             "Capo Settore",
-            "Le pratiche del settore di competenza."
+            "Le pratiche del Settore di competenza."
           ],
           [
             "Responsabile dell’istruttoria tecnica",
@@ -625,7 +625,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "Se l’Istruttore tecnico è assegnato a più settori, prima di iniziare la compilazione deve selezionare quello relativo alla nuova pratica; se è assegnato a un solo settore, la scelta non è richiesta."
+        "text": "Se l’Istruttore tecnico è assegnato a più Settori, prima di iniziare la compilazione deve selezionare quello relativo alla nuova pratica; se è assegnato a un solo Settore, la scelta non è richiesta."
       },
       {
         "type": "heading3",
@@ -3306,8 +3306,12 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         ],
         "rows": [
           [
-            "Tecnico rilevatore, Istruttore tecnico, Capo Settore",
-            "Area Agraria con il relativo settore di competenza oppure Area Tecnica con il relativo settore di competenza."
+            "Tecnico rilevatore",
+            "Area Agraria oppure Area Tecnica, con ambito esteso a tutto il comprensorio."
+          ],
+          [
+            "Istruttore tecnico, Capo Settore",
+            "Area Agraria oppure Area Tecnica, con il relativo Settore di competenza."
           ],
           [
             "Responsabile dell’istruttoria tecnica",
@@ -3323,7 +3327,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           ],
           [
             "Direttore tecnico",
-            "Area Agraria oppure Area Tecnica; nessun settore operativo da selezionare quando non previsto."
+            "Area Agraria oppure Area Tecnica; nessun Settore operativo da selezionare quando non previsto."
           ],
           [
             "Direttore amministrativo",

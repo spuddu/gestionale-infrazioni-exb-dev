@@ -706,6 +706,7 @@ export default function Setting(props: Props) {
       {/* ═══ TITOLO ═══ */}
       <Acc id='titolo' label='📝 Titolo dettaglio' open={isOpen('titolo')} onToggle={()=>toggle('titolo')}/>
       {isOpen('titolo') && <div>
+        <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={(cfgJs as any).showTitleIcon !== false} onChange={e=>patch({showTitleIcon:e.target.checked})}/> Mostra icona prima del titolo</label>
         <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={(cfgJs as any).showTitleSubtitle !== false} onChange={e=>patch({showTitleSubtitle:e.target.checked})}/> Mostra sottotitolo / descrizione</label>
         <label style={{ ...P.lbl, display:'flex', alignItems:'center', gap:8 }}><input type='checkbox' checked={(cfgJs as any).showTitleDivider !== false} onChange={e=>patch({showTitleDivider:e.target.checked})}/> Mostra separatore sotto il titolo</label>
         <label style={P.lbl}>Testo prefisso</label>

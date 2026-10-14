@@ -514,6 +514,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         <GiiPageTitle
           showSubtitle={(cfg as any).showTitleSubtitle !== false}
           showDivider={(cfg as any).showTitleDivider !== false}
+          showIcon={(cfg as any).showTitleIcon !== false}
           title={title}
           subtitle={String((cfg as any).subtitleText || '').trim() || undefined}
           fallbackIcon='prezzari'

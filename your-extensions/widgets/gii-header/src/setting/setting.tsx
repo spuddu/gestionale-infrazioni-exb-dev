@@ -399,6 +399,16 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
           <label style={P.lbl}>Colore 2</label>
           <ColInp value={cfg.logoBgGradEnd||'#0048ad'} onChange={v=>set('logoBgGradEnd',v)}/>
         </>}
+        <Check value={cfg.logoPulse !== false} onChange={v=>set('logoPulse',v)} label='Effetto lampeggio della cornice'/>
+        {cfg.logoPulse !== false && <>
+          <label style={P.lbl}>Colore lampeggio</label>
+          <ColInp value={cfg.logoPulseColor||'#3b82f6'} onChange={v=>set('logoPulseColor',v)}/>
+          <div style={P.row3}>
+            <div><label style={P.lbl}>Intensità</label><NumInp value={cfg.logoPulseOpacity??45} onChange={v=>set('logoPulseOpacity',v)} min={0} max={100} unit='%'/></div>
+            <div><label style={P.lbl}>Ampiezza</label><NumInp value={cfg.logoPulseSize??8} onChange={v=>set('logoPulseSize',v)} min={0} max={30} unit='px'/></div>
+            <div><label style={P.lbl}>Durata</label><NumInp value={cfg.logoPulseDuration??3} onChange={v=>set('logoPulseDuration',v)} min={0.5} max={10} step={0.5} unit='s'/></div>
+          </div>
+        </>}
       </div>}
 
       {/* ═══ INTESTAZIONE ═══ */}

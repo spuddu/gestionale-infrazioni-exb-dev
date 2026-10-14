@@ -863,6 +863,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
         <GiiPageTitle
           showSubtitle={(cfg as any).showTitleSubtitle !== false}
           showDivider={(cfg as any).showTitleDivider !== false}
+          showIcon={(cfg as any).showTitleIcon !== false}
           title={title}
           subtitle={subtitle}
           fallbackIcon='guida'

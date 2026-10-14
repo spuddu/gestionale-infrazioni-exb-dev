@@ -225,6 +225,7 @@ export interface Config {
 
   // --- Titolo elenco (sopra l'area bianca)
   showTitleSubtitle: boolean
+  showTitleIcon: boolean
   showTitleDivider: boolean
   listTitleText: string
   listTitleSubtitleText: string
@@ -403,6 +404,7 @@ export const defaultConfig: IMConfig = {
 
   // Titolo elenco
   showTitleSubtitle: true,
+  showTitleIcon: true,
   showTitleDivider: true,
   listTitleText: 'Elenco pratiche',
   listTitleSubtitleText: '',
