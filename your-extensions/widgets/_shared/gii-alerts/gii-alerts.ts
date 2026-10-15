@@ -362,7 +362,8 @@ function rilevazioneNumberForMessage (data: Record<string, any>, oid: number | n
 
   const base = oidPart || rawCandidate || '—'
   if (base === '—') return base
-  return sectorPart ? `${base}-${prefix}-${sectorPart}` : `${base}-${prefix}`
+  // Numero di rilevazione senza Settore: 81-TR (dal campo), 82-IT (dal GII).
+  return `${base}-${prefix}`
 }
 
 function practiceDescriptionForMessage (data: Record<string, any>, oid: number | null): string {

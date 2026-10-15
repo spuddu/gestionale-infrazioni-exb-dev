@@ -1422,6 +1422,9 @@ function alertSenderRoleCode (alert: GiiAlertItem | null | undefined): string {
   if (event === 'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA') return 'IA'
   if (event === 'NUOVA_RILEVAZIONE_TRASMESSA' && destRole === 'CS') return alertIsItOrigin(alert) ? 'IT' : 'TR'
   if (event === 'ISTRUTTORIA_TRASMESSA_VERIFICA' && destRole === 'CS') return 'IT'
+  // Trasferimento di Settore: segnalazione dell'IT al proprio CS e trasferimento al CS competente.
+  if (event === 'ISTRUTTORIA_TRASMESSA_SETTORE_NON_COMPETENTE' && destRole === 'CS') return 'IT'
+  if (event === 'RILEVAZIONE_TRASFERITA_SETTORE' && destRole === 'CS') return 'CS'
 
   if (alertIsNewAssignmentReceived(alert)) {
     if (destRole === 'IA') return 'RIA'
@@ -1635,6 +1638,8 @@ function alertSenderLine (alert: GiiAlertItem): string {
   if (!alertIsStandardWorkflowAlert(alert)) return 'Mittente: Sistema'
 
   const sender = alertSenderDisplayName(alert)
+  // Rilevazione arrivata per trasferimento di Settore: il mittente è il CS che l'ha trasferita.
+  if (sender && alertOriginEventCode(alert) === 'RILEVAZIONE_TRASFERITA_SETTORE') return `Trasferita da: ${sender}`
   if (sender) return `Mittente: ${sender}`
 
   // Per gli allarmi di workflow evitiamo il fallback allo username.
@@ -1724,6 +1729,8 @@ function alertIsStandardWorkflowAlert (alert: GiiAlertItem): boolean {
     'ATTO_ACCERTAMENTO_TRASMESSO_VERIFICA',
     'ATTO_ACCERTAMENTO_RIMANDATO_INTEGRAZIONE',
     'ATTO_ACCERTAMENTO_APPROVATO',
+    'ISTRUTTORIA_TRASMESSA_SETTORE_NON_COMPETENTE',
+    'RILEVAZIONE_TRASFERITA_SETTORE',
     'RILEVAZIONE_RESPINTA',
     'ISTRUTTORIA_TECNICA_RESPINTA',
     'CS_RESPINGE_RILEVAZIONE',
@@ -3136,6 +3143,72 @@ function HeaderAlertsPopup (props: {
 
 type Props = AllWidgetProps<IMConfig>
 
+// ── Collegamento al GII sul desktop (clic sul logo) ─────────────────────────
+// Chrome, Edge e gli altri browser che consentono l'installazione inviano
+// "beforeinstallprompt": lo conserviamo per aprire il dialogo "Installa" al clic sul logo.
+// Dove l'installazione non è disponibile (es. Firefox) si scarica un file di collegamento.
+// Icona predefinita del GII (64 x 64 px) per la scheda e la barra degli indirizzi.
+const GII_FAVICON_DEFAULT = 'data:image/png;base64,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'
+
+// Sostituisce la favicon della pagina con quella del GII.
+function giiApplicaFavicon (href: string): void {
+  try {
+    const head = document.head
+    if (!head || !href) return
+    head.querySelectorAll('link[rel~="icon"]').forEach(el => {
+      if ((el as HTMLElement).getAttribute('data-gii-favicon') !== '1') el.parentNode?.removeChild(el)
+    })
+    let link = head.querySelector('link[data-gii-favicon="1"]') as HTMLLinkElement | null
+    if (!link) {
+      link = document.createElement('link')
+      link.setAttribute('data-gii-favicon', '1')
+      link.rel = 'icon'
+      head.appendChild(link)
+    }
+    if (/^data:image\/png/i.test(href) || /\.png(\?|$)/i.test(href)) link.type = 'image/png'
+    else link.removeAttribute('type')
+    if (link.href !== href) link.href = href
+  } catch {}
+}
+
+let giiInstallPromptEvent: any = null
+try {
+  window.addEventListener('beforeinstallprompt', (e: any) => { try { e.preventDefault() } catch {} ; giiInstallPromptEvent = e })
+  window.addEventListener('appinstalled', () => { giiInstallPromptEvent = null })
+} catch {}
+
+function giiScaricaCollegamento (nome: string): string {
+  const nomeFile = (String(nome || '').trim() || 'GII').replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'GII'
+  const url = `${window.location.origin}${window.location.pathname}${window.location.search}`
+  const ua = String(navigator.userAgent || '')
+  let contenuto = ''
+  let estensione = ''
+  let tipo = 'application/octet-stream'
+  if (/Macintosh|Mac OS X/i.test(ua)) {
+    const esc = url.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    contenuto = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>URL</key><string>${esc}</string></dict></plist>\n`
+    estensione = 'webloc'
+    tipo = 'application/xml'
+  } else if (/Linux/i.test(ua) && !/Android/i.test(ua)) {
+    contenuto = `[Desktop Entry]\nType=Link\nName=${nomeFile}\nURL=${url}\n`
+    estensione = 'desktop'
+  } else {
+    contenuto = `[InternetShortcut]\r\nURL=${url}\r\n`
+    estensione = 'url'
+  }
+  const file = `${nomeFile}.${estensione}`
+  const blob = new Blob([contenuto], { type: tipo })
+  const href = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = href
+  a.download = file
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(href), 2000)
+  return file
+}
+
 export default function Widget(props: Props) {
   const cfg: any = { ...defaultConfig, ...(props.config as any) }
 
@@ -4186,6 +4259,110 @@ export default function Widget(props: Props) {
 
   // Lampeggio della cornice del logo: colore, intensità, ampiezza e durata da impostazioni.
   const logoPulseOn = cfg.logoPulse !== false
+  const logoShortcutOn = cfg.logoShortcut !== false
+  // Favicon del GII: applicata all'avvio e riapplicata se la pagina la sostituisce.
+  const faviconHref = cfg.faviconOn !== false ? (String(cfg.faviconUrl || '').trim() || GII_FAVICON_DEFAULT) : ''
+  React.useEffect(() => {
+    if (!faviconHref) return
+    giiApplicaFavicon(faviconHref)
+    let observer: MutationObserver | null = null
+    try {
+      observer = new MutationObserver(() => {
+        const altre = Array.from(document.head.querySelectorAll('link[rel~="icon"]')).some(el => (el as HTMLElement).getAttribute('data-gii-favicon') !== '1')
+        if (altre) giiApplicaFavicon(faviconHref)
+      })
+      observer.observe(document.head, { childList: true })
+    } catch {}
+    return () => { try { observer?.disconnect() } catch {} }
+  }, [faviconHref])
+
+  // App Edge (collegamento "--app"): Edge non apre la finestra ingrandita e non ricorda la
+  // dimensione. Una sola volta all'apertura, se la pagina è in una finestra senza barra degli
+  // indirizzi, la finestra viene portata a tutto lo spazio dello schermo.
+  React.useEffect(() => {
+    if (cfg.appFillScreen === false) return
+    try {
+      const w: any = window
+      if (w.__giiAppFillScreenDone) return
+      w.__giiAppFillScreenDone = true
+      const finestraApp = window.locationbar?.visible === false && window.toolbar?.visible === false
+      if (!finestraApp) return
+      const s: any = window.screen
+      const left = Number(s.availLeft || 0)
+      const top = Number(s.availTop || 0)
+      const width = Number(s.availWidth || 0)
+      const height = Number(s.availHeight || 0)
+      if (!width || !height) return
+      if (window.outerWidth >= width - 8 && window.outerHeight >= height - 8) return
+      window.moveTo(left, top)
+      window.resizeTo(width, height)
+    } catch {}
+  }, [])
+
+  // Pagina in italiano: ExB dichiara la pagina in inglese e il browser propone di tradurla.
+  React.useEffect(() => {
+    try {
+      const html = document.documentElement
+      if (html.lang !== 'it') html.lang = 'it'
+      html.setAttribute('translate', 'no')
+      if (!document.head.querySelector('meta[name="google"][content="notranslate"]')) {
+        const meta = document.createElement('meta')
+        meta.name = 'google'
+        meta.content = 'notranslate'
+        document.head.appendChild(meta)
+      }
+    } catch {}
+  }, [])
+
+  // Titolo della scheda e della finestra (anche nell'app Edge): al posto del nome dell'app
+  // nel Builder. Riapplicato se la pagina lo cambia, ad esempio al cambio di pagina.
+  const windowTitleText = cfg.windowTitleOn !== false ? (String(cfg.windowTitle || '').trim() || String(cfg.title || '').trim()) : ''
+  React.useEffect(() => {
+    if (!windowTitleText) return
+    const applica = () => { try { if (document.title !== windowTitleText) document.title = windowTitleText } catch {} }
+    applica()
+    let observer: MutationObserver | null = null
+    try {
+      observer = new MutationObserver(applica)
+      observer.observe(document.head, { childList: true, subtree: true, characterData: true })
+    } catch {}
+    return () => { try { observer?.disconnect() } catch {} }
+  }, [windowTitleText])
+  const [shortcutMsg, setShortcutMsg] = React.useState('')
+  const shortcutMsgTimerRef = React.useRef<number | null>(null)
+  const mostraShortcutMsg = (testo: string) => {
+    setShortcutMsg(testo)
+    if (shortcutMsgTimerRef.current) window.clearTimeout(shortcutMsgTimerRef.current)
+    shortcutMsgTimerRef.current = window.setTimeout(() => setShortcutMsg(''), 7000)
+  }
+  React.useEffect(() => () => { if (shortcutMsgTimerRef.current) window.clearTimeout(shortcutMsgTimerRef.current) }, [])
+  const onLogoClick = async () => {
+    if (!logoShortcutOn) return
+    const nome = String(cfg.logoShortcutName || '').trim() || 'GII'
+    try {
+      if (window.matchMedia?.('(display-mode: standalone)')?.matches) {
+        mostraShortcutMsg(`${nome} è già aperto come app installata.`)
+        return
+      }
+    } catch {}
+    const ev = giiInstallPromptEvent
+    if (ev && typeof ev.prompt === 'function') {
+      giiInstallPromptEvent = null
+      try {
+        await ev.prompt()
+        const scelta = await ev.userChoice
+        if (scelta?.outcome === 'accepted') mostraShortcutMsg(`${nome} installato: l’icona è sul desktop e nel menu delle applicazioni.`)
+        return
+      } catch {}
+    }
+    try {
+      const file = giiScaricaCollegamento(nome)
+      mostraShortcutMsg(`Collegamento scaricato: spostare il file «${file}» dalla cartella Download al desktop.`)
+    } catch (e) {
+      console.warn('[GII-Header] Collegamento al desktop non riuscito:', e)
+      mostraShortcutMsg('Non è stato possibile creare il collegamento.')
+    }
+  }
   const logoPulseRgb = (() => {
     const h = String(cfg.logoPulseColor || '#3b82f6').trim().replace('#', '')
     const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h.slice(0, 6)
@@ -4552,10 +4729,19 @@ export default function Widget(props: Props) {
             display:'flex', alignItems:'center', justifyContent:'center',
             boxShadow:'0 4px 14px rgba(0,0,0,0.3)',
             padding:cfg.logoPadding ?? 4, boxSizing:'border-box',
-            ...(logoPulseOn ? { animationName:'pulse-ring', animationDuration:`${logoPulseDuration}s`, animationIterationCount:'infinite', animationTimingFunction:'ease-out' } : {})
-          }}>
+            ...(logoPulseOn ? { animationName:'pulse-ring', animationDuration:`${logoPulseDuration}s`, animationIterationCount:'infinite', animationTimingFunction:'ease-out' } : {}),
+            ...(logoShortcutOn ? { cursor:'pointer' } : {})
+          }}
+            onClick={logoShortcutOn ? () => { void onLogoClick() } : undefined}
+            title={logoShortcutOn ? `Salva il collegamento a ${String(cfg.logoShortcutName || '').trim() || 'GII'} sul desktop` : undefined}
+          >
             <img src={cfg.logoUrl} alt='logo' style={{ width:'100%', height:'100%', objectFit:'contain', display:'block' }} />
           </div>
+          {!!shortcutMsg && (
+            <div role='status' style={{ position:'fixed', top:12, left:'50%', transform:'translateX(-50%)', zIndex:2147483000, maxWidth:'min(92vw, 520px)', padding:'10px 14px', borderRadius:10, background:'rgba(15,23,42,0.96)', border:'1px solid rgba(255,255,255,0.18)', color:'#e5e7eb', fontSize:14, lineHeight:1.4, boxShadow:'0 10px 30px rgba(0,0,0,0.35)' }}>
+              {shortcutMsg}
+            </div>
+          )}
         </div>
         <div style={{ ...off('offsetTitoli'), flex:'1 1 auto', minWidth:0, overflow:'hidden' }}>
           <div style={{

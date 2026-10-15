@@ -2917,6 +2917,8 @@ type CicloRecord = {
 const EVENTO_LABELS: Record<string, string> = {
   CREAZIONE: 'Nuova rilevazione in corso',
   NUOVA_RILEVAZIONE_TRASMESSA: 'Nuova rilevazione trasmessa',
+  ISTRUTTORIA_TRASMESSA_SETTORE_NON_COMPETENTE: 'Istruttoria trasmessa – Settore non competente',
+  RILEVAZIONE_TRASFERITA_SETTORE: 'Rilevazione trasferita ad altro Settore',
   ISTRUTTORIA_ASSEGNATA: 'Istruttoria assegnata',
   ISTRUTTORIA_TRASMESSA_VERIFICA: 'Istruttoria trasmessa per verifica',
   INTEGRAZIONE_TRASMESSA_VERIFICA: 'Esito integrazione trasmesso',
@@ -4648,7 +4650,8 @@ function DetailTabsPanel (props: {
     const origin = normalizeOriginePraticaCod(pickAttrCI(data, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])) || 'TR'
     const settore = normalizeSettoreCod(pickAttrCI(data, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'cod_settore']))
     const base = String(oid)
-    return settore ? `${base}-${origin}-${settore}` : `${base}-${origin}`
+    // Numero di rilevazione senza Settore: 81-TR (dal campo), 82-IT (dal GII).
+    return `${base}-${origin}`
   }, [hasSel, data, oid])
 
   const numeroRapportoTecnico = React.useMemo(() => {

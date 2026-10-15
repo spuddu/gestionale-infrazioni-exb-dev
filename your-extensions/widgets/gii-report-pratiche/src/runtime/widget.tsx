@@ -751,7 +751,8 @@ function buildNumeroRilevazioneReport (d: any): string {
 
   const base = oidPart || stored || '—'
   if (base === '—') return base
-  return settore ? `${base}-${prefix}-${settore}` : `${base}-${prefix}`
+  // Numero di rilevazione senza Settore: 81-TR (dal campo), 82-IT (dal GII).
+  return `${base}-${prefix}`
 }
 
 function getNumeroRilevazione (d: any): string {

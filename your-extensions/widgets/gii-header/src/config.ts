@@ -9,6 +9,14 @@ export interface Config {
   logoBgColor: string; logoBgGradient: boolean; logoBgGradEnd: string
   // Effetto lampeggio della cornice del logo (alone che si allarga e svanisce)
   logoPulse: boolean; logoPulseColor: string; logoPulseOpacity: number; logoPulseSize: number; logoPulseDuration: number
+  // Clic sul logo: installa il GII come app (se il browser lo consente) oppure scarica un collegamento
+  logoShortcut: boolean; logoShortcutName: string
+  // Icona del GII nella scheda e nella barra degli indirizzi del browser (favicon)
+  faviconOn: boolean; faviconUrl: string
+  // Titolo della scheda e della finestra del browser (vuoto = Titolo dell'header)
+  windowTitleOn: boolean; windowTitle: string
+  // App Edge (finestra senza barra degli indirizzi): all'apertura occupa tutto lo schermo
+  appFillScreen: boolean
   // Ente
   orgName: string; orgNameFont: string; orgNameSize: number
   orgNameWeight: number; orgNameColor: string; orgNameLetterSpacing: number
@@ -83,6 +91,10 @@ export const defaultConfig: Config = {
   logoUrl: '', logoSize: 56, logoRadius: 10, logoPadding: 4,
   logoBgColor: '#000000', logoBgGradient: true, logoBgGradEnd: '#0048ad',
   logoPulse: true, logoPulseColor: '#3b82f6', logoPulseOpacity: 45, logoPulseSize: 8, logoPulseDuration: 3,
+  logoShortcut: true, logoShortcutName: 'GII',
+  faviconOn: true, faviconUrl: '',
+  windowTitleOn: true, windowTitle: '',
+  appFillScreen: true,
   orgName: 'Consorzio di Bonifica della Sardegna Meridionale',
   orgNameFont: "'Trebuchet MS', sans-serif",
   orgNameSize: 11, orgNameWeight: 700,

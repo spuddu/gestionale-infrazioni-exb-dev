@@ -241,7 +241,8 @@ function viewerRilevazioneNumberForEditing (data: any, oid?: number | null): str
   const prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'IT') ? 'IT' : 'TR'
   const area = normalizeAreaCode(firstMeaningfulValue(d.area_cod, d.area))
   const settore = normalizeSettoreCode(area, firstMeaningfulValue(d.settore_cod, d.settore))
-  return `${oidPart}-${prefix}${settore ? `-${settore}` : ''}`
+  // Numero di rilevazione senza Settore: 81-TR (dal campo), 82-IT (dal GII).
+  return `${oidPart}-${prefix}`
 }
 
 function documentViewerTitleForEditing (fileName: string, data: any, oid?: number | null): string {

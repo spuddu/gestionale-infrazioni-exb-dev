@@ -1285,6 +1285,115 @@ function isValidOfficePoint (lon: any, lat: any): boolean {
   return true
 }
 
+/**
+ * Registro condiviso fra le istanze del widget: per ogni LayerView conserva filtro e featureEffect
+ * originali (quelli presenti prima che una qualsiasi istanza lo nascondesse) e le istanze che lo
+ * stanno nascondendo. L'originale viene ripristinato solo quando l'ultima istanza lo rilascia.
+ */
+type StatoLayerViewCondiviso = {
+  filter: any
+  featureEffect: any
+  filtroApplicato: any
+  proprietari: Set<object>
+  sorveglianza: any
+  modificaInterna: boolean
+}
+const registroLayerViewInfrazioni: Map<any, StatoLayerViewCondiviso> = new Map()
+
+/**
+ * Applica il filtro temporaneo senza far interpretare al watch sincrono la scrittura del widget
+ * come una modifica esterna. Se un altro componente ha cambiato il filtro, ne conserva il valore
+ * per il successivo ripristino (anche se il watch non era ancora stato inizializzato).
+ */
+function applicaFiltroInfrazioni (lv: any, stato: StatoLayerViewCondiviso): void {
+  if (stato.modificaInterna) return
+  let attuale: any = null
+  try { attuale = lv.filter ?? null } catch { return }
+  // Una seconda istanza non deve riscrivere inutilmente il filtro già applicato dalla prima.
+  if (stato.filtroApplicato != null && attuale === stato.filtroApplicato) return
+  if (stato.filtroApplicato != null) stato.filter = attuale
+
+  stato.modificaInterna = true
+  try {
+    lv.filter = { where: '1=0' }
+    stato.filtroApplicato = lv.filter
+  } catch {} finally {
+    stato.modificaInterna = false
+  }
+}
+
+/**
+ * Nasconde tutte le infrazioni del layer nella mappa di Luoghi e dati tecnici: il punto della pratica
+ * è disegnato dal widget. Si usa il filtro del LayerView e non un featureEffect con opacità zero,
+ * perché il filtro toglie le feature dalla mappa e quindi anche dal clic.
+ */
+function nascondiInfrazioniNellaMappa (lv: any, proprietario: object): void {
+  if (!lv) return
+  let stato = registroLayerViewInfrazioni.get(lv)
+  if (!stato) {
+    let filter: any = null
+    let featureEffect: any = null
+    try { filter = lv.filter ?? null } catch {}
+    try { featureEffect = lv.featureEffect ?? null } catch {}
+    stato = { filter, featureEffect, filtroApplicato: null, proprietari: new Set(), sorveglianza: null, modificaInterna: false }
+    registroLayerViewInfrazioni.set(lv, stato)
+    sorvegliaFiltroInfrazioni(lv, stato)
+  }
+  stato.proprietari.add(proprietario)
+  applicaFiltroInfrazioni(lv, stato)
+  try { if (lv.featureEffect) lv.featureEffect = null } catch {}
+}
+
+/**
+ * Quando altro codice cambia il filtro di un LayerView ancora controllato dal widget, conserva
+ * l'ultimo filtro esterno e torna a nascondere le infrazioni. La guardia modificaInterna viene
+ * attivata PRIMA della scrittura perché reactiveUtils.watch usa { sync: true }.
+ */
+function sorvegliaFiltroInfrazioni (lv: any, stato: StatoLayerViewCondiviso): void {
+  loadEsriModule<any>('esri/core/reactiveUtils').then((ru: any) => {
+    if (registroLayerViewInfrazioni.get(lv) !== stato || typeof ru?.watch !== 'function') return
+    stato.sorveglianza = ru.watch(() => lv.filter, (nuovo: any) => {
+      if (registroLayerViewInfrazioni.get(lv) !== stato || stato.modificaInterna) return
+      if (nuovo === stato.filtroApplicato) return
+      stato.filter = nuovo ?? null
+      applicaFiltroInfrazioni(lv, stato)
+    }, { sync: true })
+    // Se il filtro esterno è cambiato mentre reactiveUtils veniva caricato, la prossima
+    // applicazione lo acquisisce e ripristina subito la condizione 1=0.
+    applicaFiltroInfrazioni(lv, stato)
+  }).catch(() => {})
+}
+
+/**
+ * Rilascia i LayerView nascosti da questa istanza. Quando non resta nessuna istanza a nasconderli,
+ * ripristina filtro e featureEffect originali, salvo che il filtro sia stato cambiato da altro.
+ */
+function ripristinaInfrazioniNellaMappa (proprietario: object): void {
+  registroLayerViewInfrazioni.forEach((stato, lv) => {
+    if (!stato.proprietari.delete(proprietario)) return
+    if (stato.proprietari.size > 0) return
+    registroLayerViewInfrazioni.delete(lv)
+    try { stato.sorveglianza?.remove?.() } catch {}
+    stato.sorveglianza = null
+    try {
+      if (lv.filter !== stato.filtroApplicato) return
+      lv.filter = stato.filter
+      if (stato.featureEffect && !lv.featureEffect) lv.featureEffect = stato.featureEffect
+    } catch {}
+  })
+}
+
+/** Simbolo del punto salvato della pratica; con colore di evidenziazione quando è selezionato nel popup. */
+function simboloPuntoSalvato (colore: any, evidenziazione: any): any {
+  return {
+    type: 'simple-marker',
+    style: 'circle',
+    color: colore,
+    size: evidenziazione ? 12 : 10,
+    outline: evidenziazione ? { color: evidenziazione, width: 3 } : { color: [255, 255, 255, 255], width: 2.0 }
+  }
+}
+
 function makeWgs84Point (lon: number, lat: number): any {
   return { x: lon, y: lat, spatialReference: { wkid: 4326 } }
 }
@@ -4092,6 +4201,25 @@ function nsClearDraftSnapshot (key: string): void {
 const LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 const DRAFT_DATE_FIELDS = new Set(['data_rilevazione', 'data_firma'])
 
+/** Data e ora della rilevazione così come sono nel record (epoch in millisecondi), se presenti. */
+function dataRilevazioneOriginale (rec: any): number | null {
+  const v = rec?.data_rilevazione ?? rec?.Data_rilevazione ?? rec?.DATA_RILEVAZIONE
+  if (v == null || v === '') return null
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v.getTime()
+  if (typeof v === 'string') {
+    const raw = v.trim()
+    if (!raw) return null
+    // Accetta solo timestamp in millisecondi come stringa e date ISO 8601 con l'ora
+    // (es. una Date passata per JSON). Formati ambigui come "05/10/2026" verrebbero letti
+    // all'americana (10 maggio) e sono esclusi: in quel caso si usa il valore del modulo.
+    if (/^-?\d+(?:\.\d+)?$/.test(raw)) { const n = Number(raw); return Number.isFinite(n) ? n : null }
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw)) { const ts = Date.parse(raw); return Number.isFinite(ts) ? ts : null }
+    return null
+  }
+  return null
+}
+
 function toDraftDate (v: any): string {
   if (v == null || v === '') return ''
   try {
@@ -4179,11 +4307,8 @@ function buildPraticaCodeFromData (data: any, oid: number | null | undefined): s
   if (op === 2 || op === '2' || String(op || '').toUpperCase() === 'IT') prefix = 'IT'
   else if (op === 1 || op === '1' || String(op || '').toUpperCase() === 'TR') prefix = 'TR'
 
-  const settoreRaw = data?.settore_cod ?? data?.Settore_cod ?? data?.SETTORE_COD ?? data?.settore ?? data?.Settore ?? data?.SETTORE
-  const settore = String(settoreRaw || '').trim().toUpperCase()
-  const settoreSuffix = settore ? `-${settore}` : ''
-
-  return `${Number(oid)}-${prefix}${settoreSuffix}`
+  // Numero di rilevazione senza Settore: 81-TR (dal campo), 82-IT (dal GII).
+  return `${Number(oid)}-${prefix}`
 }
 
 function buildFascicoloDocumentaleTitleParts (data: any, oid: number | null | undefined): { prefix: string, code: string, full: string } {
@@ -6217,7 +6342,7 @@ React.useEffect(() => {
     }
     const origineTr = mode === 'edit' && Number(pickAttrCI(p.initialData || {}, ['origine_pratica', 'ORIGINE_PRATICA'])) === 1
     const azione = origineTr
-      ? 'Spostare il punto all’interno del Settore della pratica oppure, se la violazione riguarda un altro Settore, annullare lo spostamento del punto e trasmettere l’istruttoria al Capo Settore segnalando l’errore in Ulteriori annotazioni.'
+      ? 'Spostare il punto all’interno del Settore della pratica oppure, se la violazione riguarda un altro Settore, annullare lo spostamento del punto e trasmettere la rilevazione al Capo Settore con l’azione “Settore non competente”.'
       : 'Spostare il punto all’interno del Settore della pratica.'
     return {
       title: 'Settore diverso da quello della pratica.',
@@ -7117,7 +7242,9 @@ React.useEffect(() => {
         area_cod: String((mode === 'create' ? roleAreaLabel : initialAreaLabel) || ''),
         settore_cod: String((mode === 'create' ? roleSettoreLabel : initialSettoreLabel) || ''),
         tecnico_rilevatore: mode === 'create' ? (currentGiiUserDisplayName || createSurveyDefaults?.tecnicoRilevatore || g('tecnico_rilevatore') || null) : (g('tecnico_rilevatore') || null),
-        data_rilevazione: mode === 'create' ? nowTs : toTs(g('data_rilevazione')),
+        // In modifica si conserva il valore originale con l'ora: il campo nel modulo è in sola lettura
+        // e contiene solo la data, che riconvertita diventerebbe la mezzanotte UTC (ore 02.00 in Italia).
+        data_rilevazione: mode === 'create' ? nowTs : (dataRilevazioneOriginale(p.initialData) ?? toTs(g('data_rilevazione'))),
         tipologia_soggetto: tipoSogg || null,
         nome: (tipoSogg === 'PF' ? g('nome') : null) || null,
         cognome: (tipoSogg === 'PF' ? g('cognome') : null) || null,
@@ -8334,8 +8461,8 @@ ${e?.message || String(e)}`
               <div style={{ marginTop: 8, display: 'grid', gridTemplateColumns: fitGridColumns('2fr 1fr 1fr 1fr'), gap: Number(cfg.fieldGap) || 12, minWidth: 0, maxWidth: '100%' }}>
                 <NpField label='Comune'><NpText value={g('nome_comun')} onChange={() => {}} disabled/></NpField>
                 <NpField label='Sezione'><NpText value={g('sezione')} onChange={() => {}} disabled/></NpField>
-                <NpField label='Foglio'><NpText value={g('foglio')} onChange={() => {}} disabled/></NpField>
-                <NpField label='Mappale'><NpText value={g('mappale')} onChange={() => {}} disabled/></NpField>
+                <NpField label='Foglio'><NpText value={senzaZeriIniziali(g('foglio'))} onChange={() => {}} disabled/></NpField>
+                <NpField label='Mappale'><NpText value={senzaZeriIniziali(g('mappale'))} onChange={() => {}} disabled/></NpField>
               </div>
             )}
             {reqPoint === 1 && !isRitAgrTecLimitedEdit && particelleCandidate.length > 1 && (
@@ -10922,11 +11049,16 @@ function catastoLookupFromFeatures (features: any[]): GiiCatastoLookup {
 }
 
 // Etichetta di una particella nella scelta dell'IT.
+/** Foglio e mappale come si leggono: senza zeri iniziali (solo visualizzazione, il dato salvato non cambia). */
+function senzaZeriIniziali (v: any): string {
+  return String(v ?? '').trim().replace(/^0+(?=\d)/, '')
+}
+
 function catastoCandidateLabel (v: GiiCatastoValues): string {
   const parti = [v.nome_comun || 'Comune n.d.']
   if (v.sezione) parti.push(`Sez. ${v.sezione}`)
-  parti.push(`Fg. ${v.foglio || 'n.d.'}`)
-  parti.push(`Mapp. ${v.mappale || 'n.d.'}`)
+  parti.push(`Fg. ${senzaZeriIniziali(v.foglio) || 'n.d.'}`)
+  parti.push(`Mapp. ${senzaZeriIniziali(v.mappale) || 'n.d.'}`)
   return parti.join(' – ')
 }
 
@@ -11817,6 +11949,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     // interrogazione/selezione feature, popup e altri handler ordinari della mappa.
     const h = view.on('immediate-click', (e: any) => {
       if (!mapClickEnabledRef.current) return
+      // Pagina appena lasciata: la modalità viene spenta al successivo controllo di visibilità,
+      // ma nel frattempo il clic non va intercettato.
+      const el = rootRef.current
+      if (!el || (el.offsetWidth === 0 && el.offsetHeight === 0)) return
       try { e?.stopPropagation?.() } catch {}
       ;(async () => {
         const pt = await toWgs84Point(e?.mapPoint)
@@ -11841,8 +11977,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }, [mapView, mapClickEnabled])
 
-  // ── Marker visivo sulla mappa per il punto (cliccato o esistente) ──
+  // Pagina ExB del widget visibile: quando è nascosta il widget non deve lasciare sulla mappa
+  // filtri, grafiche o pulsanti propri (vedi anche "Gestione mappa").
+  const [pageVisible, setPageVisible] = React.useState(false)
+
+  // ── Marker visivo sulla mappa per il punto nuovo non ancora salvato ──
+  // Il punto già salvato della pratica in modifica è disegnato a parte (vedi "Punto salvato della pratica").
   const markerGraphicRef = React.useRef<any>(null)
+  const pendingMarkerPoint = (() => {
+    const ep = clickedPointWgs84
+    if (!ep || !isFiniteNum(ep.x) || !isFiniteNum(ep.y)) return null
+    if (Number(ep.x) === 0 && Number(ep.y) === 0) return null
+    return ep
+  })()
   const effectiveMarkerPoint = (() => {
     const ep = clickedPointWgs84 || existingGeomWgs84
     if (!ep || !isFiniteNum(ep.x) || !isFiniteNum(ep.y)) return null
@@ -11869,7 +12016,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }
   React.useEffect(() => {
     const view: any = mapView
-    if (!view) return
+    if (!view || !pageVisible) return
     const centerOnPoint = () => {
       const ep = centerPointRef.current
       if (!ep) return
@@ -11925,7 +12072,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (centerPointBtnRef.current === btn) centerPointBtnRef.current = null
       try { shell.remove() } catch {}
     }
-  }, [mapView])
+  }, [mapView, pageVisible])
   React.useEffect(() => {
     applyCenterPointBtnState(centerPointBtnRef.current, hasCenterPoint)
   }, [hasCenterPoint])
@@ -11941,7 +12088,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
     } catch { /* ignore */ }
 
-    if (!effectiveMarkerPoint || !isFiniteNum(effectiveMarkerPoint.x) || !isFiniteNum(effectiveMarkerPoint.y)) return
+    if (!pendingMarkerPoint || !pageVisible) return
 
     let cancelled = false
     ;(async () => {
@@ -11951,7 +12098,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           loadEsriModule<any>('esri/geometry/Point')
         ])
         if (cancelled) return
-        const pt = new Point({ longitude: Number(effectiveMarkerPoint.x), latitude: Number(effectiveMarkerPoint.y), spatialReference: { wkid: 4326 } })
+        const pt = new Point({ longitude: Number(pendingMarkerPoint.x), latitude: Number(pendingMarkerPoint.y), spatialReference: { wkid: 4326 } })
         const graphic = new Graphic({
           geometry: pt,
           symbol: {
@@ -11977,12 +12124,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         }
       } catch { /* ignore */ }
     }
-  }, [mapView, effectiveMarkerPoint])
+  }, [mapView, pendingMarkerPoint, pageVisible])
 
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   // Contatore che si incrementa ogni volta che il widget diventa visibile (= ingresso nella pagina ExB)
   const [pageVisitCount, setPageVisitCount] = React.useState(0)
-  const [pageVisible, setPageVisible] = React.useState(false)
   const wasVisibleRef = React.useRef(false)
   React.useEffect(() => {
     const check = () => {
@@ -12138,14 +12284,30 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return computeReqPoint(initialEditData)
   }, [initialEditData])
 
-  // ── Gestione mappa: featureEffect, zoom ──
+  // ── Gestione mappa: filtro del layer delle infrazioni, zoom ──
   const mapFeatureLayerViewsRef = React.useRef<any[]>([])
   const mapFeatureLayerViewsKeyRef = React.useRef<string>('')
   const mapDefaultViewpointRef = React.useRef<any>(null)
+  // Identità di questa istanza nel registro condiviso dei LayerView nascosti: i filtri originali
+  // tornano quando l'ultima istanza smette di controllare la mappa (pagina lasciata o widget smontato).
+  const proprietarioMappaRef = React.useRef<object>({})
+  React.useEffect(() => {
+    if (pageVisible) return
+    ripristinaInfrazioniNellaMappa(proprietarioMappaRef.current)
+    // Modalità di posizionamento del punto disattivata, per non intercettare clic su altre pagine.
+    setMapClickEnabled(false)
+  }, [pageVisible])
+  React.useEffect(() => {
+    const proprietario = proprietarioMappaRef.current
+    return () => { ripristinaInfrazioniNellaMappa(proprietario) }
+  }, [])
 
   React.useEffect(() => {
     const view: any = mapView
     if (!view?.map) return
+    // Pagina lasciata: il ripristino è gestito a parte; le operazioni ancora in corso vengono annullate
+    // dalla pulizia di questo effetto (cancelled) e non riapplicano il filtro.
+    if (!pageVisible) return
 
     // Se il widget è nascosto (altra pagina ExB), non toccare la mappa
     const el = rootRef.current
@@ -12157,7 +12319,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       mapDefaultViewpointRef.current = builderVp ? builderVp.clone() : (view.viewpoint ? view.viewpoint.clone() : null)
     }
 
-    // Anti-lampeggio: al primo accesso nascondi il container mappa finché il featureEffect non è applicato
+    // Anti-lampeggio: al primo accesso nascondi il container mappa finché il filtro non è applicato
     const mapContainer = view.container as HTMLElement | null
     const needsBlind = !mapFeatureLayerViewsRef.current.length
     if (needsBlind && mapContainer) {
@@ -12167,7 +12329,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     // Se c'è un layerView precedente, nascondi subito i punti su quello
     try {
       mapFeatureLayerViewsRef.current.forEach((lv: any) => {
-        lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
+        nascondiInfrazioniNellaMappa(lv, proprietarioMappaRef.current)
       })
     } catch {}
 
@@ -12228,7 +12390,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         ;(async () => {
           const layerViews = await resolveRapportiLayerViews()
           if (cancelled) { showMap(); return }
-          layerViews.forEach((lv: any) => { lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' } })
+          layerViews.forEach((lv: any) => { nascondiInfrazioniNellaMappa(lv, proprietarioMappaRef.current) })
           showMap()
         })()
       } else {
@@ -12250,8 +12412,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
           // Una sola query sul primo layer compatibile: evita tentativi multipli e outFields pesanti.
           const feat = await queryRapportoFeature()
-          if (!feat || cancelled) {
-            layerViews.forEach((lv: any) => { lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' } })
+          if (cancelled) { showMap(); return }
+          if (!feat) {
+            layerViews.forEach((lv: any) => { nascondiInfrazioniNellaMappa(lv, proprietarioMappaRef.current) })
             showMap()
             return
           }
@@ -12272,10 +12435,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           }
 
           if (targetGeom && editReqPoint === 1) {
-            layerViews.forEach((lv: any) => { lv.featureEffect = { filter: { where: `${idField} = ${editOid}` }, excludedEffect: 'opacity(0)' } })
+            // Il punto della pratica non è disegnato dal layer: dopo uno spostamento il layer continuerebbe
+            // a mostrarlo nella posizione precedente. Lo disegna il widget (vedi "Punto salvato della pratica").
+            layerViews.forEach((lv: any) => { nascondiInfrazioniNellaMappa(lv, proprietarioMappaRef.current) })
             view.goTo({ target: targetGeom, zoom: Math.max(view.zoom || 19, 19) }, { duration: 600 }).catch(() => {})
           } else {
-            layerViews.forEach((lv: any) => { lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' } })
+            layerViews.forEach((lv: any) => { nascondiInfrazioniNellaMappa(lv, proprietarioMappaRef.current) })
           }
         } catch {}
         showMap()
@@ -12285,7 +12450,106 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
 
     return () => { cancelled = true }
-  }, [mapView, editOid, editIdFieldName, inCreateMode, editReqPoint, pageVisitCount, cfg.mapLayerId, cfg.mapLayerUrl, cfg.mapLayerLayerId, cfg.mapLayerTitle])
+  }, [mapView, editOid, editIdFieldName, inCreateMode, editReqPoint, pageVisitCount, pageVisible, cfg.mapLayerId, cfg.mapLayerUrl, cfg.mapLayerLayerId, cfg.mapLayerTitle])
+
+  // ── Punto salvato della pratica ──
+  // Disegnato dal widget nella posizione letta dal servizio, con il popup del layer delle infrazioni
+  // e gli attributi aggiornati. Rosso quando non c'è uno spostamento in corso; grigio quando è
+  // indicato un punto nuovo non ancora salvato (il punto nuovo è il marker rosso).
+  const savedPointGraphicRef = React.useRef<any>(null)
+  const hasPendingPoint = !!pendingMarkerPoint
+  React.useEffect(() => {
+    const view: any = mapView
+    if (!view?.graphics) return
+    const rimuovi = () => {
+      try {
+        if (savedPointGraphicRef.current) view.graphics.remove(savedPointGraphicRef.current)
+      } catch {}
+      savedPointGraphicRef.current = null
+    }
+    rimuovi()
+    if (!pageVisible) return
+    const g0 = existingGeomWgs84
+    const isEdit = !inCreateMode && editOid != null && Number.isFinite(editOid)
+    if (!isEdit || !g0 || !isFiniteNum(g0.x) || !isFiniteNum(g0.y)) return
+    if (Number(g0.x) === 0 && Number(g0.y) === 0) return
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [Graphic, Point] = await Promise.all([
+          loadEsriModule<any>('esri/Graphic'),
+          loadEsriModule<any>('esri/geometry/Point')
+        ])
+        if (cancelled) return
+        const idField = editIdFieldName || 'OBJECTID'
+        const layer: any = findRapportiLayers(view, cfg).find((l: any) => typeof l?.queryFeatures === 'function') || null
+        let attributi: any = {}
+        if (layer) {
+          try {
+            const res = await layer.queryFeatures({ where: `${idField} = ${editOid}`, outFields: ['*'], returnGeometry: false, num: 1 })
+            attributi = { ...(res?.features?.[0]?.attributes || {}) }
+          } catch {}
+        }
+        if (cancelled) return
+        // Grafica nuova, senza riferimento al layer: se fosse collegata al layer, il clic la farebbe
+        // selezionare come record della fonte dati ExB, che la ridisegna con la geometria in memoria
+        // (quella precedente allo spostamento).
+        const graphic: any = new Graphic({ attributes: attributi })
+        graphic.geometry = new Point({ longitude: Number(g0.x), latitude: Number(g0.y), spatialReference: { wkid: 4326 } })
+        const colore = hasPendingPoint ? [120, 120, 120, 200] : [220, 38, 38, 200]
+        graphic.__giiColore = colore
+        graphic.symbol = simboloPuntoSalvato(colore, null)
+        try {
+          const tpl = layer?.popupTemplate
+          if (tpl) graphic.popupTemplate = typeof tpl.clone === 'function' ? tpl.clone() : tpl
+        } catch {}
+        if (cancelled) return
+        view.graphics.add(graphic)
+        savedPointGraphicRef.current = graphic
+      } catch {}
+    })()
+
+    return () => {
+      cancelled = true
+      rimuovi()
+    }
+  }, [mapView, existingGeomWgs84, editOid, editIdFieldName, inCreateMode, hasPendingPoint, pageVisible, cfg.mapLayerId, cfg.mapLayerUrl, cfg.mapLayerLayerId, cfg.mapLayerTitle])
+
+  // Il punto salvato non è una feature del layer, quindi la mappa non lo evidenzia quando lo si
+  // seleziona: mentre il popup lo mostra, il bordo prende il colore di evidenziazione della mappa.
+  React.useEffect(() => {
+    const view: any = mapView
+    if (!view || !pageVisible) return
+    let cancelled = false
+    let handle: any = null
+    const coloreEvidenziazione = (): any => {
+      try {
+        const c = view.highlights?.toArray?.()?.[0]?.color ?? view.highlightOptions?.color
+        if (c) return c
+      } catch {}
+      return [0, 255, 255, 255]
+    }
+    const aggiorna = (selezionata: any) => {
+      const g: any = savedPointGraphicRef.current
+      if (!g) return
+      const evidenziato = !!selezionata && selezionata === g
+      try { g.symbol = simboloPuntoSalvato(g.__giiColore || [220, 38, 38, 200], evidenziato ? coloreEvidenziazione() : null) } catch {}
+    }
+    loadEsriModule<any>('esri/core/reactiveUtils').then((ru: any) => {
+      if (cancelled || typeof ru?.watch !== 'function') return
+      handle = ru.watch(
+        () => [view.popup?.visible, view.popup?.selectedFeature],
+        ([visibile, selezionata]: any[]) => aggiorna(visibile ? selezionata : null),
+        { initial: true }
+      )
+    }).catch(() => {})
+    return () => {
+      cancelled = true
+      try { handle?.remove?.() } catch {}
+      aggiorna(null)
+    }
+  }, [mapView, pageVisible])
 
   const handleCloseEditPage = React.useCallback(() => {
     if (inCreateMode) return

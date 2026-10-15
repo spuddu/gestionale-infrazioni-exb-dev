@@ -77,11 +77,13 @@ function buildNumeroPraticaClause(tipo: TipoPratica, raw: string): string | null
   const v = raw.trim()
   if (!v) return null
   if (tipo === 'rilevazione') {
-    const { oid, origine, settore } = parseRilevazioneCode(v)
+    // Il numero di rilevazione non contiene più il Settore (81-TR, 82-IT). Un eventuale
+    // suffisso digitato secondo il vecchio formato (81-TR-D1) viene ignorato: dopo un
+    // trasferimento di Settore non corrisponderebbe più alla pratica.
+    const { oid, origine } = parseRilevazioneCode(v)
     if (!oid) return null
     const parts = [`OBJECTID = ${oid}`]
     if (origine !== null) parts.push(`origine_pratica = ${origine}`)
-    if (settore) parts.push(`settore_cod = '${sqlEscapePratica(settore)}'`)
     return parts.join(' AND ')
   }
   if (tipo === 'rapporto') { const n = /^R-/i.test(v) ? v : `R-${v}`; return `numero_rapporto_tecnico = '${sqlEscapePratica(n)}'` }
@@ -1084,7 +1086,7 @@ export default function Widget(props: Props) {
               <div className='fieldBlock' style={{ width: 160, flex: '0 1 160px' }}>
                 <label className='filterLabel'>Numero pratica</label>
                 <input className='filterInput' type='text' value={praticaValues.numeroPratica} disabled={busy || !layer || !praticaValues.tipoPratica}
-                  placeholder={praticaValues.tipoPratica === 'rilevazione' ? 'Es. 411-IT-D1' : praticaValues.tipoPratica === 'rapporto' ? 'Es. R-25/2026' : (praticaValues.tipoPratica === 'accertamento' || praticaValues.tipoPratica === 'verbale') ? 'Es. A-1/2026' : '— seleziona tipo —'}
+                  placeholder={praticaValues.tipoPratica === 'rilevazione' ? 'Es. 411-IT' : praticaValues.tipoPratica === 'rapporto' ? 'Es. R-25/2026' : (praticaValues.tipoPratica === 'accertamento' || praticaValues.tipoPratica === 'verbale') ? 'Es. A-1/2026' : '— seleziona tipo —'}
                   onChange={e => setPraticaValues(prev => ({ ...prev, numeroPratica: e.target.value }))} />
               </div>
               <div className='fieldBlock' style={{ width: 200, flex: '0 1 200px' }}>

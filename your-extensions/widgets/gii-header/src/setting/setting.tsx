@@ -409,6 +409,22 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
             <div><label style={P.lbl}>Durata</label><NumInp value={cfg.logoPulseDuration??3} onChange={v=>set('logoPulseDuration',v)} min={0.5} max={10} step={0.5} unit='s'/></div>
           </div>
         </>}
+        <Check value={cfg.faviconOn !== false} onChange={v=>set('faviconOn',v)} label='Icona del GII nella scheda del browser (favicon)'/>
+        {cfg.faviconOn !== false && <>
+          <label style={P.lbl}>Immagine della favicon (vuota = icona GII predefinita)</label>
+          <ImgUpload value={cfg.faviconUrl ?? ''} onChange={v=>set('faviconUrl',v)}/>
+        </>}
+        <Check value={cfg.windowTitleOn !== false} onChange={v=>set('windowTitleOn',v)} label='Titolo del GII nella scheda e nella finestra del browser'/>
+        {cfg.windowTitleOn !== false && <>
+          <label style={P.lbl}>Titolo (vuoto = Titolo dell’header)</label>
+          <Inp value={cfg.windowTitle ?? ''} onChange={v=>set('windowTitle',v)} placeholder={cfg.title || 'GII'}/>
+        </>}
+        <Check value={cfg.appFillScreen !== false} onChange={v=>set('appFillScreen',v)} label='App Edge: all’apertura occupa tutto lo schermo'/>
+        <Check value={cfg.logoShortcut !== false} onChange={v=>set('logoShortcut',v)} label='Clic sul logo: collegamento al GII sul desktop'/>
+        {cfg.logoShortcut !== false && <>
+          <label style={P.lbl}>Nome del collegamento</label>
+          <Inp value={cfg.logoShortcutName ?? 'GII'} onChange={v=>set('logoShortcutName',v)} placeholder='GII'/>
+        </>}
       </div>}
 
       {/* ═══ INTESTAZIONE ═══ */}

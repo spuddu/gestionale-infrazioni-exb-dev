@@ -93,7 +93,8 @@ function getRilevazioneDisplay(rec: DataRecord): string {
   const prefix = getOriginePraticaPrefix(a, rec);
   const settore = getSettoreCodeFromRecord(a);
   const base = oid != null ? `${oid}-${prefix}` : `?-${prefix}`;
-  return settore ? `${base}-${settore}` : base;
+  // Numero di rilevazione senza Settore: 81-TR (dal campo), 82-IT (dal GII).
+  return base;
 }
 
 function getTipoPraticaDisplay(rec: DataRecord): string {
@@ -215,6 +216,9 @@ const ALLOWED_OGGETTI = new Set(OGGETTO_STATUS_CATALOG.map((s) => s.label));
 const EVENTO_OGGETTO_LABELS: Record<string, string> = {
   CREAZIONE: 'BOZZA',
   NUOVA_RILEVAZIONE_TRASMESSA: 'RILEVAZIONE TRASMESSA',
+  // Trasferimento di Settore: per il CS ricevente sono rilevazioni trasmesse.
+  ISTRUTTORIA_TRASMESSA_SETTORE_NON_COMPETENTE: 'RILEVAZIONE TRASMESSA',
+  RILEVAZIONE_TRASFERITA_SETTORE: 'RILEVAZIONE TRASMESSA',
   ISTRUTTORIA_ASSEGNATA: 'ASSEGNATA',
   ISTRUTTORIA_TRASMESSA_VERIFICA: 'ISTRUITA',
   INTEGRAZIONE_TRASMESSA_VERIFICA: 'ESITO INTEGRAZIONE TRASMESSO',
@@ -4450,6 +4454,8 @@ export default function Widget(props: Props) {
         return getStateView(role, "Rimandato", statoIntegrazione);
       if (
         logEvent === "NUOVA_RILEVAZIONE_TRASMESSA" ||
+        logEvent === "ISTRUTTORIA_TRASMESSA_SETTORE_NON_COMPETENTE" ||
+        logEvent === "RILEVAZIONE_TRASFERITA_SETTORE" ||
         logEvent === "ISTRUTTORIA_TRASMESSA_VERIFICA" ||
         logEvent === "INTEGRAZIONE_TRASMESSA_VERIFICA" ||
         logEvent === "ISTRUTTORIA_VERIFICATA" ||

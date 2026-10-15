@@ -22,6 +22,39 @@ const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 const GII_ATTIVITA_CORRENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_ATTIVITA_CORRENTI/FeatureServer/0'
 
+// ── Trasferimento di Settore delle rilevazioni del Tecnico rilevatore ───────
+// L'IT segnala che il Settore non è competente indicando quello ritenuto competente;
+// il CS può solo trasferire la rilevazione a quel Settore (o rimandarla all'IT).
+const EVENTO_SETTORE_NON_COMPETENTE = 'ISTRUTTORIA_TRASMESSA_SETTORE_NON_COMPETENTE'
+const EVENTO_TRASFERIMENTO_SETTORE = 'RILEVAZIONE_TRASFERITA_SETTORE'
+// Righe della nota spese della pratica: al trasferimento vengono eliminate.
+const GII_NOTA_SPESE_DETTAGLIO_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_NOTA_SPESE_DETTAGLIO/FeatureServer/0'
+// Cartografie e regole del Survey per i Settori proposti al TR: distretto in cui ricade il
+// punto, reti attive e manufatti entro 2 m; per l'Area Tecnica il solo Settore DS.
+const GII_RETE_IRRIGUA_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Rete_irrigua_CBS/FeatureServer/9'
+const GII_MANUFATTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Manufatti_rete_irrigua_CBSM/FeatureServer/8'
+const GII_DISTRETTI_LORDI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Distretti_irrigui_lordi/FeatureServer/108'
+const GII_DATI_TECNICI_BUFFER_M = 2
+const SETTORI_PER_AREA: Record<string, string[]> = {
+  AGR: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7'],
+  TEC: ['DS']
+}
+const SETTORE_NOME: Record<string, string> = {
+  D1: 'Distretto 1 Quartu Sant’Elena',
+  D2: 'Distretto 2 Serramanna',
+  D3: 'Distretto 3 San Gavino',
+  D4: 'Distretto 4 Basso Sulcis',
+  D5: 'Distretto 5 Senorbì',
+  D6: 'Distretto 6 Cixerri',
+  D7: 'Distretto 7 San Sperate',
+  DS: 'Manutenzione opere di dreno e di scolo'
+}
+function settoreNomeCompleto (cod: any): string {
+  const c = String(cod ?? '').trim().toUpperCase()
+  if (!c) return ''
+  return `Settore ${SETTORE_NOME[c] || c}`
+}
+
 // ── Cache GII_utenti per risolvere utente_destinatario ──────────────────────
 type UtenteCached = {
   username: string
@@ -149,7 +182,8 @@ function buildRilevazioneNumberFromData (data: any, oid: number | null | undefin
 
   const base = oidPart || rawCandidate || '—'
   if (base === '—') return base
-  return sectorPart ? `${base}-${prefix}-${sectorPart}` : `${base}-${prefix}`
+  // Numero di rilevazione senza Settore: 81-TR (dal campo), 82-IT (dal GII).
+  return `${base}-${prefix}`
 }
 
 function buildPracticeCodeFromData (data: any, oid: number | null | undefined): string {
@@ -1571,7 +1605,7 @@ function actionButtonStyle (bg: string, disabled: boolean, ui?: { btnBorderRadiu
   return { ...base, backgroundColor: bg, borderColor: bg, color: textColor || '#ffffff' }
 }
 
-type Pending = null | 'TAKE' | 'ASSEGNA_IT' | 'ASSEGNA_IA' | 'INVIA_IA' | 'RESTITUISCI_IA' | 'INTEGRAZIONE' | 'INTEGRAZIONE_IA' | 'INTEGRAZIONE_TECNICA' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'ELIMINA'
+type Pending = null | 'TAKE' | 'ASSEGNA_IT' | 'ASSEGNA_IA' | 'INVIA_IA' | 'RESTITUISCI_IA' | 'INTEGRAZIONE' | 'INTEGRAZIONE_IA' | 'INTEGRAZIONE_TECNICA' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'ELIMINA' | 'SETTORE_NON_COMPETENTE' | 'TRASFERISCI_SETTORE'
 type PendingInviaIaContext = null | 'IA_INTEGRATION_OUTCOME'
 
 type WorkflowEsitoChoice = '' | 'CONFORME' | 'DA_INTEGRARE' | 'RESPINTA'
@@ -1696,7 +1730,14 @@ function ActionsPanel (props: {
   // Evento che ha consegnato la pratica al ruolo corrente. Per il CS serve a
   // distinguere la nuova rilevazione dall'istruttoria già assegnata e dai
   // rientri successivi da integrazione, senza dedurlo dal numero del rapporto.
-  const [incomingWorkflowForUi, setIncomingWorkflowForUi] = React.useState<{ evento: string; ruolo: string; dt: number | null } | null>(null)
+  const [incomingWorkflowForUi, setIncomingWorkflowForUi] = React.useState<{ evento: string; ruolo: string; dt: number | null; note?: string; settoreIndicato?: string } | null>(null)
+  // Trasferimento di Settore: Settore scelto dall'IT nel popup "Settore non competente".
+  const [settoreIndicatoDraft, setSettoreIndicatoDraft] = React.useState('')
+  // Settori che il Survey ha proposto al TR, ricalcolati sul punto del TR con le stesse regole.
+  const [settoriPropostiTr, setSettoriPropostiTr] = React.useState<{ key: string, loading: boolean, codici: string[] } | null>(null)
+  // Settore di destinazione da usare per l'instradamento durante il trasferimento
+  // (la pratica letta in memoria ha ancora il Settore di partenza).
+  const settoreRoutingOverrideRef = React.useRef<string>('')
   const incomingWorkflowRequestRef = React.useRef(0)
 
   // Popup di diniego (validazione pre-trasmissione)
@@ -2467,14 +2508,15 @@ function ActionsPanel (props: {
     return res?.features?.[0] || null
   }
 
-  const queryLatestIncomingClosure = async (parentGlobalId: string, ruoloDestinatario: string): Promise<{ evento: string, ruolo: string, dt: number | null } | null> => {
+  const queryLatestIncomingClosure = async (parentGlobalId: string, ruoloDestinatario: string): Promise<{ evento: string, ruolo: string, dt: number | null, note?: string, settoreIndicato?: string } | null> => {
     if (!parentGlobalId || !ruoloDestinatario) return null
     try {
       const logLayer = await getCycleLogLayer()
       if (!logLayer?.queryFeatures) return null
       const q = logLayer.createQuery ? logLayer.createQuery() : {}
       q.where = `(${parentGlobalIdWhere('parent_globalid', parentGlobalId)}) AND ruolo_destinatario = ${sqlQuote(ruoloDestinatario)} AND stato_record = 'CHIUSO'`
-      q.outFields = ['evento_chiusura', 'ruolo_competente', 'dt_chiusura']
+      const hasSettoreIndicato = Array.isArray(logLayer?.fields) && logLayer.fields.some((f: any) => String(f?.name || '').toLowerCase() === 'settore_indicato')
+      q.outFields = ['evento_chiusura', 'ruolo_competente', 'dt_chiusura', 'note_chiusura', ...(hasSettoreIndicato ? ['settore_indicato'] : [])]
       q.returnGeometry = false
       q.num = 1
       const oidField = String(logLayer.objectIdField || 'OBJECTID')
@@ -2485,7 +2527,9 @@ function ActionsPanel (props: {
       return {
         evento: String(a.evento_chiusura || '').trim().toUpperCase(),
         ruolo: String(a.ruolo_competente || '').trim().toUpperCase(),
-        dt: Number.isFinite(Number(a.dt_chiusura)) ? Number(a.dt_chiusura) : null
+        dt: Number.isFinite(Number(a.dt_chiusura)) ? Number(a.dt_chiusura) : null,
+        note: String(a.note_chiusura || '').trim(),
+        settoreIndicato: normalizeSettoreCod(a.settore_indicato)
       }
     } catch {
       return null
@@ -2515,6 +2559,101 @@ function ActionsPanel (props: {
         }
       }
     })()
+  }, [selectionKey, role, hasSel])
+
+  // Settori proposti al TR dal Survey: ricalcolati dalle cartografie sul punto del TR
+  // (il primo valore del punto nel registro dei cicli, se l'IT lo ha spostato; altrimenti
+  // il punto attuale). Servono all'azione "Settore non competente" dell'IT.
+  const calcolaSettoriPropostiTr = async (): Promise<string[]> => {
+    const area = getPracticeAreaForRouting()
+    if (area === 'TEC') return ['DS']
+    const ctx = await getCurrentCycleContextAsync()
+    const parentGlobalId = String(ctx?.parentGlobalId || '').trim()
+
+    let lon: number | null = null
+    let lat: number | null = null
+    if (parentGlobalId) {
+      const logLayer = await getCycleLogLayer()
+      if (logLayer?.queryFeatures) {
+        const logOid = String(logLayer.objectIdField || 'OBJECTID')
+        const ql: any = logLayer.createQuery ? logLayer.createQuery() : {}
+        ql.where = `(${parentGlobalIdWhere('parent_globalid', parentGlobalId)}) AND valori_prima_json LIKE '%coordinate_punto_mappa%'`
+        ql.outFields = ['valori_prima_json', 'dt_apertura', logOid]
+        ql.returnGeometry = false
+        ql.orderByFields = ['dt_apertura ASC', `${logOid} ASC`]
+        ql.num = 1
+        const r = await logLayer.queryFeatures(ql)
+        const prima = parseCycleAuditJson(r?.features?.[0]?.attributes?.valori_prima_json)
+        const m = String(prima.coordinate_punto_mappa ?? '').match(/Lon\s+(-?\d+(?:\.\d+)?)\s*-\s*Lat\s+(-?\d+(?:\.\d+)?)/i)
+        if (m) { lon = Number(m[1]); lat = Number(m[2]) }
+      }
+    }
+    if (lon == null || lat == null) {
+      const { layer } = await resolveLayer(active?.state?.ds)
+      if (!layer?.queryFeatures) return []
+      const q: any = layer.createQuery ? layer.createQuery() : {}
+      q.objectIds = [Number(oid)]
+      q.outFields = [String(layer.objectIdField || idFieldNameFromSel || 'OBJECTID')]
+      q.returnGeometry = true
+      q.outSpatialReference = { wkid: 4326 }
+      const res = await layer.queryFeatures(q)
+      const g = res?.features?.[0]?.geometry
+      const x = Number(g?.longitude ?? g?.x)
+      const y = Number(g?.latitude ?? g?.y)
+      if (!Number.isFinite(x) || !Number.isFinite(y) || (x === 0 && y === 0)) return []
+      lon = x
+      lat = y
+    }
+
+    const [FeatureLayer, Point] = await Promise.all([
+      loadEsriModule<any>('esri/layers/FeatureLayer'),
+      loadEsriModule<any>('esri/geometry/Point')
+    ])
+    const punto = new Point({ longitude: lon, latitude: lat, spatialReference: { wkid: 4326 } })
+    const settoriNelPunto = async (url: string, where: string, distanza: number | null): Promise<string[]> => {
+      const fl = new FeatureLayer({ url })
+      if (typeof fl.load === 'function') await fl.load()
+      const q: any = fl.createQuery ? fl.createQuery() : {}
+      q.where = where
+      q.geometry = punto
+      q.spatialRelationship = 'intersects'
+      if (distanza != null) { q.distance = distanza; q.units = 'meters' }
+      q.outFields = ['Codice_set']
+      q.returnGeometry = false
+      const res = await fl.queryFeatures(q)
+      return (Array.isArray(res?.features) ? res.features : [])
+        .map((f: any) => String(pickAttrCI(f?.attributes || {}, ['Codice_set']) ?? '').trim().toUpperCase())
+        .filter((c: string) => /^[A-Z0-9_]{1,10}$/.test(c))
+    }
+    const gruppi = await Promise.all([
+      settoriNelPunto(GII_DISTRETTI_LORDI_URL, '1=1', null),
+      settoriNelPunto(GII_RETE_IRRIGUA_URL, "Stato = 'Attivo'", GII_DATI_TECNICI_BUFFER_M),
+      settoriNelPunto(GII_MANUFATTI_URL, '1=1', GII_DATI_TECNICI_BUFFER_M)
+    ])
+    const out: string[] = []
+    gruppi.flat().forEach(c => { if (!out.includes(c)) out.push(c) })
+    return out
+  }
+
+  React.useEffect(() => {
+    const key = selectionKey ? `${selectionKey}|${role}` : ''
+    const origine = toNumOrNull(pickAttrCI(data, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA']))
+    if (role !== 'IT' || !hasSel || !key || (origine != null && origine !== 1)) {
+      setSettoriPropostiTr(null)
+      return
+    }
+    let cancelled = false
+    setSettoriPropostiTr({ key, loading: true, codici: [] })
+    void (async () => {
+      try {
+        const codici = await calcolaSettoriPropostiTr()
+        if (!cancelled) setSettoriPropostiTr({ key, loading: false, codici })
+      } catch (e) {
+        console.warn('[GII-Azioni] Settori proposti al TR non calcolabili:', e)
+        if (!cancelled) setSettoriPropostiTr({ key, loading: false, codici: [] })
+      }
+    })()
+    return () => { cancelled = true }
   }, [selectionKey, role, hasSel])
 
   const getNextCycleNumber = async (parentGlobalId: string, ruoloCompetente: string): Promise<number> => {
@@ -2702,7 +2841,7 @@ function ActionsPanel (props: {
     return { oldMap, newMap, fields }
   }
 
-  const closeCycleLog = async (opts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string, auditOldMap?: Record<string, any>, auditNewMap?: Record<string, any> }) => {
+  const closeCycleLog = async (opts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string, settoreIndicato?: string, auditOldMap?: Record<string, any>, auditNewMap?: Record<string, any> }) => {
     try {
       if (oid == null) return
       const { parentGlobalId, area, settore, username } = await getCurrentCycleContextAsync()
@@ -2749,6 +2888,7 @@ function ActionsPanel (props: {
           ruolo_destinatario: opts.ruoloDestinatario || '',
           utente_destinatario: opts.utenteDestinatario || '',
           note_chiusura: opts.noteChiusura || '',
+          settore_indicato: opts.settoreIndicato || null,
           area,
           settore,
           fase: opts.fase || role,
@@ -2784,6 +2924,7 @@ function ActionsPanel (props: {
         ruolo_destinatario: opts.ruoloDestinatario || '',
         utente_destinatario: opts.utenteDestinatario || '',
         note_chiusura: opts.noteChiusura || '',
+        settore_indicato: opts.settoreIndicato || null,
         area: area || attrs.area || '',
         settore: settore || attrs.settore || '',
         fase: opts.fase || attrs.fase || role,
@@ -2816,6 +2957,7 @@ function ActionsPanel (props: {
   }
 
   const getPracticeSettoreForRouting = (): string => {
+    if (settoreRoutingOverrideRef.current) return settoreRoutingOverrideRef.current
     const areaPratica = getPracticeAreaForRouting()
     return normalizeSettoreLabel(areaPratica, pickAttrCI(data, ['settore_cod', 'settore', 'cod_settore']))
   }
@@ -3047,6 +3189,8 @@ function ActionsPanel (props: {
     const dest = normalizeActivityDestRole(ruoloDestRaw)
 
     if (ev === 'NUOVA_RILEVAZIONE_TRASMESSA' && dest === 'CS') return 'Nuova rilevazione ricevuta'
+    if (ev === EVENTO_TRASFERIMENTO_SETTORE && dest === 'CS') return 'Nuova rilevazione ricevuta'
+    if (ev === EVENTO_SETTORE_NON_COMPETENTE && dest === 'CS') return 'Istruttoria trasmessa – Settore non competente'
     if (isIntegrationRequestEvent(ev)) return 'Richiesta integrazione ricevuta'
     if (isExplicitIntegrationReturnEvent(ev)) return 'Esito integrazione ricevuto'
     if (isOrdinaryInstructionEvent(ev)) return 'Nuova istruttoria ricevuta'
@@ -3067,6 +3211,8 @@ function ActionsPanel (props: {
     const n = String(numeroRapporto || '').trim() || '—'
 
     if (ev === 'NUOVA_RILEVAZIONE_TRASMESSA' && dest === 'CS') return `Rilevazione n. ${n} ricevuta.`
+    if (ev === EVENTO_TRASFERIMENTO_SETTORE && dest === 'CS') return `Rilevazione n. ${n} ricevuta.`
+    if (ev === EVENTO_SETTORE_NON_COMPETENTE && dest === 'CS') return `Istruttoria della pratica n. ${n} ricevuta.`
     if (isIntegrationRequestEvent(ev)) return `Richiesta di integrazione per la pratica n. ${n} ricevuta.`
     if (isExplicitIntegrationReturnEvent(ev)) return `Esito dell’integrazione della pratica n. ${n} ricevuto.`
     if (isOrdinaryInstructionEvent(ev)) return `Istruttoria della pratica n. ${n} ricevuta.`
@@ -4340,7 +4486,35 @@ function ActionsPanel (props: {
   )
   const iaPuoApporreAttestazione = role !== 'IA' || !iaConformitaGiaApposta || riaHaRimandatoAIaDopoVisto
 
+  // ── Trasferimento di Settore (solo rilevazioni del TR, prima del rapporto tecnico) ──
+  // L'IT può segnalare "Settore non competente" indicando un altro Settore della stessa Area.
+  // Il CS che riceve la segnalazione può solo trasferire a quel Settore o rimandare all'IT:
+  // "Approva" e "Respingi" non sono disponibili. Il CS che riceve una rilevazione trasferita
+  // non può respingerla.
+  const incomingEventoTrasferimento = String(incomingWorkflowForUi?.evento || '').trim().toUpperCase()
+  const isRilevazioneDaTr = origineNum == null || origineNum === 1
+  const settoriAltriDellArea = (SETTORI_PER_AREA[getPracticeAreaForRouting()] || []).filter(c => c !== getPracticeSettoreForRouting())
+  const csRicevutaSettoreNonCompetente = role === 'CS' && incomingEventoTrasferimento === EVENTO_SETTORE_NON_COMPETENTE
+  const settoreIndicatoDaIt = csRicevutaSettoreNonCompetente ? normalizeSettoreCod(incomingWorkflowForUi?.settoreIndicato) : ''
+  const csRicevutaPerTrasferimento = role === 'CS' && incomingEventoTrasferimento === EVENTO_TRASFERIMENTO_SETTORE
+  // Per l'IT: i Settori tra cui il TR ha dovuto scegliere, escluso quello della pratica.
+  // Se il TR non ha avuto scelta (un solo Settore nel punto) l'azione non compare.
+  const settoriPropostiAltri = (settoriPropostiTr && !settoriPropostiTr.loading ? settoriPropostiTr.codici : [])
+    .filter(c => c !== getPracticeSettoreForRouting() && settoriAltriDellArea.includes(c))
+  const canStartSettoreNonCompetente =
+    role === 'IT' &&
+    canStartEsito &&
+    isRilevazioneDaTr &&
+    !String(pickAttrCI(data, ['numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO']) || '').trim() &&
+    settoriPropostiAltri.length > 0
+  const canStartTrasferisciSettore =
+    csRicevutaSettoreNonCompetente &&
+    canStartEsito &&
+    !!settoreIndicatoDaIt &&
+    settoriAltriDellArea.includes(settoreIndicatoDaIt)
+
   const canStartApprova =
+    !csRicevutaSettoreNonCompetente &&
     canStartEsito &&
     role !== 'IA' &&
     iaPuoApporreAttestazione &&
@@ -4348,6 +4522,8 @@ function ActionsPanel (props: {
     !(role === 'RIA' && !currentIntegrationRequester && !riaBozzaDeterminazioneDaVerificare && !riaAttoContestazioneDaVerificare && !isRientroTecnicoDaDt)
 
   const canStartRespingi =
+    !csRicevutaSettoreNonCompetente &&
+    !csRicevutaPerTrasferimento &&
     canStartEsito &&
     role !== 'IT' &&
     role !== 'RIT' &&
@@ -4436,6 +4612,7 @@ function ActionsPanel (props: {
     pending === 'INVIA_IA' && pendingInviaIaContext === 'IA_INTEGRATION_OUTCOME'
   const isCsInitialRilevazioneForUi = role === 'CS' && (
     incomingWorkflowEventForUi === 'NUOVA_RILEVAZIONE_TRASMESSA' ||
+    incomingWorkflowEventForUi === EVENTO_TRASFERIMENTO_SETTORE ||
     (!incomingWorkflowEventForUi && !hasTiAnyEvidence)
   )
 
@@ -4457,8 +4634,11 @@ function ActionsPanel (props: {
       return 'L’istruttoria verrà presa in carico.'
     }
 
-    if (ev === 'NUOVA_RILEVAZIONE_TRASMESSA') {
+    if (ev === 'NUOVA_RILEVAZIONE_TRASMESSA' || ev === EVENTO_TRASFERIMENTO_SETTORE) {
       return 'La nuova rilevazione verrà presa in carico.'
+    }
+    if (ev === EVENTO_SETTORE_NON_COMPETENTE) {
+      return 'L’istruttoria verrà presa in carico.'
     }
     if (isIntegrationRequestEvent(ev)) {
       return 'La richiesta di integrazione verrà presa in carico.'
@@ -4741,6 +4921,24 @@ function ActionsPanel (props: {
           visible: !hideRiaForwardToIa && role !== 'IA' && !(role === 'RIA' && riaIncomingIaIntegrationRequest),
           color: role === 'DT' ? buttonColors.approvaRapporto : buttonColors.approva,
           textColor: role === 'DT' ? buttonColors.approvaRapportoText : buttonColors.approvaText
+        },
+        {
+          key: 'SETTORE_NON_COMPETENTE',
+          label: 'Settore non competente',
+          desc: 'Trasmette la rilevazione al Capo Settore segnalando che è di competenza di un altro Settore.',
+          enabled: canStartSettoreNonCompetente,
+          visible: role === 'IT' && isRilevazioneDaTr,
+          color: buttonColors.integrazione,
+          textColor: buttonColors.integrazioneText
+        },
+        {
+          key: 'TRASFERISCI_SETTORE',
+          label: settoreIndicatoDaIt ? `Trasferisci al ${settoreNomeCompleto(settoreIndicatoDaIt)}` : 'Trasferisci ad altro Settore',
+          desc: 'Trasferisce la rilevazione al Capo Settore indicato dall’Istruttore tecnico.',
+          enabled: canStartTrasferisciSettore,
+          visible: csRicevutaSettoreNonCompetente,
+          color: buttonColors.approva,
+          textColor: buttonColors.approvaText
         }
       ].filter(i => i.visible)
     },
@@ -5044,7 +5242,7 @@ function ActionsPanel (props: {
   }
 
   // NOTE: compare per esito conforme/non conforme, respinta e — Matrice_TI caso 1/b — anche per eliminazione (obbligatoria)
-  const showNote = pending === 'APPROVA' || pending === 'INVIA_IA' || pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA' || pending === 'RESPINGI' || pending === 'ELIMINA'
+  const showNote = pending === 'APPROVA' || pending === 'INVIA_IA' || pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA' || pending === 'RESPINGI' || pending === 'ELIMINA' || pending === 'SETTORE_NON_COMPETENTE' || pending === 'TRASFERISCI_SETTORE'
   const noteEnabled = showNote && hasSel && !loading && !lockedByTransmit
 
   const noteDraftTrim = String(noteDraft ?? '').trim()
@@ -5063,9 +5261,11 @@ function ActionsPanel (props: {
   const integrationOtherSelected = integrationTargets.includes('Altro')
   const isAltro = /\baltro\b/i.test(reasonTrim)
   const hasOtherMotivation = (pending === 'RESPINGI' && isAltro) || (isRiaTechnicalNonConformity && integrationOtherSelected) || (!isAdministrativeRiaReturn && !isRiaAutomaticNonConformity && isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail && integrationOtherSelected)
-  const freeNotePrefix = hasOtherMotivation
-    ? (isRiaAutomaticNonConformity ? 'Specificazione della non conformità e ulteriori annotazioni' : 'Altre motivazioni e ulteriori annotazioni')
-    : 'Ulteriori annotazioni'
+  const freeNotePrefix = pending === 'SETTORE_NON_COMPETENTE'
+    ? 'Motivazione'
+    : hasOtherMotivation
+      ? (isRiaAutomaticNonConformity ? 'Specificazione della non conformità e ulteriori annotazioni' : 'Altre motivazioni e ulteriori annotazioni')
+      : 'Ulteriori annotazioni'
   const integrationReasonBlock = isAdministrativeRiaReturn
     ? (integrationTargets.length > 0 ? `Oggetto del rimando: ${integrationTargets.join(', ')}` : '')
     : isRiaAdministrativeNonConformity
@@ -5102,6 +5302,7 @@ function ActionsPanel (props: {
     hasOtherMotivation ||
     isAdministrativeRiaReturn ||
     isRiaAutomaticNonConformity ||
+    (pending === 'SETTORE_NON_COMPETENTE') ||  // la motivazione della segnalazione è obbligatoria
     (pending === 'ELIMINA')  // Matrice_TI caso 1/b: note obbligatoria per eliminazione
 
   const reasonIsRequired = pending === 'RESPINGI'
@@ -5143,6 +5344,7 @@ function ActionsPanel (props: {
     resetStructuredReasons()
     setTiSelected('')
     setTiLoadErr('')
+    setSettoreIndicatoDraft('')
   }
 
   // Particelle catastali distinte nel punto della pratica (0 se il punto non è impostato).
@@ -5189,6 +5391,10 @@ function ActionsPanel (props: {
     if (p === 'APPROVA' && !canStartApprova) return
     if (p === 'RESPINGI' && !canStartRespingi) return
     if (p === 'ELIMINA' && !canStartElimina) return
+    if (p === 'SETTORE_NON_COMPETENTE' && !canStartSettoreNonCompetente) return
+    if (p === 'TRASFERISCI_SETTORE' && !canStartTrasferisciSettore) return
+    // Un solo Settore alternativo: già impostato.
+    if (p === 'SETTORE_NON_COMPETENTE') setSettoreIndicatoDraft(settoriPropostiAltri.length === 1 ? settoriPropostiAltri[0] : '')
 
     // Validazione RIT → DT: grado obbligatorio per ciascun articolo interessato, occorrenza obbligatoria solo per Art. 15
     if (p === 'APPROVA' && role === 'RIT') {
@@ -5430,7 +5636,7 @@ function ActionsPanel (props: {
   const saveWithWorkflowLog = async (
     attributesIn: Record<string, any>,
     okText: string,
-    logOpts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string, skipCurrentActivity?: boolean }
+    logOpts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string, settoreIndicato?: string, skipCurrentActivity?: boolean }
   ) => {
     const operationContextStamp = getGiiPracticeContextStamp()
     const operationContextIsCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
@@ -5953,7 +6159,7 @@ function ActionsPanel (props: {
     }
   }
 
-  const onConfirmEsito = async (esito: number, label: string) => {
+  const onConfirmEsito = async (esito: number, label: string, esitoOpts?: { eventoOverride?: string, settoreIndicato?: string }) => {
     setLoading(true)
     setMsg(null)
 
@@ -6101,9 +6307,12 @@ function ActionsPanel (props: {
       }
 
       const integRequester = (esito === ESITO_APPROVATA && !isIaAttestazioneConformita) ? getIntegrationRequesterForCurrentRole() : ''
-      const ruoloDest = esito === ESITO_APPROVATA
-        ? (isIaAttestazioneConformita ? '' : (integRequester || (role === 'RIA' ? 'IA' : getNextRoleForForward())))
-        : ''
+      // "Settore non competente": la rilevazione va sempre al Capo Settore.
+      const ruoloDest = esitoOpts?.eventoOverride
+        ? 'CS'
+        : esito === ESITO_APPROVATA
+          ? (isIaAttestazioneConformita ? '' : (integRequester || (role === 'RIA' ? 'IA' : getNextRoleForForward())))
+          : ''
       if (ruoloDest) {
         try {
           // Non subordinare il passaggio al ruolo successivo allo schema della
@@ -6243,9 +6452,11 @@ function ActionsPanel (props: {
                     : 'ISTRUTTORIA_AMMINISTRATIVA_VALIDATA')
                 : ''
 
-      const eventoPositivo = isForwardingIntegrationOutcome
-        ? 'ESITO_INTEGRAZIONE_TRASMESSO'
-        : eventoOrdinarioPositivo
+      const eventoPositivo = esitoOpts?.eventoOverride
+        ? esitoOpts.eventoOverride
+        : isForwardingIntegrationOutcome
+          ? 'ESITO_INTEGRAZIONE_TRASMESSO'
+          : eventoOrdinarioPositivo
 
       const logOpts = esito === ESITO_APPROVATA && !isIaAttestazioneConformita && eventoPositivo
         ? {
@@ -6253,12 +6464,15 @@ function ActionsPanel (props: {
             ruoloDestinatario: ruoloDest,
             utenteDestinatario: resolveDestUser(ruoloDest),
             noteChiusura: noteTrim,
-            fase: role
+            fase: role,
+            settoreIndicato: esitoOpts?.settoreIndicato || undefined
           }
         : null
 
       if (logOpts) {
-        const successText = isIaAttestazioneConformita
+        const successText = esitoOpts?.eventoOverride === EVENTO_SETTORE_NON_COMPETENTE
+          ? `Rilevazione trasmessa al Capo Settore con l’indicazione del ${settoreNomeCompleto(esitoOpts?.settoreIndicato)}.`
+          : isIaAttestazioneConformita
           ? 'Istruttoria conforme.'
           : riaAttoContestazioneDaVerificare
             ? 'Atto di accertamento approvato e restituito all’Istruttore amministrativo.'
@@ -6352,6 +6566,195 @@ function ActionsPanel (props: {
       setLoading(false)
       const txt = e?.message ? String(e.message) : String(e)
       setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
+    }
+  }
+
+  // ── Trasferimento della rilevazione al Settore indicato dall'IT ──────────────
+  // Ripristina i valori arrivati dal Tecnico rilevatore (il valore più vecchio registrato
+  // per ogni campo nel registro dei cicli), elimina le righe della nota spese e gli allegati
+  // aggiunti durante l'istruttoria, riporta il punto nella posizione di partenza e consegna
+  // la rilevazione, da prendere in carico, al Capo Settore del Settore di destinazione.
+  const onConfirmTrasferisciSettore = async () => {
+    setLoading(true)
+    setMsg(null)
+    const dest = settoreIndicatoDaIt
+    try {
+      if (!dest || !settoriAltriDellArea.includes(dest)) throw new Error('Settore di destinazione non valido.')
+      const ctx = await getCurrentCycleContextAsync()
+      const parentGlobalId = String(ctx?.parentGlobalId || '').trim()
+      if (!parentGlobalId) throw new Error('Riferimento della pratica (GlobalID) non disponibile.')
+
+      const { layer } = await resolveLayer(ds)
+      if (!layer?.applyEdits) throw new Error('Layer della pratica non disponibile.')
+      if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
+      const layerFields: any[] = Array.isArray(layer.fields) ? layer.fields : []
+      const fieldByLower = new Map<string, any>()
+      layerFields.forEach((f: any) => { const n = String(f?.name || ''); if (n) fieldByLower.set(n.toLowerCase(), f) })
+      const oidFieldName = String(layer.objectIdField || idFieldNameFromSel || 'OBJECTID')
+
+      // 1. Valori di partenza e allegati aggiunti, dal registro dei cicli della pratica.
+      const logLayer = await getCycleLogLayer()
+      if (!logLayer?.queryFeatures) throw new Error('Registro dei cicli non disponibile.')
+      const logOidField = String(logLayer.objectIdField || 'OBJECTID')
+      const ql: any = logLayer.createQuery ? logLayer.createQuery() : {}
+      ql.where = `(${parentGlobalIdWhere('parent_globalid', parentGlobalId)})`
+      ql.outFields = ['dt_apertura', 'valori_prima_json', 'valori_dopo_json', logOidField]
+      ql.returnGeometry = false
+      ql.orderByFields = ['dt_apertura ASC', `${logOidField} ASC`]
+      const logRes = await logLayer.queryFeatures(ql)
+      const cicli: any[] = (Array.isArray(logRes?.features) ? logRes.features : []).map((f: any) => f?.attributes || {})
+      const valoriPartenza: Record<string, any> = {}
+      const allegatiAggiunti = new Set<number>()
+      for (const c of cicli) {
+        const prima = parseCycleAuditJson(c.valori_prima_json)
+        for (const k of Object.keys(prima)) {
+          const kl = String(k || '').trim().toLowerCase()
+          if (kl && !(kl in valoriPartenza)) valoriPartenza[kl] = prima[k]
+        }
+        const dopo = parseCycleAuditJson(c.valori_dopo_json)
+        let voci: any = dopo[CYCLE_AUDIT_ATTACHMENTS_KEY]
+        if (typeof voci === 'string') { try { voci = JSON.parse(voci) } catch { voci = [] } }
+        ;(Array.isArray(voci) ? voci : []).forEach((v: any) => {
+          const id = Number(v?.attachmentId)
+          if (String(v?.action || '').trim().toUpperCase() === 'AGGIUNTO' && Number.isFinite(id) && id > 0) allegatiAggiunti.add(id)
+        })
+      }
+
+      // Campi di workflow, documenti e date di sistema non fanno parte dei dati del TR.
+      const campoNonRipristinabile = (k: string): boolean => {
+        if (!k) return true
+        if (['objectid', 'globalid', 'settore_cod', 'area_cod', 'origine_pratica', 'data_rilevazione', 'data_firma', 'coordinate_punto_mappa', CYCLE_AUDIT_ATTACHMENTS_KEY].includes(k)) return true
+        return /^(stato_|dt_|esito_|presa_in_carico_|it_assegnato_|ia_assegnato_|ri_assegnato_|note_|ns_|gii_|determinazione_|protocollo_|numero_rapporto|data_rapporto|accertamento_)/.test(k)
+      }
+      // Nel registro le date sono salvate come testo (gg/mm/aaaa [hh:mm:ss]) e i valori vuoti come ''.
+      const dataDaTesto = (v: string): number | null => {
+        const m = String(v || '').trim().match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/)
+        if (!m) return null
+        const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), Number(m[4] || 0), Number(m[5] || 0), Number(m[6] || 0))
+        return Number.isNaN(d.getTime()) ? null : d.getTime()
+      }
+      const valorePerCampo = (f: any, v: any): { ok: boolean, value: any } => {
+        if (v == null || v === '') return { ok: true, value: null }
+        const t = String(f?.type || '').toLowerCase()
+        if (t === 'date' || t === 'esrifieldtypedate') {
+          if (typeof v === 'number' && Number.isFinite(v)) return { ok: true, value: v }
+          const ms = dataDaTesto(String(v))
+          return ms == null ? { ok: false, value: null } : { ok: true, value: ms }
+        }
+        if (/integer|double|single|long/.test(t)) {
+          const n = Number(v)
+          return Number.isFinite(n) ? { ok: true, value: n } : { ok: false, value: null }
+        }
+        return { ok: true, value: String(v) }
+      }
+
+      const upd: Record<string, any> = {}
+      const campiNonRipristinati: string[] = []
+      for (const k of Object.keys(valoriPartenza)) {
+        if (campoNonRipristinabile(k)) continue
+        const f = fieldByLower.get(k)
+        if (!f || f.editable === false) continue
+        const conv = valorePerCampo(f, valoriPartenza[k])
+        if (!conv.ok) { campiNonRipristinati.push(String(f.alias || f.name)); continue }
+        upd[String(f.name)] = conv.value
+      }
+      // Nota spese: il TR non la compila, quindi tutti i campi ns_* tornano vuoti.
+      layerFields.forEach((f: any) => {
+        const n = String(f?.name || '')
+        if (/^ns_/i.test(n) && f.editable !== false) upd[n] = null
+      })
+
+      // Workflow: nessun Istruttore tecnico, rilevazione da prendere in carico dal CS di destinazione.
+      const now = Date.now()
+      ;[
+        'it_assegnato_username', 'it_assegnato_nome', 'dt_assegnazione_it', 'it_assegnato_da',
+        'stato_IT', 'dt_stato_IT', 'dt_presa_in_carico_IT', 'esito_IT', 'dt_esito_IT', 'note_IT',
+        'dt_presa_in_carico_CS', 'esito_CS', 'dt_esito_CS', 'note_CS'
+      ].forEach(n => { upd[n] = null })
+      upd.stato_CS = STATO_DA_PRENDERE
+      upd.dt_stato_CS = now
+      const fSettore = fieldByLower.get('settore_cod')
+      upd.settore_cod = fSettore && /integer|double|single|long/.test(String(fSettore.type || '').toLowerCase())
+        ? SETTORE_NUM[dest]
+        : dest
+
+      // Posizione di partenza del punto (registrata come "Lon x - Lat y").
+      let geometriaPartenza: any = null
+      const mPunto = String(valoriPartenza['coordinate_punto_mappa'] ?? '').match(/Lon\s+(-?\d+(?:\.\d+)?)\s*-\s*Lat\s+(-?\d+(?:\.\d+)?)/i)
+      if (mPunto) {
+        const Point = await loadEsriModule<any>('esri/geometry/Point')
+        const pt4326 = new Point({ longitude: Number(mPunto[1]), latitude: Number(mPunto[2]), spatialReference: { wkid: 4326 } })
+        const wkid = Number(layer?.spatialReference?.wkid || 4326)
+        if (wkid === 4326) {
+          geometriaPartenza = pt4326
+        } else if (wkid === 3857 || wkid === 102100) {
+          const wmu = await loadEsriModule<any>('esri/geometry/support/webMercatorUtils')
+          geometriaPartenza = wmu.geographicToWebMercator(pt4326)
+        } else {
+          const projection = await loadEsriModule<any>('esri/geometry/projection')
+          if (projection?.load) await projection.load()
+          geometriaPartenza = projection.project(pt4326, layer.spatialReference)
+        }
+      }
+
+      // Allegati aggiunti durante l'istruttoria e ancora presenti.
+      let allegatiDaEliminare: number[] = []
+      if (allegatiAggiunti.size > 0 && typeof layer.queryAttachments === 'function') {
+        const att = await layer.queryAttachments({ objectIds: [Number(oid)] })
+        const presenti = new Set<number>(((att && att[Number(oid)]) || []).map((a: any) => Number(a?.id)))
+        allegatiDaEliminare = Array.from(allegatiAggiunti).filter(id => presenti.has(id))
+      }
+
+      // 2. Righe della nota spese.
+      const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+      const nsLayer = new FeatureLayer({ url: GII_NOTA_SPESE_DETTAGLIO_URL })
+      if (typeof nsLayer.load === 'function') await nsLayer.load()
+      const qn: any = nsLayer.createQuery ? nsLayer.createQuery() : {}
+      qn.where = `(${parentGlobalIdWhere('parent_globalid', parentGlobalId)})`
+      const nsIds: number[] = (await nsLayer.queryObjectIds(qn)) || []
+      if (nsIds.length > 0) {
+        const nsRes = await nsLayer.applyEdits({ deleteFeatures: nsIds.map(id => ({ objectId: id })) })
+        const nsErr = (nsRes?.deleteFeatureResults || []).find((r: any) => r?.error)
+        if (nsErr) throw new Error(`Eliminazione della nota spese non riuscita: ${nsErr.error?.message || 'errore del servizio'}`)
+      }
+
+      // 3. Allegati aggiunti dall'IT.
+      if (allegatiDaEliminare.length > 0) {
+        const Graphic = await loadEsriModule<any>('esri/Graphic')
+        const attRes = await layer.deleteAttachments(new Graphic({ attributes: { [oidFieldName]: Number(oid) } }), allegatiDaEliminare)
+        const attErr = (Array.isArray(attRes) ? attRes : []).find((r: any) => r?.error)
+        if (attErr) throw new Error(`Eliminazione degli allegati aggiunti non riuscita: ${attErr.error?.message || 'errore del servizio'}`)
+      }
+
+      // 4. Posizione del punto.
+      if (geometriaPartenza) {
+        const geoRes = await layer.applyEdits({ updateFeatures: [{ attributes: { [oidFieldName]: Number(oid) }, geometry: geometriaPartenza }] })
+        const geoErr = (geoRes?.updateFeatureResults || [])[0]?.error
+        if (geoErr) throw new Error(`Ripristino della posizione del punto non riuscito: ${geoErr.message || 'errore del servizio'}`)
+      }
+
+      // 5. Dati, workflow, registro e avviso al CS di destinazione.
+      settoreRoutingOverrideRef.current = dest
+      try {
+        addGiiRoutingFields(upd, 'CS', 'TRASMISSIONE')
+        const okText = campiNonRipristinati.length > 0
+          ? `Rilevazione trasferita al ${settoreNomeCompleto(dest)}. Non è stato possibile ripristinare: ${campiNonRipristinati.join(', ')}.`
+          : `Rilevazione trasferita al ${settoreNomeCompleto(dest)}.`
+        await saveWithWorkflowLog(upd, okText, {
+          eventoChiusura: EVENTO_TRASFERIMENTO_SETTORE,
+          ruoloDestinatario: 'CS',
+          noteChiusura: noteTrim,
+          fase: role,
+          settoreIndicato: dest
+        })
+      } finally {
+        settoreRoutingOverrideRef.current = ''
+      }
+      setConfirmAttempted(false)
+    } catch (e: any) {
+      setLoading(false)
+      const txt = e?.message ? String(e.message) : String(e)
+      setMsg({ kind: 'err', text: `Trasferimento non riuscito: ${txt}` })
     }
   }
 
@@ -6494,7 +6897,11 @@ function ActionsPanel (props: {
                   : 'Istruttoria tecnica respinta')
               : pending === 'ELIMINA'
                 ? `Archiviazione ${subjectNameWithArticle}`
-                : 'Conferma azione'
+                : pending === 'SETTORE_NON_COMPETENTE'
+                  ? 'Settore non competente'
+                  : pending === 'TRASFERISCI_SETTORE'
+                    ? 'Trasferimento ad altro Settore'
+                    : 'Conferma azione'
 
   const approvaActionDesc = isIntegrationResponseForWorkflowUi
     ? (role === 'RIA' && (fwdDest === 'IA' || currentIntegrationRequester === 'IA')
@@ -6553,6 +6960,8 @@ function ActionsPanel (props: {
     INTEGRAZIONE_TECNICA: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `L’istruttoria verrà rimandata al ${rimandoTecnicaTargetLabel}.` },
     RESPINGI:       { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: role === 'CS' ? (isCsInitialRilevazioneForUi ? 'La rilevazione verrà respinta.' : 'L’istruttoria verrà respinta.') : 'L’istruttoria verrà respinta.' },
     ELIMINA:        { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: praticaLabel === 'Rapporto tecnico' ? 'L’istruttoria verrà archiviata e non sarà più visibile nell’elenco.' : 'La rilevazione verrà archiviata e non sarà più visibile nell’elenco.' },
+    SETTORE_NON_COMPETENTE: { icon: '↪', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: settoreIndicatoDraft ? `La rilevazione verrà trasmessa al Capo Settore con l’indicazione del ${settoreNomeCompleto(settoreIndicatoDraft)}.` : 'La rilevazione verrà trasmessa al Capo Settore con l’indicazione del Settore ritenuto competente.' },
+    TRASFERISCI_SETTORE: { icon: '↪', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `La rilevazione verrà trasferita al Capo Settore del ${settoreNomeCompleto(settoreIndicatoDaIt)}.` },
   }
   const theme = pending ? (pendingTheme[pending] ?? { icon: '●', color: '#2f6fed', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: '' }) : pendingTheme.TAKE
   const pendingModalWidth = pending === 'TAKE' ? 'min(92vw, 520px)' : 'min(94vw, 780px)'
@@ -6655,7 +7064,11 @@ function ActionsPanel (props: {
   const isIntegrationOutcomeTransmissionPending = isIntegrationResponseForWorkflowUi && (pending === 'APPROVA' || pending === 'INVIA_IA')
   const isOrdinaryItTransmissionPending = role === 'IT' && pending === 'APPROVA' && !isIntegrationOutcomeTransmissionPending
   const isAttestazioneConformitaPending = (pending === 'APPROVA' || pending === 'INVIA_IA') && !isIntegrationOutcomeTransmissionPending && !isOrdinaryItTransmissionPending
-  const workflowNoteLabel = isAdministrativeRiaReturn
+  const workflowNoteLabel = pending === 'SETTORE_NON_COMPETENTE'
+    ? 'Motivazione'
+    : pending === 'TRASFERISCI_SETTORE'
+      ? 'Ulteriori annotazioni'
+      : isAdministrativeRiaReturn
     ? 'Esito della verifica'
     : isRiaAutomaticNonConformity
       ? 'Motivazione del rimando'
@@ -6668,7 +7081,11 @@ function ActionsPanel (props: {
     ? 'Motivazione del rimando'
     : workflowNoteLabel
   const workflowNoteTextAreaRequired = noteIsRequired
-  const workflowNotePlaceholder = (isAdministrativeRiaReturn || isRiaAutomaticNonConformity)
+  const workflowNotePlaceholder = pending === 'SETTORE_NON_COMPETENTE'
+    ? 'Indicare perché la rilevazione è di competenza del Settore indicato…'
+    : pending === 'TRASFERISCI_SETTORE'
+      ? 'Inserire eventuali annotazioni sul trasferimento…'
+      : (isAdministrativeRiaReturn || isRiaAutomaticNonConformity)
     ? 'Indicare la motivazione del rimando…'
     : isIntegrationOutcomeTransmissionPending
       ? 'Inserire eventuali annotazioni sull’esito dell’integrazione…'
@@ -6821,6 +7238,7 @@ function ActionsPanel (props: {
     setIaLoadErr('')
     setZeroNotaSpeseWarning([])
     setIncompleteNotaSpeseWarning([])
+    setSettoreIndicatoDraft('')
   }
 
   const openWorkflowMenu = () => {
@@ -6854,6 +7272,8 @@ function ActionsPanel (props: {
     if (pending === 'APPROVA' || pending === 'INVIA_IA') return true
     if (pending === 'RESPINGI') return !!reasonTrim && (!isAltro || !!noteDraftTrim)
     if (pending === 'ELIMINA') return !!noteTrim
+    if (pending === 'SETTORE_NON_COMPETENTE') return !!settoreIndicatoDraft && !!noteDraftTrim
+    if (pending === 'TRASFERISCI_SETTORE') return canStartTrasferisciSettore
     return true
   })()
 
@@ -6902,6 +7322,8 @@ function ActionsPanel (props: {
       else if (pending === 'APPROVA') await confirmApprovaWithNotaSpeseWarning()
       else if (pending === 'RESPINGI') await onConfirmRespinta()
       else if (pending === 'ELIMINA') await onConfirmElimina()
+      else if (pending === 'SETTORE_NON_COMPETENTE') await onConfirmEsito(ESITO_APPROVATA, 'Settore non competente', { eventoOverride: EVENTO_SETTORE_NON_COMPETENTE, settoreIndicato: settoreIndicatoDraft })
+      else if (pending === 'TRASFERISCI_SETTORE') await onConfirmTrasferisciSettore()
     } finally {
       // Chiudiamo il popup e azzeriamo l'azione nello stesso passaggio: evita
       // il render intermedio in cui il testo dell'esito integrazione veniva
@@ -7126,6 +7548,44 @@ function ActionsPanel (props: {
                 </select>
                 {!iaLoading && !iaLoadErr && iaOptions.length === 0 && <div style={{ fontSize: 14, opacity: 0.75 }}>Nessun Istruttore amministrativo trovato.</div>}
                 {!!iaLoadErr && <div style={{ fontSize: 14, color: '#dc2626' }}>Errore elenco Istruttori amministrativi: {iaLoadErr}</div>}
+              </div>
+            )}
+
+            {csRicevutaSettoreNonCompetente && (
+              <div style={{ display: 'grid', gap: 4, padding: 10, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, fontSize: 15, color: '#78350f', lineHeight: 1.45 }}>
+                <div><b>Settore non competente.</b> L’Istruttore tecnico indica come competente il {settoreNomeCompleto(settoreIndicatoDaIt) || 'Settore non specificato'}.</div>
+                {!!incomingWorkflowForUi?.note && <div style={{ whiteSpace: 'pre-line' }}>{incomingWorkflowForUi.note}</div>}
+              </div>
+            )}
+
+            {pending === 'SETTORE_NON_COMPETENTE' && role === 'IT' && (
+              <div style={{ display: 'grid', gap: 8 }}>
+                <div style={{ display: 'grid', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Settore ritenuto competente</div>
+                    <div style={labelReqStyle(true, confirmAttempted && !settoreIndicatoDraft)}>Scelta obbligatoria</div>
+                  </div>
+                  <select
+                    value={settoreIndicatoDraft}
+                    onChange={(e) => { setSettoreIndicatoDraft(String(e.target.value || '')); if (confirmAttempted) setConfirmAttempted(false) }}
+                    disabled={loading}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${confirmAttempted && !settoreIndicatoDraft ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none', fontSize: 15 }}
+                  >
+                    <option value=''>— Seleziona Settore —</option>
+                    {settoriPropostiAltri.map(c => (
+                      <option key={c} value={c}>{settoreNomeCompleto(c)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: 14.5, color: '#7f1d1d', lineHeight: 1.45 }}>
+                  Se il Capo Settore trasferirà la rilevazione, i dati inseriti nell’istruttoria andranno persi (modifiche ai dati, nota spese, allegati aggiunti, spostamento del punto) e saranno ripristinati i valori arrivati dal Tecnico rilevatore.
+                </div>
+              </div>
+            )}
+
+            {pending === 'TRASFERISCI_SETTORE' && role === 'CS' && (
+              <div style={{ padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: 14.5, color: '#7f1d1d', lineHeight: 1.45 }}>
+                Con il trasferimento i dati inseriti nell’istruttoria (modifiche ai dati, nota spese, allegati aggiunti, spostamento del punto) andranno persi e saranno ripristinati i valori arrivati dal Tecnico rilevatore. La rilevazione passerà, da prendere in carico, al Capo Settore del {settoreNomeCompleto(settoreIndicatoDaIt)}.
               </div>
             )}
 
