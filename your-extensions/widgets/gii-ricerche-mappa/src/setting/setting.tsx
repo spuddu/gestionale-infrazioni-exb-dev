@@ -791,6 +791,7 @@ type GenericSearch = {
   layerTitle: string
   fields: GenericSearchField[]
   searchType?: 'generic' | 'pratica'
+  ignoreMapFilter?: boolean
 }
 
 type GenericSearchField = {
@@ -852,7 +853,8 @@ function normalizeGenericSearches(cfg: any): GenericSearch[] {
       layerUrl: String(s?.layerUrl || ''),
       layerTitle: String(s?.layerTitle || ''),
       fields: normalizeGenericFields(s?.fields),
-      searchType: s?.searchType === 'pratica' ? 'pratica' : 'generic'
+      searchType: s?.searchType === 'pratica' ? 'pratica' : 'generic',
+      ignoreMapFilter: s?.ignoreMapFilter === true
     }))
   }
 
@@ -1221,6 +1223,7 @@ export default function Setting(props: Props) {
                   <span style={{ ...P.lbl, marginTop: 12 }}>Layer da interrogare</span>
                   <LayerSelect value={layerKey} options={mapLayerOptions} loading={mapLayerLoading} disabled={!mapWidgetId || mapLayerOptions.length === 0} onChange={key => onLayerSelect(search, key)} />
                   {search.layerTitle && <div style={{ ...P.preview, wordBreak: 'break-all' }}>Layer selezionato: <b style={{ color: '#e5e7eb' }}>{search.layerTitle}</b>{search.layerUrl ? <><br />URL: {search.layerUrl}</> : null}</div>}
+                  <Check label='Cerca su tutto il layer (ignora il filtro della mappa)' value={search.ignoreMapFilter === true} onChange={v => updateSearch(search.id, { ignoreMapFilter: v })} />
                   {schemaLoading && <div style={P.hint}>Lettura schema campi del layer selezionato…</div>}
                   {!schemaLoading && search.layerUrl && !fields.length && <div style={{ ...P.hint, color: '#fca5a5' }}>Elenco campi non ancora caricato per il layer selezionato.</div>}
 

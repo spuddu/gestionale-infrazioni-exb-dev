@@ -23,6 +23,8 @@ export interface MapSearchConfig {
   layerTitle: string
   fields: SearchFieldConfig[]
   searchType?: 'generic' | 'pratica'
+  // true: la ricerca interroga il servizio del layer senza il filtro della copia nella mappa
+  ignoreMapFilter?: boolean
 }
 
 export interface Config {

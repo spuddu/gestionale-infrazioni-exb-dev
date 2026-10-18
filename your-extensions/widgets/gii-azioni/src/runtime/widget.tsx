@@ -27,11 +27,13 @@ const GII_ATTIVITA_CORRENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ
 // il CS può solo trasferire la rilevazione a quel Settore (o rimandarla all'IT).
 const EVENTO_SETTORE_NON_COMPETENTE = 'ISTRUTTORIA_TRASMESSA_SETTORE_NON_COMPETENTE'
 const EVENTO_TRASFERIMENTO_SETTORE = 'RILEVAZIONE_TRASFERITA_SETTORE'
-// Righe della nota spese della pratica: al trasferimento vengono eliminate.
-const GII_NOTA_SPESE_DETTAGLIO_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_NOTA_SPESE_DETTAGLIO/FeatureServer/0'
+// Righe della nota spese della pratica: al trasferimento vengono eliminate. Vista di scrittura,
+// la stessa impostata in gii-editing-tec (nsNotaSpeseDettaglioUrlWrite): il layer madre non è
+// accessibile agli utenti del GII.
+const GII_NOTA_SPESE_DETTAGLIO_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_EDIT_NOTA_SPESE_DETTAGLIO/FeatureServer/0'
 // Cartografie e regole del Survey per i Settori proposti al TR: distretto in cui ricade il
 // punto, reti attive e manufatti entro 2 m; per l'Area Tecnica il solo Settore DS.
-const GII_RETE_IRRIGUA_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Rete_irrigua_CBS/FeatureServer/9'
+const GII_RETE_IRRIGUA_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Rete_irrigua_CBSM/FeatureServer/9'
 const GII_MANUFATTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Manufatti_rete_irrigua_CBSM/FeatureServer/8'
 const GII_DISTRETTI_LORDI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Distretti_irrigui_lordi/FeatureServer/108'
 const GII_DATI_TECNICI_BUFFER_M = 2
@@ -3968,8 +3970,15 @@ function ActionsPanel (props: {
   }, [noteDraft, autoResizeNote])
 
   // Carica elenco IT da GII_utenti tramite ruolo_cod. Filtra per area/settore se disponibili.
+  // Guardia in un ref e dati della pratica letti da ref: la funzione resta stabile, così
+  // l'effetto che la richiama all'apertura del popup non riparte a ogni cambio di tiLoading.
+  const tiLoadingRef = React.useRef(false)
+  const tiDataRef = React.useRef<any>(data)
+  tiDataRef.current = data
   const loadTiOptions = React.useCallback(async () => {
-    if (tiLoading) return
+    if (tiLoadingRef.current) return
+    tiLoadingRef.current = true
+    const data = tiDataRef.current
     setTiLoading(true)
     setTiLoadErr('')
     try {
@@ -4029,9 +4038,10 @@ function ActionsPanel (props: {
     } catch (e: any) {
       setTiLoadErr(e?.message ? String(e.message) : String(e))
     } finally {
+      tiLoadingRef.current = false
       setTiLoading(false)
     }
-  }, [tiLoading])
+  }, [])
 
   React.useEffect(() => {
     if (pending !== 'ASSEGNA_IT') return
@@ -4924,7 +4934,7 @@ function ActionsPanel (props: {
         },
         {
           key: 'SETTORE_NON_COMPETENTE',
-          label: 'Settore non competente',
+          label: `${settoreNomeCompleto(getPracticeSettoreForRouting()) || 'Settore'} non competente`,
           desc: 'Trasmette la rilevazione al Capo Settore segnalando che è di competenza di un altro Settore.',
           enabled: canStartSettoreNonCompetente,
           visible: role === 'IT' && isRilevazioneDaTr,
@@ -5503,6 +5513,10 @@ function ActionsPanel (props: {
       // La scelta del IT deve essere esplicita: non preselezioniamo l'eventuale
       // valore storico già presente sul record.
       setTiSelected('')
+      // Elenco svuotato e caricamento segnato subito: niente elenco della pratica precedente
+      // e niente "Nessun Istruttore tecnico trovato" prima che arrivi la risposta.
+      setTiOptions([])
+      setTiLoading(true)
       window.setTimeout(() => { void loadTiOptions() }, 0)
     } else {
       setTiSelected('')

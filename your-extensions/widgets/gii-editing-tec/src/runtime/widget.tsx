@@ -11147,7 +11147,7 @@ async function lookupCatastoAtPoint (view: any, wgs84: any): Promise<GiiCatastoL
 // ── Dati tecnici rilevati: stessa logica e stesso formato dello script Survey
 //    gii_dati_tecnici.js (reti attive e manufatti entro 2 m dal punto, distretti
 //    che contengono il punto, Settori da Codice_set, nomi da Distretti_irrigui_lordi). ──
-const GII_RETE_IRRIGUA_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Rete_irrigua_CBS/FeatureServer/9'
+const GII_RETE_IRRIGUA_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Rete_irrigua_CBSM/FeatureServer/9'
 const GII_MANUFATTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Manufatti_rete_irrigua_CBSM/FeatureServer/8'
 const GII_DISTRETTI_LORDI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/Distretti_irrigui_lordi/FeatureServer/108'
 const GII_DATI_TECNICI_BUFFER_M = 2

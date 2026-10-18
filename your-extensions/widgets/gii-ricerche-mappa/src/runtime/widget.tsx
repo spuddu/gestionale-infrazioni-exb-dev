@@ -6,6 +6,7 @@ import { JimuMapViewComponent, type JimuMapView } from 'jimu-arcgis'
 import type { IMConfig } from '../config'
 import { defaultConfig, type MapSearchConfig, type SearchFieldConfig } from '../config'
 import { buildIaAssignmentWhereClause } from '../../../_shared/gii-access/ia-assignment'
+import { buildReqPointSqlWhereClause, REQ_POINT_VIEW_FLAG_FIELDS } from '../../../_shared/gii-anteprime/req-point'
 
 type Props = AllWidgetProps<IMConfig>
 type Option = { value: string; label: string; raw: any }
@@ -32,6 +33,9 @@ const ARTICOLI_PRATICA = [
   { id: 'v_art37', label: 'Art. 37 - Uso sistemi di irrigazione incompatibili', whereClause: 'v_art37 = 1' },
   { id: 'v_art39', label: 'Art. 39 - Danni alle strutture irrigue', whereClause: 'v_art39 = 1' },
 ]
+// Nella combo solo gli articoli che richiedono un punto in mappa (stessa regola condivisa della
+// ricerca: art. 15 e gli articoli di REQ_POINT_VIEW_FLAG_FIELDS); gli altri non troverebbero nulla.
+const ARTICOLI_PRATICA_CON_PUNTO = ARTICOLI_PRATICA.filter(a => a.id === 'norma15' || REQ_POINT_VIEW_FLAG_FIELDS.includes(a.id))
 
 type TipoPratica = '' | 'rilevazione' | 'rapporto' | 'accertamento' | 'verbale'
 
@@ -40,10 +44,11 @@ type PraticaValues = {
   cfPiva: string
   tipoPratica: TipoPratica
   numeroPratica: string
+  annoPratica: string
   articolo: string
 }
 
-const PRATICA_EMPTY: PraticaValues = { nominativo: '', cfPiva: '', tipoPratica: '', numeroPratica: '', articolo: '' }
+const PRATICA_EMPTY: PraticaValues = { nominativo: '', cfPiva: '', tipoPratica: '', numeroPratica: '', annoPratica: '', articolo: '' }
 
 function sqlEscapePratica(v: string): string { return v.replace(/'/g, "''") }
 
@@ -73,38 +78,62 @@ function parseRilevazioneCode(raw: string): { oid: number | null; origine: numbe
   return { oid, origine, settore }
 }
 
-function buildNumeroPraticaClause(tipo: TipoPratica, raw: string): string | null {
-  const v = raw.trim()
-  if (!v) return null
+function buildNumeroPraticaClause(tipo: TipoPratica, rawNumero: string, rawAnno: string): string | null {
+  // Numero e anno: solo cifre, ricerca esatta (8 trova la 8, non la 80; l'anno ha 4 cifre).
+  const numero = String(rawNumero || '').trim()
+  const anno = String(rawAnno || '').trim()
+  if (!tipo || (!numero && !anno)) return null
+  if ((numero && !/^\d+$/.test(numero)) || (anno && !/^\d{4}$/.test(anno))) return '1=0'
+  const n = numero ? parseInt(numero, 10) : null
+  if (numero && !n) return '1=0'
+  const a = anno ? parseInt(anno, 10) : null
   if (tipo === 'rilevazione') {
-    // Il numero di rilevazione non contiene più il Settore (81-TR, 82-IT). Un eventuale
-    // suffisso digitato secondo il vecchio formato (81-TR-D1) viene ignorato: dopo un
-    // trasferimento di Settore non corrisponderebbe più alla pratica.
-    const { oid, origine } = parseRilevazioneCode(v)
-    if (!oid) return null
-    const parts = [`OBJECTID = ${oid}`]
-    if (origine !== null) parts.push(`origine_pratica = ${origine}`)
+    // Il numero della rilevazione è l'OBJECTID, unico qualunque sia l'origine (TR o IT).
+    // L'anno è quello della data di rilevazione, dal 1° gennaio al 31 dicembre ora italiana
+    // (le date sono in UTC: il 1° gennaio alle 00:00 in Italia è il 31 dicembre alle 23:00 UTC).
+    const parts: string[] = []
+    if (n) parts.push(`OBJECTID = ${n}`)
+    if (a) parts.push(`(data_rilevazione >= TIMESTAMP '${a - 1}-12-31 23:00:00' AND data_rilevazione < TIMESTAMP '${a}-12-31 23:00:00')`)
     return parts.join(' AND ')
   }
-  if (tipo === 'rapporto') { const n = /^R-/i.test(v) ? v : `R-${v}`; return `numero_rapporto_tecnico = '${sqlEscapePratica(n)}'` }
-  if (tipo === 'accertamento' || tipo === 'verbale') { const n = /^A-/i.test(v) ? v : `A-${v}`; return `accertamento_numero = '${sqlEscapePratica(n)}'` }
-  return null
+  // Rapporto tecnico R-<numero>/<anno>, atto di accertamento A-<numero>/<anno>: il prefisso lo aggiunge la ricerca.
+  const campo = tipo === 'rapporto' ? 'numero_rapporto_tecnico' : (tipo === 'accertamento' || tipo === 'verbale') ? 'accertamento_numero' : ''
+  const prefisso = tipo === 'rapporto' ? 'R-' : 'A-'
+  if (!campo) return null
+  if (n && a) return `${campo} = '${prefisso}${n}/${a}'`
+  if (n) return `${campo} LIKE '${prefisso}${n}/%'`
+  return `${campo} LIKE '${prefisso}%/${a}'`
 }
 
-function buildWherePratica(pv: PraticaValues): { where: string | null; hasUserCriteria: boolean } {
+function buildWherePratica(pv: PraticaValues): { where: string | null; whereSenzaPunto: string | null; hasUserCriteria: boolean } {
   const clauses: string[] = []
   const nomClause = buildNominativoClause(pv.nominativo)
   if (nomClause) clauses.push(nomClause)
   const cfClause = buildCfPivaClause(pv.cfPiva)
   if (cfClause) clauses.push(cfClause)
-  const numClause = buildNumeroPraticaClause(pv.tipoPratica, pv.numeroPratica)
+  const numClause = buildNumeroPraticaClause(pv.tipoPratica, pv.numeroPratica, pv.annoPratica)
   if (numClause) clauses.push(numClause)
   if (pv.articolo) { const art = ARTICOLI_PRATICA.find(a => a.id === pv.articolo); if (art) clauses.push(`(${art.whereClause})`) }
-  if (!clauses.length) return { where: null, hasUserCriteria: false }
-  // req_point non e' una fonte di verita' affidabile per le pratiche Survey: puo'
-  // essere vuoto/non aggiornato fino alla prima modifica dell'IT. La ricerca in mappa
-  // non deve quindi escludere una pratica sulla base del solo campo salvato.
-  return { where: clauses.join(' AND '), hasUserCriteria: true }
+  if (!clauses.length) return { where: null, whereSenzaPunto: null, hasUserCriteria: false }
+  const whereSenzaPunto = clauses.join(' AND ')
+  // Solo pratiche con un punto in mappa. Il campo salvato req_point non è affidabile per le
+  // pratiche Survey (può essere vuoto fino alla prima modifica dell'IT): il criterio è ricalcolato
+  // dalle violazioni, con la stessa regola condivisa usata dalla mappa (computeReqPoint).
+  clauses.push(buildReqPointSqlWhereClause())
+  return { where: clauses.join(' AND '), whereSenzaPunto, hasUserCriteria: true }
+}
+
+// Nome breve della pratica per il messaggio "senza punto in mappa": il numero del rapporto o
+// dell'atto quando la ricerca era per quel tipo, altrimenti la rilevazione (81-TR).
+function descriviPraticaSenzaPunto(attrs: any, tipo: TipoPratica, oidField: string): string {
+  const a = attrs || {}
+  const oid = a[oidField] ?? a.OBJECTID ?? a.objectid
+  const origine = Number(a.origine_pratica) === 2 ? 'IT' : 'TR'
+  const rapporto = txt(a.numero_rapporto_tecnico).trim()
+  const atto = txt(a.accertamento_numero).trim()
+  if (tipo === 'rapporto' && rapporto) return rapporto
+  if ((tipo === 'accertamento' || tipo === 'verbale') && atto) return atto
+  return oid != null ? `Rilevazione ${oid}-${origine}` : 'Pratica'
 }
 const COLLATOR = new Intl.Collator('it', { numeric: true, sensitivity: 'base' })
 
@@ -541,6 +570,9 @@ function findMapLayer(view: any, search: MapSearchConfig): any {
   return null
 }
 async function getConfiguredLayer(mapView: any, search: MapSearchConfig): Promise<any> {
+  // Opzione della ricerca: interroga il servizio senza il filtro della copia nella mappa
+  // (es. copie dei Manufatti filtrate per tipo: la ricerca trova tutti i manufatti).
+  if (search.ignoreMapFilter === true && search.layerUrl) return getLayer(search.layerUrl, search.layerLayerId)
   // Cerca prima il layer nella mappa per preservare istanze filtrate (Tutte/Attive/Dismesse)
   const mapLayer = findMapLayer(mapView, search)
   if (mapLayer) {
@@ -820,7 +852,7 @@ export default function Widget(props: Props) {
       } finally { if (!cancelled) setBusy(false) }
     })()
     return () => { cancelled = true }
-  }, [activeSearch?.id, activeSearch?.layerUrl, activeSearch?.layerTitle, activeSearch?.layerId, activeSearch?.layerLayerId, mapView, clearHighlight])
+  }, [activeSearch?.id, activeSearch?.layerUrl, activeSearch?.layerTitle, activeSearch?.layerId, activeSearch?.layerLayerId, activeSearch?.ignoreMapFilter, mapView, clearHighlight])
 
   const activeValues = values[activeSearch?.id || ''] || {}
   React.useEffect(() => {
@@ -897,6 +929,7 @@ export default function Widget(props: Props) {
     }
 
     let where = '1=1'
+    let whereSenzaPunto = ''
 
     if (isPratica) {
       const result = buildWherePratica(praticaValues)
@@ -905,6 +938,7 @@ export default function Widget(props: Props) {
       // se durante la ricostruzione del MapView si usa temporaneamente un FeatureLayer
       // creato dall'URL, la query non deve poter restituire pratiche fuori competenza.
       where = combineGiiMapVisibilityWhere(result.where!, buildRoleVisibilityWhereClause(readGiiUserForMapVisibility()))
+      whereSenzaPunto = combineGiiMapVisibilityWhere(result.whereSenzaPunto!, buildRoleVisibilityWhereClause(readGiiUserForMapVisibility()))
     } else {
     const invalidFields = missingConfiguredFields(layer, activeSearch)
     if (invalidFields.length) {
@@ -941,7 +975,32 @@ export default function Widget(props: Props) {
       if (mapView?.spatialReference) q.outSpatialReference = mapView.spatialReference
       const res = await layer.queryFeatures(q)
       const features: any[] = res?.features || []
-      if (!features.length) { setStatus({ kind: 'warn', text: 'Nessuna feature trovata per i criteri impostati.' }); return }
+      if (!features.length) {
+        // Ricerca di pratiche: se esistono pratiche con questi criteri ma senza punto in mappa
+        // (violazioni che non richiedono la localizzazione), lo si dice invece di "nessun risultato".
+        if (isPratica && whereSenzaPunto) {
+          try {
+            const oidField = txt(layer.objectIdField) || 'OBJECTID'
+            const qs = layer.createQuery()
+            qs.where = whereSenzaPunto
+            qs.outFields = [oidField, 'origine_pratica', 'numero_rapporto_tecnico', 'accertamento_numero']
+            qs.returnGeometry = false
+            qs.num = 2
+            const rs = await layer.queryFeatures(qs)
+            const senzaPunto: any[] = rs?.features || []
+            if (senzaPunto.length === 1) {
+              setStatus({ kind: 'warn', text: `${descriviPraticaSenzaPunto(senzaPunto[0]?.attributes, praticaValues.tipoPratica, oidField)}: esiste, ma senza punto in mappa` })
+              return
+            }
+            if (senzaPunto.length > 1) {
+              setStatus({ kind: 'warn', text: 'Pratiche trovate, ma senza punto in mappa' })
+              return
+            }
+          } catch {}
+        }
+        setStatus({ kind: 'warn', text: 'Nessuna feature trovata per i criteri impostati.' })
+        return
+      }
 
       // Numero esatto: se ha superato il limite, fai una queryCount separata
       let totalCount = features.length
@@ -1065,7 +1124,7 @@ export default function Widget(props: Props) {
                   <select className='filterSelect' style={{ appearance: 'none', WebkitAppearance: 'none', paddingRight: 28 }} value={praticaValues.articolo} disabled={busy || !layer}
                     onChange={e => setPraticaValues(prev => ({ ...prev, articolo: e.target.value }))}>
                     <option value=''>- Tutti -</option>
-                    {ARTICOLI_PRATICA.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+                    {ARTICOLI_PRATICA_CON_PUNTO.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
                   </select>
                   <span className='searchSelectChevron'>▾</span>
                 </div>
@@ -1074,7 +1133,7 @@ export default function Widget(props: Props) {
                 <label className='filterLabel'>Tipo pratica</label>
                 <div className='searchTypeWrap'>
                   <select className='filterSelect' style={{ appearance: 'none', WebkitAppearance: 'none', paddingRight: 28 }} value={praticaValues.tipoPratica} disabled={busy || !layer}
-                    onChange={e => setPraticaValues(prev => ({ ...prev, tipoPratica: e.target.value as TipoPratica, numeroPratica: '' }))}>
+                    onChange={e => setPraticaValues(prev => ({ ...prev, tipoPratica: e.target.value as TipoPratica, numeroPratica: '', annoPratica: '' }))}>
                     <option value=''>- Tutti -</option>
                     <option value='rilevazione'>Rilevazione</option>
                     <option value='rapporto'>Rapporto tecnico</option>
@@ -1083,11 +1142,17 @@ export default function Widget(props: Props) {
                   <span className='searchSelectChevron'>▾</span>
                 </div>
               </div>
-              <div className='fieldBlock' style={{ width: 160, flex: '0 1 160px' }}>
+              <div className='fieldBlock' style={{ width: 120, flex: '0 1 120px' }}>
                 <label className='filterLabel'>Numero pratica</label>
-                <input className='filterInput' type='text' value={praticaValues.numeroPratica} disabled={busy || !layer || !praticaValues.tipoPratica}
-                  placeholder={praticaValues.tipoPratica === 'rilevazione' ? 'Es. 411-IT' : praticaValues.tipoPratica === 'rapporto' ? 'Es. R-25/2026' : (praticaValues.tipoPratica === 'accertamento' || praticaValues.tipoPratica === 'verbale') ? 'Es. A-1/2026' : '— seleziona tipo —'}
-                  onChange={e => setPraticaValues(prev => ({ ...prev, numeroPratica: e.target.value }))} />
+                <input className='filterInput' type='text' inputMode='numeric' value={praticaValues.numeroPratica} disabled={busy || !layer || !praticaValues.tipoPratica}
+                  placeholder={!praticaValues.tipoPratica ? '— seleziona tipo —' : praticaValues.tipoPratica === 'rilevazione' ? 'Es. 81' : 'Es. 25'}
+                  onChange={e => { const raw = e.target.value; setPraticaValues(prev => ({ ...prev, numeroPratica: raw.replace(/\D+/g, '') })) }} />
+              </div>
+              <div className='fieldBlock' style={{ width: 90, flex: '0 1 90px' }}>
+                <label className='filterLabel'>Anno</label>
+                <input className='filterInput' type='text' inputMode='numeric' maxLength={4} value={praticaValues.annoPratica} disabled={busy || !layer || !praticaValues.tipoPratica}
+                  placeholder={praticaValues.tipoPratica ? 'Es. 2026' : ''}
+                  onChange={e => { const raw = e.target.value; setPraticaValues(prev => ({ ...prev, annoPratica: raw.replace(/\D+/g, '').slice(0, 4) })) }} />
               </div>
               <div className='fieldBlock' style={{ width: 200, flex: '0 1 200px' }}>
                 <label className='filterLabel'>Nominativo / Ragione sociale</label>

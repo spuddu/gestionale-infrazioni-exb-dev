@@ -3278,6 +3278,14 @@ function buildSyntheticCreationCycle (data: any, loggedCicli: CicloRecord[]): Ci
   )
   const areaRaw = firstNonEmptyAttr(data, ['area_cod', 'area', 'cod_area'])
   const settoreRaw = firstNonEmptyAttr(data, ['settore_cod', 'settore', 'cod_settore'])
+  // Rilevazione trasferita ad altro Settore: la pratica ha ormai il Settore di destinazione,
+  // mentre la rilevazione era stata trasmessa al CS del Settore originario, che è quello
+  // registrato nel primo ciclo del log (la prima azione del CS di partenza).
+  const trasferita = (loggedCicli || []).some(c => String(c?.evento_chiusura || '').trim().toUpperCase() === 'RILEVAZIONE_TRASFERITA_SETTORE')
+  const primoCicloLog = trasferita
+    ? [...(loggedCicli || [])].sort((x, y) => Number(x?.dt_apertura ?? x?.dt_chiusura ?? 0) - Number(y?.dt_apertura ?? y?.dt_chiusura ?? 0))[0]
+    : null
+  const settoreIniziale = String(primoCicloLog?.settore ?? '').trim()
 
   return {
     numero_ciclo_ruolo: 1,
@@ -3292,7 +3300,7 @@ function buildSyntheticCreationCycle (data: any, loggedCicli: CicloRecord[]): Ci
     utente_destinatario: '',
     note_chiusura: '',
     area: formatAreaIter(areaRaw),
-    settore: formatSettoreIter(settoreRaw),
+    settore: settoreIniziale || formatSettoreIter(settoreRaw),
     fase: origin,
     num_campi_modificati: 0,
     campi_modificati: '',
