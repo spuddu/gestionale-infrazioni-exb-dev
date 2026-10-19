@@ -1433,7 +1433,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         padding: `${Number(cfg.panelPaddingTop ?? defaultConfig.panelPaddingTop)}px ${Number(cfg.panelPaddingRight ?? defaultConfig.panelPaddingRight)}px ${Number(cfg.panelPaddingBottom ?? defaultConfig.panelPaddingBottom)}px ${Number(cfg.panelPaddingLeft ?? defaultConfig.panelPaddingLeft)}px`,
         boxShadow: '0 28px 90px rgba(0,0,0,0.30)'
       }}>
-        <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: activeTab === 'statistiche' ? 'auto' : 'hidden', overflowX: 'hidden', paddingRight: 2 }}>
+        {/* scrollbarGutter: lo spazio della barra di scorrimento è riservato in entrambe le schede,
+            così passando da Operativo a Statistiche il contenuto non si sposta a sinistra. */}
+        <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: activeTab === 'statistiche' ? 'auto' : 'hidden', overflowX: 'hidden', paddingRight: 2, scrollbarGutter: 'stable' } as any}>
           <GiiPageTitle
           showSubtitle={(cfg as any).showTitleSubtitle !== false}
           showDivider={(cfg as any).showTitleDivider !== false}
@@ -1453,7 +1455,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14, borderBottom: `1px solid ${cfg.cardBorder}`, flexWrap: 'wrap' }}>
             {[
-              { id: 'operativo' as DashboardTab, label: 'Operativo' },
+              { id: 'operativo' as DashboardTab, label: 'Stato operativo' },
               { id: 'statistiche' as DashboardTab, label: 'Statistiche' }
             ].map(tab => {
               const active = activeTab === tab.id
@@ -1482,12 +1484,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
           {activeTab === 'statistiche' ? (
             <React.Fragment>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 14, alignItems: 'start', marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 14, alignItems: 'center', minHeight: 40, marginBottom: 12 }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ color: cfg.accentColor, fontSize: 10.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1.6, marginBottom: 5 }}>Statistiche dinamiche</div>
-              <h2 style={{ margin: 0, color: cfg.textColor, fontSize: 26, lineHeight: 1.05, fontWeight: 900 }}>Cruscotto statistiche</h2>
-              <div style={{ color: cfg.mutedColor, fontSize: 13, marginTop: 7, maxWidth: 760, lineHeight: 1.42 }}>Quadro dinamico delle pratiche, dei Settori e delle tipologie di infrazione.</div>
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginTop: 11 }}>
+              {/* Come nella scheda Operativo: il titolo è solo nell'intestazione della pagina. */}
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
                 {lastLoad && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Aggiornato: {new Date(lastLoad).toLocaleString('it-IT')}</div>}
                 {cfg.showTechnicalInfo && views.length > 0 && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>{views.length > 1 ? 'Ambiti dati' : 'Ambito dati'}: {viewsLabel}</div>}
                 <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Record caricati: {records.length}</div>
@@ -1618,18 +1618,16 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             </React.Fragment>
           ) : (
             <React.Fragment>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, minHeight: 40, marginBottom: 12, flexWrap: 'wrap' }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ color: cfg.accentColor, fontSize: 10.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 5 }}>Quadro operativo</div>
-                  <h2 style={{ margin: 0, color: cfg.textColor, fontSize: 24, lineHeight: 1.08, fontWeight: 900 }}>{cfg.title || 'Cruscotto operativo'}</h2>
-                  <div style={{ color: cfg.mutedColor, fontSize: 13, marginTop: 7, maxWidth: 760, lineHeight: 1.42 }}>{cfg.subtitle || 'Sintesi delle attività, delle pratiche ferme e dell’avanzamento delle lavorazioni.'}</div>
-                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
+                  {/* Titolo e sottotitolo sono già nell'intestazione della pagina: qui solo i dati di aggiornamento. */}
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
                     {lastLoad && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Aggiornato: {new Date(lastLoad).toLocaleString('it-IT')}</div>}
                     {cfg.showTechnicalInfo && views.length > 0 && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>{views.length > 1 ? 'Ambiti dati' : 'Ambito dati'}: {viewsLabel}</div>}
                     <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Record caricati: {records.length}</div>
                   </div>
                 </div>
-                <button onClick={() => setNonce(n => n + 1)} style={{ border: `1px solid ${cfg.cardBorder}`, background: 'rgba(255,255,255,0.08)', color: cfg.textColor, borderRadius: 12, padding: '8px 12px', fontWeight: 800, cursor: 'pointer' }}>Aggiorna</button>
+                <button onClick={() => setNonce(n => n + 1)} style={{ border: `1px solid ${cfg.cardBorder}`, background: 'rgba(15,23,42,0.86)', color: cfg.textColor, borderRadius: 999, padding: '9px 13px', fontWeight: 900, cursor: 'pointer', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)' }}>Aggiorna</button>
               </div>
 
               {loading && <div style={{ padding: 14, marginBottom: 16, borderRadius: 14, background: 'rgba(255,255,255,0.08)', color: cfg.mutedColor }}>Caricamento dashboard...</div>}

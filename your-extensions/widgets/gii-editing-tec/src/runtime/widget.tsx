@@ -2358,9 +2358,19 @@ function RegolamentoArticleDetailsTi (props: { articleState: RegolamentoArticoli
           focusable='false'
           style={{ display: 'block' }}
         >
-          <path d='M12 4.4v15.8' stroke='#0b67c2' strokeWidth='1.6' strokeLinecap='round' strokeLinejoin='round' />
-          <path d='M12 4.4C9.2 2.8 5.8 2.3 2.6 3.2v15.9c3.3-.9 6.6-.4 9.4 1.2' stroke='#0b67c2' strokeWidth='1.6' strokeLinecap='round' strokeLinejoin='round' />
-          <path d='M12 4.4c2.8-1.6 6.2-2.1 9.4-1.2v15.9c-3.3-.9-6.6-.4-9.4 1.2' stroke='#0b67c2' strokeWidth='1.6' strokeLinecap='round' strokeLinejoin='round' />
+          {/* Bilancia con due gocce: stessa icona del Regolamento irriguo nella home (ingombro 21 su 24). */}
+          <g transform='translate(12 12) scale(1.1667) translate(-12 -12)' stroke='#0b67c2'>
+            <g strokeWidth='1.3714' strokeLinecap='round' strokeLinejoin='round'>
+              <circle cx='12' cy='4.8' r='1.2' />
+              <path d='M12,6v14.3' />
+              <path d='M8.3,20.4h7.3' />
+              <path d='M5.6,8.1h12.9' />
+            </g>
+            <g strokeWidth='0.9905' strokeMiterlimit='10'>
+              <path d='M5.8,17c1.1-.1,1.9-1,1.9-2.2s-.2-1.2-.5-1.7c-.5-1-1.3-1.8-1.7-2.6-.7,1.3-2.2,2.6-2.2,4.3s1,2.2,2.2,2.2.2,0,.2,0Z' />
+              <path d='M18.7,17c1.1-.1,1.9-1,1.9-2.2s-.2-1.2-.5-1.7c-.5-1-1.3-1.8-1.7-2.6-.7,1.3-2.2,2.6-2.2,4.3s1,2.2,2.2,2.2.2,0,.2,0Z' />
+            </g>
+          </g>
         </svg>
       </div>
       <div style={{ minWidth: 0 }}>

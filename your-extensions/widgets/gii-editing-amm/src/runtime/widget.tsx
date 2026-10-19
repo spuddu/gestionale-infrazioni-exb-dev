@@ -11364,6 +11364,7 @@ function articleDetailsByRole (role: string, articles: RegolamentoArticolo[], va
     <div style={{ display: 'grid', gap: 10 }}>
       {list.map(article => (
         <div key={`${role}-${article.codice_articolo}`} style={{ display: 'grid', gap: 4 }}>
+          <div style={{ color: c.title, fontSize: adminFieldFontSize(st), fontWeight: 800, lineHeight: 1.35 }}>{articleTitleLine(article)}</div>
           {article.testo_articolo && <div style={{ color: c.text, fontSize: adminFieldFontSize(st), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{article.testo_articolo}</div>}
           {(article.atto_regolamento || article.anno_riferimento) && <div style={{ color: c.meta, fontSize: adminLabelFontSize(st) }}>{[article.atto_regolamento, article.anno_riferimento ? `Anno ${article.anno_riferimento}` : ''].filter(Boolean).join(' · ')}</div>}
         </div>
@@ -11391,6 +11392,32 @@ function groupVociBySanzioneArticle (group: SanzioneConsultivaGroup, voci: Sanzi
 
 type NormToggleVariant = 'violata' | 'sanzionatoria'
 
+// Icona del Regolamento (bilancia con due gocce), come nel riquadro «Riferimento regolamento»
+// della scheda Violazione di gii-editing-tec.
+function NormaRegolamentoIcon (props: { color: string, border: string, background: string }) {
+  return (
+    <div
+      aria-hidden='true'
+      style={{ width: 54, height: 54, border: `1px solid ${props.border}`, borderRadius: 10, background: props.background, display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}
+    >
+      <svg width='30' height='34' viewBox='0 0 24 24' preserveAspectRatio='xMidYMid meet' fill='none' aria-hidden='true' focusable='false' style={{ display: 'block' }}>
+        <g transform='translate(12 12) scale(1.1667) translate(-12 -12)' stroke={props.color}>
+          <g strokeWidth='1.3714' strokeLinecap='round' strokeLinejoin='round'>
+            <circle cx='12' cy='4.8' r='1.2' />
+            <path d='M12,6v14.3' />
+            <path d='M8.3,20.4h7.3' />
+            <path d='M5.6,8.1h12.9' />
+          </g>
+          <g strokeWidth='0.9905' strokeMiterlimit='10'>
+            <path d='M5.8,17c1.1-.1,1.9-1,1.9-2.2s-.2-1.2-.5-1.7c-.5-1-1.3-1.8-1.7-2.6-.7,1.3-2.2,2.6-2.2,4.3s1,2.2,2.2,2.2.2,0,.2,0Z' />
+            <path d='M18.7,17c1.1-.1,1.9-1,1.9-2.2s-.2-1.2-.5-1.7c-.5-1-1.3-1.8-1.7-2.6-.7,1.3-2.2,2.6-2.2,4.3s1,2.2,2.2,2.2.2,0,.2,0Z' />
+          </g>
+        </g>
+      </svg>
+    </div>
+  )
+}
+
 function NormToggleBox (props: { title: string, variant: NormToggleVariant, children: any, amount?: string }) {
   const st = useAdminStyle()
   const [open, setOpen] = React.useState(false)
@@ -11414,6 +11441,19 @@ function NormToggleBox (props: { title: string, variant: NormToggleVariant, chil
         arrow: st.normSanzionatoriaArrowColor || '#b91c1c',
         body: st.normSanzionatoriaBodyBg || '#fffafa'
       }
+  // Contenuto aperto con lo stesso aspetto del riquadro «Riferimento regolamento» di gii-editing-tec:
+  // icona a sinistra, etichetta in maiuscolo, titolo e testo dell'articolo.
+  const contenuto = (
+    <div style={{ display: 'grid', gridTemplateColumns: '54px minmax(0, 1fr)', gap: 10, alignItems: 'start', minWidth: 0 }}>
+      <NormaRegolamentoIcon color={isViolata ? '#0b67c2' : palette.arrow} border={palette.border} background={palette.background} />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ color: isViolata ? '#0b5ca8' : palette.arrow, fontSize: adminFieldFontSize(st), fontWeight: 800, lineHeight: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>
+          Riferimento regolamento
+        </div>
+        {props.children}
+      </div>
+    </div>
+  )
 
   if (!isViolata) {
     return (
@@ -11443,7 +11483,7 @@ function NormToggleBox (props: { title: string, variant: NormToggleVariant, chil
         </button>
         {open && (
           <div style={{ padding: '8px 10px', borderTop: `${palette.borderWidth}px solid ${palette.border}`, background: palette.body }}>
-            {props.children}
+            {contenuto}
           </div>
         )}
       </div>
@@ -11478,7 +11518,7 @@ function NormToggleBox (props: { title: string, variant: NormToggleVariant, chil
       </button>
       {open && (
         <div style={{ padding: '8px 10px', borderTop: `1px solid ${palette.border}`, background: palette.body }}>
-          {props.children}
+          {contenuto}
         </div>
       )}
     </div>
@@ -11800,11 +11840,11 @@ function DettaglioImportiContent (props: { value: any, data?: any, fields?: Laye
                     <div style={{ color: st.formFieldColor || '#0f172a', fontSize: Number(st.formFieldFontSize ?? 15), fontWeight: 900, lineHeight: 1.35, padding: '1px 2px 0' }}>
                       {displayViolationTitle(normGroup)}
                     </div>
-                    <NormToggleBox variant='violata' title={violationNormTitle(normGroup)}>
+                    <NormToggleBox variant='violata' title='Norma violata'>
                       {articleDetailsByRole('Norma violata', normGroup.articoliViolati, 'violata')}
                     </NormToggleBox>
                     {groupVociBySanzioneArticle(normGroup, normGroup.voci).map(block => (
-                      <NormToggleBox key={`${normGroup.codiceCasistica}-${block.key}`} variant='sanzionatoria' title={`Norma sanzionatoria: ${articleListTitle(block.articles, block.fallback)}`}>
+                      <NormToggleBox key={`${normGroup.codiceCasistica}-${block.key}`} variant='sanzionatoria' title='Norma sanzionatoria'>
                         {articleDetailsByRole('Norma sanzionatoria', block.articles, 'sanzionatoria')}
                       </NormToggleBox>
                     ))}

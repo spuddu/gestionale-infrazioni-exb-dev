@@ -554,6 +554,7 @@ const ICON_OPTIONS = [
   {value:'dashboard',   label:'📊 Dashboard'},
   {value:'report',      label:'📄 Report'},
   {value:'utenti',      label:'👤 Utenti'},
+  {value:'rubrica',     label:'📒 Rubrica'},
   {value:'gruppo',      label:'👥 Gruppo'},
   {value:'prezzari',    label:'€ Prezzari'},
   {value:'impostazioni',label:'⚙️ Impostazioni'},
@@ -578,6 +579,8 @@ function inferCardIconValue(input: any): string {
   // Mantiene il setting coerente con il runtime: la card Regolamento usa
   // l'icona dedicata anche nelle configurazioni storiche che avevano "elenco".
   if (/regolamento/.test(text) && (!explicit || explicit === 'elenco')) return 'regolamento'
+  // La card Rubrica usa l'icona dedicata anche con il vecchio valore "utenti".
+  if (/rubrica/.test(text) && (!explicit || explicit === 'utenti')) return 'rubrica'
   // La card Guida operativa già autogenerata può avere ancora "nuova": nel setting
   // mostriamo e salviamo l'icona dedicata senza richiedere modifiche al config esistente.
   if (/guida\s+operativa|(^|[^a-z])guida([^a-z]|$)/.test(text) && (!explicit || explicit === 'nuova')) return 'guida'
