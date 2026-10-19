@@ -47,13 +47,9 @@ type DashboardTab = 'operativo' | 'statistiche'
 type ChartItem = { label: string; value: number }
 type TrendPoint = { label: string; value: number }
 
-type RecentSortKey = 'numeroRapporto' | 'comune' | 'fase' | 'lastUpdate'
 type SortDir = 'asc' | 'desc'
-type RecentSortRule = { key: RecentSortKey; dir: SortDir }
 type SettoreSortBy = 'label' | 'count'
 type InfrazioneSortBy = 'article' | 'count'
-
-const DEFAULT_RECENT_SORT_RULES: RecentSortRule[] = [{ key: 'lastUpdate', dir: 'desc' }]
 
 const SETTORE_FROM_CODE: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS', 10: 'D7' }
 
@@ -417,23 +413,12 @@ function getObjectId (d: any): string {
   return getFirst(d, ['OBJECTID', 'objectid', 'ObjectId', 'objectId', 'FID'], '—')
 }
 
+// Numero di rilevazione: solo l'OID (es. 83), come nel report; l'origine TR/IT è nella colonna Origine.
 function getNumeroRapporto (d: any): string {
-  const stored = getFirst(d, [
-    'cod_pratica', 'Cod_pratica', 'COD_PRATICA',
-    'numero_rapporto', 'Numero_rapporto', 'NUMERO_RAPPORTO',
-    'num_rapporto', 'Num_rapporto', 'NUM_RAPPORTO',
-    'n_rapporto', 'N_rapporto', 'N_RAPPORTO'
-  ], '')
-  if (stored) return stored
   const oid = getObjectId(d)
-  if (!oid || oid === '—') return '—'
-  const opRaw = d['origine_pratica'] ?? d['Origine_pratica'] ?? d['ORIGINE_PRATICA']
-  const op = String(opRaw ?? '').trim().toUpperCase()
-  let prefix = 'TR'
-  if (op === '2' || op === 'IT') prefix = 'IT'
-  else if (op === '1' || op === 'TR') prefix = 'TR'
-  return `${prefix}-${oid}`
+  return oid && oid !== '—' ? oid : '—'
 }
+
 
 function getComune (d: any): string {
   return getFirst(d, ['comune', 'Comune', 'COMUNE'], '—')
@@ -738,6 +723,37 @@ async function queryLayer (view: RuntimeDsView, where: string, pageSize: number)
 
 function EmptyState (props: { cfg: any; text?: string }) {
   return <div style={{ color: props.cfg.mutedColor, fontSize: 12.5, padding: '16px 0' }}>{props.text || 'Nessun dato disponibile.'}</div>
+}
+
+// Icona Esporta: la freccia esce dal vassoio (come in report, Gestione utenti, Parametri, Caricatore prezzari).
+function ExportActionIcon (props: { size?: number }): React.ReactElement {
+  const size = Number(props.size || 18)
+  return (
+    <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+      <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
+      <path d='M17 8l-5-5-5 5'/>
+      <path d='M12 3v12'/>
+    </svg>
+  )
+}
+
+function csvEscape (v: any): string {
+  const s = String(v ?? '')
+  if (/[;"\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`
+  return s
+}
+
+// Icona Aggiorna (frecce circolari), uguale a quella del report.
+function RefreshActionIcon (props: { size?: number }): React.ReactElement {
+  const size = Number(props.size || 18)
+  return (
+    <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+      <path d='M21 12a9 9 0 0 1-15.36 6.36L3 16'/>
+      <path d='M3 21v-5h5'/>
+      <path d='M3 12a9 9 0 0 1 15.36-6.36L21 8'/>
+      <path d='M21 3v5h-5'/>
+    </svg>
+  )
 }
 
 function CardShell (props: { cfg: any; title?: string; right?: React.ReactNode; children: React.ReactNode; minHeight?: number }) {
@@ -1140,10 +1156,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [error, setError] = React.useState<string>('')
   const [lastLoad, setLastLoad] = React.useState<number | null>(null)
   const [nonce, setNonce] = React.useState(0)
-  const [hoveredRecentRowId, setHoveredRecentRowId] = React.useState('')
-  const [selectedRecentRowId, setSelectedRecentRowId] = React.useState('')
-  const [recentPage, setRecentPage] = React.useState(1)
-  const [recentSortRules, setRecentSortRules] = React.useState<RecentSortRule[]>(DEFAULT_RECENT_SORT_RULES)
   const [periodFilter, setPeriodFilter] = React.useState<PeriodFilter>('all')
   const [activeTab, setActiveTab] = React.useState<DashboardTab>('operativo')
   const [selectedSettore, setSelectedSettore] = React.useState('')
@@ -1306,7 +1318,49 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     if (selectedInfrazione && !allInfrazioni.some(item => item.label === selectedInfrazione)) setSelectedInfrazione('')
   }, [allInfrazioni, selectedInfrazione])
 
+  // Ultimo aggiornamento fra le pratiche del perimetro (per la Sintesi operativa).
+  const lastTouchMs = React.useMemo(() => displayRecords.reduce((max, r) => Math.max(max, getLastTouchMs(r) || 0), 0), [displayRecords])
+
   const trend = React.useMemo(() => buildPeriodTrend(displayRecords, activeTab === 'statistiche' ? periodFilter : '365'), [displayRecords, activeTab, periodFilter])
+
+  // Esporta CSV delle statistiche visibili (dati aggregati, con periodo e filtri attivi). L'elenco delle pratiche si esporta dal Report.
+  const exportStatisticheCsv = () => {
+    const periodoLabel: Record<PeriodFilter, string> = { all: 'Tutto', '365': 'Ultimi 12 mesi', '90': 'Ultimi 90 giorni', '30': 'Ultimi 30 giorni' }
+    const rows: any[][] = [
+      ['Statistiche delle pratiche GII'],
+      ['Esportato il', new Date().toLocaleString('it-IT')],
+      ['Periodo', periodoLabel[periodFilter] || periodFilter],
+      ['Filtro Settore', selectedSettore || 'Nessuno'],
+      ['Filtro tipologia di infrazione', selectedInfrazione || 'Nessuno'],
+      [],
+      ['Indicatore', 'Pratiche'],
+      ['Pratiche analizzate', displayRecords.length]
+    ]
+    if (!(user?.isAdmin || user?.isWorkflowAdmin)) {
+      rows.push(['In attesa mia', attesaMia], ['Da prendere in carico', daPrendere], ['In attesa di altri', attesaAltri])
+    }
+    rows.push([`Ferme da più di ${Number(cfg.staleDays || 15)} giorni`, ferme], ['Fase sanzionatoria', sanz])
+    const sezione = (titolo: string, items: Array<{ label: string; value: number }>) => {
+      rows.push([], [titolo, 'Pratiche'])
+      for (const item of items) rows.push([item.label, item.value])
+    }
+    sezione('Settore', allSettori)
+    sezione('Tipologia di infrazione', allInfrazioni)
+    sezione('Fase', byFase)
+    sezione('Ruolo competente', byRole)
+    rows.push([], ['Periodo di rilevazione', 'Rilevazioni'])
+    for (const p of trend) rows.push([p.label, p.value])
+    const csv = rows.map(row => row.map(csvEscape).join(';')).join('\r\n')
+    const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `gii_statistiche_pratiche_${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
 
   const criticalRows = React.useMemo(() => {
     return displayRecords
@@ -1316,108 +1370,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       .slice(0, 6)
   }, [displayRecords, now, staleMs])
 
-  const recent = React.useMemo(() => {
-    const recentBase = [...displayRecords]
-      .map(r => ({ r, t: getLastTouchMs(r) || 0 }))
-      .sort((a, b) => b.t - a.t)
 
-    const getSortValue = (row: { r: DashRecord; t: number }, key: RecentSortKey): any => {
-      if (key === 'numeroRapporto') return getNumeroRapporto(row.r)
-      if (key === 'comune') return getComune(row.r)
-      if (key === 'fase') return faseLabel(getActiveRole(row.r))
-      if (key === 'lastUpdate') return row.t || 0
-      return ''
-    }
 
-    const rules = recentSortRules.length ? recentSortRules : DEFAULT_RECENT_SORT_RULES
-    return recentBase.sort((a, b) => {
-      for (const rule of rules) {
-        const dir = rule.dir === 'asc' ? 1 : -1
-        const av = getSortValue(a, rule.key)
-        const bv = getSortValue(b, rule.key)
-        const cmp = (typeof av === 'string' || typeof bv === 'string')
-          ? String(av || '').localeCompare(String(bv || ''), 'it', { numeric: true, sensitivity: 'base' })
-          : ((av || 0) - (bv || 0))
-        if (cmp !== 0) return cmp * dir
-      }
-      return (b.t || 0) - (a.t || 0)
-    })
-  }, [displayRecords, recentSortRules])
-
-  React.useEffect(() => {
-    if (!selectedRecentRowId) return
-    if (!recent.some(({ r }) => getObjectId(r) === selectedRecentRowId)) setSelectedRecentRowId('')
-  }, [recent, selectedRecentRowId])
-
-  React.useEffect(() => {
-    setRecentPage(1)
-  }, [displayRecords.length, recentSortRules, periodFilter, activeTab, selectedSettore, selectedInfrazione])
-
-  const recentRowsPerPage = Math.max(1, Number((cfg as any).tableRows || 25))
-  const recentPageCount = Math.max(1, Math.ceil(recent.length / recentRowsPerPage))
-  const safeRecentPage = Math.min(Math.max(1, recentPage), recentPageCount)
-  const recentPageRows = recent.slice((safeRecentPage - 1) * recentRowsPerPage, safeRecentPage * recentRowsPerPage)
-
-  React.useEffect(() => {
-    if (recentPage !== safeRecentPage) setRecentPage(safeRecentPage)
-  }, [recentPage, safeRecentPage])
-
-  const isDefaultRecentSort = recentSortRules.length === 1 && recentSortRules[0].key === 'lastUpdate' && recentSortRules[0].dir === 'desc'
-
-  const handleRecentSortHeaderClick = (key: RecentSortKey) => {
-    setRecentSortRules(current => {
-      const hasOnlyDefault = current.length === 1 && current[0].key === 'lastUpdate' && current[0].dir === 'desc'
-      const base = current.length ? current : DEFAULT_RECENT_SORT_RULES
-      const effectiveBase = hasOnlyDefault && key !== 'lastUpdate' ? [] : base
-      const index = effectiveBase.findIndex(rule => rule.key === key)
-
-      if (index >= 0) {
-        const activeRule = effectiveBase[index]
-
-        // L'ordinamento predefinito è già "Ultimo aggiornamento ▼".
-        // Se l'utente clicca per prima cosa quella intestazione, deve comunque vedere
-        // un cambio reale: passiamo quindi ad "Ultimo aggiornamento ▲" invece di
-        // rimuovere la regola e tornare visivamente allo stesso ordinamento.
-        if (hasOnlyDefault && key === 'lastUpdate' && activeRule.dir === 'desc') {
-          return [{ key: 'lastUpdate', dir: 'asc' }]
-        }
-
-        if (activeRule.dir === 'asc') {
-          const next = [...effectiveBase]
-          next[index] = { ...activeRule, dir: 'desc' }
-          return next
-        }
-
-        const next = effectiveBase.filter((_, i) => i !== index)
-        return next.length ? next : DEFAULT_RECENT_SORT_RULES
-      }
-
-      return [...effectiveBase, { key, dir: 'asc' }]
-    })
-  }
-
-  const recentTh = (label: string, key: RecentSortKey, align: 'left' | 'center' | 'right' = 'left') => {
-    const activeIndex = recentSortRules.findIndex(rule => rule.key === key)
-    const activeRule = activeIndex >= 0 ? recentSortRules[activeIndex] : null
-    const justify = align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start'
-    return (
-      <th
-        style={{ padding: '9px 7px', color: activeRule ? cfg.textColor : cfg.mutedColor, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.5, borderBottom: `1px solid ${cfg.cardBorder}`, cursor: 'pointer', whiteSpace: 'normal', lineHeight: 1.15, verticalAlign: 'bottom', textAlign: align, userSelect: 'none' }}
-        onClick={() => handleRecentSortHeaderClick(key)}
-        title='Ordina / aggiungi all’ordinamento multiplo'
-      >
-        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: justify, gap: 4, width: '100%', minWidth: 0 }}>
-          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-          {activeRule && (
-            <span aria-hidden='true' style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0, color: cfg.accentColor, fontSize: 10, fontWeight: 900, lineHeight: 1 }}>
-              <span style={{ display: 'inline-block', transform: activeRule.dir === 'asc' ? 'translateY(-1px)' : 'translateY(1px)' }}>{activeRule.dir === 'asc' ? '▲' : '▼'}</span>
-              <span style={{ minWidth: 12, height: 12, borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px', fontSize: 8.5, fontWeight: 900, background: cfg.accentColor, color: '#111827' }}>{activeIndex + 1}</span>
-            </span>
-          )}
-        </span>
-      </th>
-    )
-  }
 
   return (
     <div style={{ width: '100%', height: '100%', overflow: 'hidden', color: cfg.textColor, boxSizing: 'border-box', padding: `${Number(cfg.outerPaddingTop ?? defaultConfig.outerPaddingTop)}px ${Number(cfg.outerPaddingRight ?? defaultConfig.outerPaddingRight)}px ${Number(cfg.outerPaddingBottom ?? defaultConfig.outerPaddingBottom)}px ${Number(cfg.outerPaddingLeft ?? defaultConfig.outerPaddingLeft)}px` }}>
@@ -1434,8 +1388,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         boxShadow: '0 28px 90px rgba(0,0,0,0.30)'
       }}>
         {/* scrollbarGutter: lo spazio della barra di scorrimento è riservato in entrambe le schede,
-            così passando da Operativo a Statistiche il contenuto non si sposta a sinistra. */}
-        <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: activeTab === 'statistiche' ? 'auto' : 'hidden', overflowX: 'hidden', paddingRight: 2, scrollbarGutter: 'stable' } as any}>
+            così passando da Operativo a Statistiche il contenuto non si sposta a sinistra.
+            Anche Stato operativo scorre, se il contenuto supera l'altezza disponibile. */}
+        <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto', overflowX: 'hidden', paddingRight: 2, scrollbarGutter: 'stable' } as any}>
           <GiiPageTitle
           showSubtitle={(cfg as any).showTitleSubtitle !== false}
           showDivider={(cfg as any).showTitleDivider !== false}
@@ -1502,7 +1457,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                   style={{ border: `1px solid ${cfg.accentColor}`, background: 'rgba(56,189,248,0.16)', color: cfg.textColor, borderRadius: 999, padding: '9px 12px', fontWeight: 900, cursor: 'pointer' }}
                 >Azzera filtri</button>
               )}
-              <button onClick={() => setNonce(n => n + 1)} style={{ border: `1px solid ${cfg.cardBorder}`, background: 'rgba(15,23,42,0.86)', color: cfg.textColor, borderRadius: 999, padding: '9px 13px', fontWeight: 900, cursor: 'pointer', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)' }}>Aggiorna</button>
+              <button type='button' onClick={exportStatisticheCsv} disabled={displayRecords.length === 0} title='Esporta CSV delle statistiche' aria-label='Esporta CSV delle statistiche' style={{ width: 36, height: 36, padding: 0, boxSizing: 'border-box', border: `1px solid ${displayRecords.length ? cfg.accentColor : cfg.cardBorder}`, background: displayRecords.length ? cfg.accentColor : 'rgba(15,23,42,0.86)', color: displayRecords.length ? '#03111f' : cfg.mutedColor, borderRadius: 8, cursor: displayRecords.length ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><ExportActionIcon /></button>
+              <button type='button' onClick={() => setNonce(n => n + 1)} title='Aggiorna' aria-label='Aggiorna' style={{ width: 36, height: 36, padding: 0, boxSizing: 'border-box', border: `1px solid ${cfg.cardBorder}`, background: 'rgba(15,23,42,0.86)', color: cfg.textColor, borderRadius: 8, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)' }}><RefreshActionIcon /></button>
             </div>
           </div>
 
@@ -1603,7 +1559,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                   ['Fase più frequente', byFase[0]?.label || '—', byFase[0]?.value || 0],
                   ['Settore più presente', bySettore[0]?.label || '—', bySettore[0]?.value || 0],
                   ['Infrazione ricorrente', byInfrazione[0]?.label || '—', byInfrazione[0]?.value || 0],
-                  ['Ultimo aggiornamento', formatShortDateTime(recent[0]?.t || null), recent.length]
+                  ['Ultimo aggiornamento', formatShortDateTime(lastTouchMs || null), displayRecords.length]
                 ].map(([label, value, count]) => (
                   <div key={String(label)} style={{ border: `1px solid ${cfg.cardBorder}`, borderRadius: 12, padding: 12, background: 'rgba(2,6,23,0.22)' }}>
                     <div style={{ color: cfg.mutedColor, fontSize: 10.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1 }}>{label}</div>
@@ -1627,7 +1583,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Record caricati: {records.length}</div>
                   </div>
                 </div>
-                <button onClick={() => setNonce(n => n + 1)} style={{ border: `1px solid ${cfg.cardBorder}`, background: 'rgba(15,23,42,0.86)', color: cfg.textColor, borderRadius: 999, padding: '9px 13px', fontWeight: 900, cursor: 'pointer', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)' }}>Aggiorna</button>
+                <button type='button' onClick={() => setNonce(n => n + 1)} title='Aggiorna' aria-label='Aggiorna' style={{ width: 36, height: 36, padding: 0, boxSizing: 'border-box', border: `1px solid ${cfg.cardBorder}`, background: 'rgba(15,23,42,0.86)', color: cfg.textColor, borderRadius: 8, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)' }}><RefreshActionIcon /></button>
               </div>
 
               {loading && <div style={{ padding: 14, marginBottom: 16, borderRadius: 14, background: 'rgba(255,255,255,0.08)', color: cfg.mutedColor }}>Caricamento dashboard...</div>}
@@ -1655,92 +1611,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             </React.Fragment>
           )}
 
-        <section style={{ background: cfg.cardBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: Number(cfg.cardRadius ?? defaultConfig.cardRadius), padding: 12, minHeight: activeTab === 'statistiche' ? 320 : 0, flex: activeTab === 'statistiche' ? '0 0 auto' : '1 1 0', display: 'flex', flexDirection: 'column', boxShadow: '0 18px 54px rgba(0,0,0,0.20)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 8, flexShrink: 0 }}>
-            <h3 style={{ margin: 0, fontSize: 15, color: cfg.textColor }}>Pratiche aggiornate di recente</h3>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-              <div style={{ color: cfg.mutedColor, fontSize: 12 }}>Pagina {safeRecentPage} di {recentPageCount}</div>
-              <button
-                onClick={() => setRecentSortRules(DEFAULT_RECENT_SORT_RULES)}
-                disabled={isDefaultRecentSort}
-                title='Ripristina ordinamento predefinito'
-                style={{ width: 36, height: 36, border: `1px solid ${isDefaultRecentSort ? cfg.cardBorder : cfg.accentColor}`, background: isDefaultRecentSort ? 'rgba(255,255,255,0.04)' : cfg.accentColor, color: isDefaultRecentSort ? cfg.mutedColor : '#03111f', borderRadius: 8, padding: 0, fontSize: 17, fontWeight: 900, lineHeight: '34px', textAlign: 'center', cursor: isDefaultRecentSort ? 'not-allowed' : 'pointer', boxShadow: isDefaultRecentSort ? 'none' : '0 0 0 2px rgba(56,189,248,0.20)' }}
-              >↺</button>
-            </div>
-          </div>
-          <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed', flexShrink: 0 }}>
-              <colgroup>
-                <col style={{ width: '18%' }} />
-                <col style={{ width: '24%' }} />
-                <col style={{ width: '34%' }} />
-                <col style={{ width: '24%' }} />
-              </colgroup>
-              <thead style={{ background: cfg.cardBg }}>
-                <tr style={{ textAlign: 'left' }}>
-                  {recentTh('N. rapporto', 'numeroRapporto')}
-                  {recentTh('Comune', 'comune')}
-                  {recentTh('Fase', 'fase')}
-                  {recentTh('Ultimo aggiornamento', 'lastUpdate')}
-                </tr>
-              </thead>
-            </table>
-            <div style={{ overflowY: 'auto', overflowX: 'hidden', flex: '1 1 auto', minHeight: 0 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
-                <colgroup>
-                  <col style={{ width: '18%' }} />
-                  <col style={{ width: '24%' }} />
-                  <col style={{ width: '34%' }} />
-                  <col style={{ width: '24%' }} />
-                </colgroup>
-                <tbody>
-                  {recentPageRows.map(({ r, t }, i) => {
-                    const rapporto = getNumeroRapporto(r)
-                    const comune = getComune(r)
-                    const oid = getObjectId(r)
-                    const rowId = `${oid}-${(safeRecentPage - 1) * recentRowsPerPage + i}`
-                    const selected = selectedRecentRowId === oid
-                    const hovered = hoveredRecentRowId === oid
-                    const rowBg = selected ? 'rgba(56,189,248,0.16)' : hovered ? 'rgba(255,255,255,0.09)' : 'transparent'
-                    return (
-                      <tr
-                        key={rowId}
-                        tabIndex={0}
-                        role='button'
-                        aria-selected={selected}
-                        onClick={() => setSelectedRecentRowId(current => current === oid ? '' : oid)}
-                        onMouseEnter={() => setHoveredRecentRowId(oid)}
-                        onMouseLeave={() => setHoveredRecentRowId(current => current === oid ? '' : current)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            setSelectedRecentRowId(current => current === oid ? '' : oid)
-                          }
-                        }}
-                        style={{ borderBottom: `1px solid rgba(255,255,255,0.07)`, background: rowBg, boxShadow: selected ? `inset 3px 0 0 ${cfg.accentColor}` : 'none', cursor: 'pointer', outline: 'none', transition: 'background 120ms ease, box-shadow 120ms ease' }}
-                      >
-                        <td title={rapporto} style={{ padding: '8px 7px', color: cfg.textColor, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rapporto}</td>
-                        <td title={String(comune)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{String(comune)}</td>
-                        <td title={faseLabel(getActiveRole(r))} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{faseLabel(getActiveRole(r))}</td>
-                        <td title={t ? new Date(t).toLocaleString('it-IT') : '—'} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t ? new Date(t).toLocaleString('it-IT') : '—'}</td>
-                      </tr>
-                    )
-                  })}
-                  {recentPageRows.length === 0 && (
-                    <tr><td colSpan={4} style={{ padding: 14, color: cfg.mutedColor }}>Nessuna pratica disponibile.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap', flexShrink: 0 }}>
-            <div style={{ color: cfg.mutedColor, fontSize: 12 }}>Mostrate {recentPageRows.length} pratiche su {recent.length} risultati.</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button disabled={safeRecentPage <= 1} onClick={() => setRecentPage(p => Math.max(1, p - 1))} style={{ border: `1px solid ${cfg.cardBorder}`, background: 'rgba(255,255,255,0.08)', color: safeRecentPage <= 1 ? cfg.mutedColor : cfg.textColor, borderRadius: 10, padding: '7px 10px', fontWeight: 700, cursor: safeRecentPage <= 1 ? 'not-allowed' : 'pointer' }}>Indietro</button>
-              <button disabled={safeRecentPage >= recentPageCount} onClick={() => setRecentPage(p => Math.min(recentPageCount, p + 1))} style={{ border: `1px solid ${cfg.cardBorder}`, background: 'rgba(255,255,255,0.08)', color: safeRecentPage >= recentPageCount ? cfg.mutedColor : cfg.textColor, borderRadius: 10, padding: '7px 10px', fontWeight: 700, cursor: safeRecentPage >= recentPageCount ? 'not-allowed' : 'pointer' }}>Avanti</button>
-            </div>
-          </div>
-        </section>
         </div>
       </div>
     </div>

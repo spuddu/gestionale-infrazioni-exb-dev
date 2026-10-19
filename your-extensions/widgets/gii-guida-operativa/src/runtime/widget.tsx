@@ -211,7 +211,7 @@ function Arrow({ dir }: { dir: 'left' | 'right' }): React.ReactElement {
 export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElement {
   const cfg: any = props.config || {}
   const title = String(cfg.title || 'Guida operativa')
-  const subtitle = String(cfg.subtitle || "Procedure e riferimenti per l'utilizzo del Gestionale Infrazioni Irrigue")
+  const subtitle = String(cfg.subtitle || "Procedure e riferimenti per l'utilizzo del gestionale")
   const accent = String(cfg.accentColor || '#1F4E79')
   const titleColor = String(cfg.titleColor || '#1F4E79')
   const titleDividerColor = String(cfg.titleDividerColor || '#1F4E79')
@@ -813,7 +813,9 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
       } else if (b.type === 'lead') {
         nodes.push(<p key={`lead-${i}`} style={{ fontSize: contentLeadFontSize, lineHeight: 1.65, color: '#1f2937', margin: '3px 0 16px', fontWeight: 600 }}>{renderTextWithChapterLinks(b.text)}</p>)
       } else if (b.type === 'paragraph') {
-        nodes.push(<p key={`p-${i}`} style={{ fontSize: contentBodyFontSize, lineHeight: 1.62, margin: '8px 0', color: textColor, fontWeight: 500 }}>{renderTextWithChapterLinks(b.text)}</p>)
+        // Immagine piccola in linea con il testo (non ingrandibile), ad esempio il logo del gestionale.
+        const inlineImage = b.inlineFigure ? GUIDE_FIGURES[b.inlineFigure]?.images?.[0] : undefined
+        nodes.push(<p key={`p-${i}`} style={{ fontSize: contentBodyFontSize, lineHeight: 1.62, margin: '8px 0', color: textColor, fontWeight: 500, ...(inlineImage ? { display: 'flow-root' } : {}) }}>{inlineImage ? <img src={inlineImage.src} alt={inlineImage.alt} draggable={false} style={{ float: 'left', width: 48, height: 48, margin: '3px 12px 2px 0', borderRadius: 11 }} /> : null}{renderTextWithChapterLinks(b.text)}</p>)
       } else if (b.type === 'bullet') {
         nodes.push(<div key={`bullet-${i}`} style={{ display: 'grid', gridTemplateColumns: '12px minmax(0,1fr)', gap: 8, margin: '6px 0', fontSize: contentBodyFontSize, lineHeight: 1.58, color: textColor, fontWeight: 500 }}><span style={{ color: accent, fontWeight: 900 }}>•</span><span>{renderTextWithChapterLinks(b.text)}</span></div>)
       } else if (b.type === 'figure') {

@@ -108,9 +108,9 @@ const exactHelp: Record<string, GuideStepHelp> = {
     ],
     figure: 'Figura – Mappa del gestionale'
   },
-  'Aprire Dashboard e restare su Quadro operativo per verificare il carico corrente.': {
+  'Aprire Dashboard e restare su Stato operativo per verificare il carico corrente.': {
     paragraphs: [
-      'Aprire Dashboard dalla Home o dal navigatore laterale. All’apertura viene mostrata la sezione Operativo, che riepiloga il carico corrente e separa le pratiche In attesa mia da quelle In attesa di altri.',
+      'Aprire Dashboard dalla Home o dal navigatore laterale. All’apertura viene mostrata la vista Stato operativo, che riepiloga il carico corrente e separa le pratiche In attesa mia da quelle In attesa di altri.',
       'Nella stessa schermata sono disponibili gli indicatori sulle pratiche ferme oltre la soglia e sulla fase sanzionatoria, oltre alle ripartizioni per fase e ruolo competente.'
     ],
     figure: 'Figura – Dashboard operativa'
@@ -163,6 +163,40 @@ const exactHelp: Record<string, GuideStepHelp> = {
       'Impostare la Modalità di pagamento, selezionare il Tipo di notifica e indicare le Spese di notifica. Le spese concorrono al totale da pagare e devono essere valorizzate anche quando sono pari a zero.'
     ],
     figure: 'Figura – Notifica e dati di pagamento'
+  },
+  'Aprire le Azioni e scegliere l’azione “… non competente”.': {
+    paragraphs: [
+      'Con la pratica selezionata aprire Gestisci istruttoria nell’area Azioni. L’azione riporta il nome del Settore della pratica, ad esempio “Settore Distretto 2 Serramanna non competente”.',
+      'Se l’azione non compare, la rilevazione non è segnalabile: è stata creata da un Istruttore tecnico, ha già il numero del rapporto tecnico oppure nel punto il Tecnico rilevatore non ha dovuto scegliere fra più Settori.'
+    ]
+  },
+  'Selezionare il Settore ritenuto competente.': {
+    paragraphs: [
+      'Nel pannello scegliere il Settore in Settore ritenuto competente. L’elenco propone i soli Settori della stessa Area fra cui il Tecnico rilevatore ha dovuto scegliere; se il Settore è uno solo è già selezionato.'
+    ]
+  },
+  'Inserire la Motivazione e confermare.': {
+    paragraphs: [
+      'La Motivazione è obbligatoria: indicare perché la rilevazione è di competenza del Settore indicato, ad esempio a quale distretto, tratto di rete o manufatto si riferisce la violazione.',
+      'Prima di confermare leggere l’avviso: se il Capo Settore trasferirà la rilevazione, i dati inseriti nell’istruttoria andranno persi e saranno ripristinati i valori arrivati dal Tecnico rilevatore.'
+    ]
+  },
+  'Valutare la segnalazione: Settore indicato, motivazione e, se utile, posizione del punto nella scheda Mappa del Dettaglio pratica.': {
+    paragraphs: [
+      'Aprendo Gestisci istruttoria, in testa al pannello sono riportati il Settore indicato dall’Istruttore tecnico e la sua motivazione.',
+      'Per verificare la posizione aprire la scheda Mappa nel pannello Dettaglio pratica selezionata. In questo caso le azioni disponibili sono soltanto il trasferimento al Settore indicato e il rimando all’Istruttore tecnico.'
+    ]
+  },
+  'Se la segnalazione è fondata, scegliere “Trasferisci al Settore …”, inserire eventuali Ulteriori annotazioni e confermare.': {
+    paragraphs: [
+      'In Gestisci istruttoria scegliere l’azione Trasferisci, che riporta il nome del Settore indicato dall’Istruttore tecnico. Le Ulteriori annotazioni sono facoltative.',
+      'Prima di confermare leggere l’avviso: con il trasferimento i dati inseriti nell’istruttoria vanno persi e sono ripristinati i valori arrivati dal Tecnico rilevatore. La rilevazione passa, da prendere in carico, al Capo Settore del Settore indicato.'
+    ]
+  },
+  'Se la segnalazione non è fondata, rimandare la pratica all’Istruttore tecnico indicando la motivazione.': {
+    paragraphs: [
+      'In Gestisci istruttoria scegliere il rimando all’Istruttore tecnico e indicare perché la rilevazione resta di competenza del Settore. L’Istruttore tecnico riprende la pratica e prosegue l’istruttoria.'
+    ]
   }
 }
 
@@ -553,9 +587,9 @@ function getReviewedStepHelp(text: string, sectionTitle = '', chapterTitle = '')
         'Se i criteri non producono il risultato atteso, ridurli o azzerarli e ripetere la ricerca.'
       ] }
     }
-    if (section.includes('cercare una pratica sulla mappa') && (lower.startsWith('usare cerca.') || lower === 'eseguire la ricerca delle pratiche.')) {
+    if (section.includes('cercare una pratica sulla mappa') && (lower.startsWith('usare cerca.') || lower === 'eseguire la ricerca delle pratiche.' || lower === 'eseguire la ricerca con cerca.')) {
       return { paragraphs: [
-        'Dopo avere impostato almeno un criterio, utilizzare Cerca. Se si usa Numero pratica, verificare di avere selezionato anche il Tipo pratica corretto: Rilevazione, Rapporto tecnico oppure Atto di accertamento.',
+        'Dopo avere impostato i criteri, utilizzare Cerca. Se si usa Numero pratica, verificare di avere selezionato anche il Tipo pratica corretto: Rilevazione, Rapporto tecnico oppure Atto di accertamento.',
         'L’elenco e la mappa mostrano soltanto le pratiche che il profilo corrente è autorizzato a vedere. Controllare il conteggio dei risultati e l’eventuale avviso che segnala la visualizzazione dei soli primi elementi.'
       ] }
     }
@@ -1285,7 +1319,7 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
     if (lower.startsWith('controllare in attesa mia')) {
       return {
         paragraphs: [
-          'Nella sezione Operativo della Dashboard utilizzare i riquadri In attesa mia e Ferme oltre 15 giorni per individuare il carico che richiede attenzione. I conteggi riguardano le pratiche visibili al ruolo corrente.',
+          'Nella vista Stato operativo della Dashboard utilizzare i riquadri In attesa mia e Ferme oltre 15 giorni per individuare il carico che richiede attenzione. I conteggi riguardano le pratiche visibili al ruolo corrente.',
           'La Dashboard serve a individuare le priorità; per aprire e lavorare la singola pratica tornare poi all’Elenco pratiche.'
         ],
         figure: 'Figura – Dashboard operativa'
@@ -1299,11 +1333,12 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
         ]
       }
     }
-    if (lower.startsWith('usare esporta csv')) {
+    if (lower.startsWith('usare esporta csv') || lower.startsWith('usare il pulsante esporta csv')) {
       return {
         paragraphs: [
           'Dopo avere impostato i filtri desiderati utilizzare Esporta CSV. Il file contiene le righe mostrate nel Report con i filtri correnti, non l’intero archivio indistintamente.',
-          'Il separatore utilizzato è il punto e virgola, così il file può essere aperto nei comuni strumenti di foglio elettronico mantenendo separate le colonne.'
+          'Il separatore utilizzato è il punto e virgola, così il file può essere aperto nei comuni strumenti di foglio elettronico mantenendo separate le colonne.',
+          'Il pulsante è riconoscibile dall’icona con la freccia che esce dal vassoio; passando il mouse sopra compare la scritta Esporta CSV.'
         ]
       }
     }
@@ -2056,26 +2091,26 @@ export function getGuideStepHelp(text: string, sectionTitle = '', chapterTitle =
         ]
       }
     }
-    if (lower.startsWith('impostare almeno un criterio tra articolo')) {
+    if (lower.startsWith('impostare almeno un criterio tra articolo') || lower.startsWith('impostare i criteri desiderati tra articolo')) {
       return {
         paragraphs: [
-          'Nella sezione Infrazioni compilare almeno uno dei criteri disponibili: Articolo violato, Tipo pratica, Numero pratica, Nominativo/Ragione sociale oppure CF/P. IVA.',
-          'I criteri possono essere combinati per restringere la ricerca. Se si usa Numero pratica, impostare anche il Tipo pratica corretto.'
+          'Nella sezione Infrazioni compilare i criteri che interessano: Articolo violato, Tipo pratica, Numero pratica, Anno, Nominativo / Ragione sociale oppure CF / P. IVA.',
+          'I criteri possono essere combinati per restringere la ricerca. Numero pratica e Anno si attivano dopo avere scelto il Tipo pratica. Lasciando Tipo pratica su Tutti senza altri criteri vengono cercate tutte le pratiche visibili al proprio profilo.'
         ]
       }
     }
-    if (lower.startsWith('se si utilizza numero pratica')) {
+    if (lower.startsWith('se si utilizza numero pratica') || lower.startsWith('per cercare una pratica per numero')) {
       return {
         paragraphs: [
-          'Aprire Tipo pratica e scegliere il riferimento che si sta cercando: Rilevazione, Rapporto tecnico oppure Atto di accertamento. Inserire poi il relativo numero nel campo Numero pratica.',
-          'La combinazione evita che numerazioni appartenenti a tipologie diverse producano risultati ambigui.'
+          'Aprire Tipo pratica e scegliere il riferimento che si sta cercando: Rilevazione, Rapporto tecnico oppure Atto di accertamento. Inserire poi nel campo Numero pratica il solo numero, senza lettere né anno: ad esempio 25 per il rapporto tecnico R-25/2026.',
+          'La ricerca per numero è esatta. Se lo stesso numero esiste in anni diversi, indicare anche l’Anno per individuare la pratica.'
         ]
       }
     }
-    if (lower.startsWith('consultare il conteggio e le pratiche visualizzate')) {
+    if (lower.startsWith('consultare il conteggio e le pratiche visualizzate') || lower.startsWith('leggere il messaggio sotto i campi')) {
       return {
         paragraphs: [
-          'Dopo la ricerca controllare il numero di risultati e l’elenco delle pratiche visualizzate. Se il gestionale segnala che mostra soltanto i primi elementi, aggiungere uno o più criteri per restringere il risultato.',
+          'Dopo la ricerca leggere il messaggio sotto i campi. Indica quante pratiche sono state trovate; se alcune non compaiono in mappa, spiega che le loro violazioni non prevedono la geolocalizzazione. Se il messaggio indica che sono visualizzate soltanto le prime pratiche, aggiungere uno o più criteri per restringere il risultato.',
           'Selezionare il risultato di interesse per localizzarlo sulla mappa.'
         ]
       }

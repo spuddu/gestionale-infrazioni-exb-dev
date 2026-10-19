@@ -82,7 +82,13 @@ function buildNumeroPraticaClause(tipo: TipoPratica, rawNumero: string, rawAnno:
   // Numero e anno: solo cifre, ricerca esatta (8 trova la 8, non la 80; l'anno ha 4 cifre).
   const numero = String(rawNumero || '').trim()
   const anno = String(rawAnno || '').trim()
-  if (!tipo || (!numero && !anno)) return null
+  if (!tipo) return null
+  // Solo il tipo, senza numero né anno: tutte le pratiche di quel tipo (le rilevazioni sono tutte).
+  if (!numero && !anno) {
+    if (tipo === 'rapporto') return `(numero_rapporto_tecnico IS NOT NULL AND numero_rapporto_tecnico <> '')`
+    if (tipo === 'accertamento' || tipo === 'verbale') return `(accertamento_numero IS NOT NULL AND accertamento_numero <> '')`
+    return null
+  }
   if ((numero && !/^\d+$/.test(numero)) || (anno && !/^\d{4}$/.test(anno))) return '1=0'
   const n = numero ? parseInt(numero, 10) : null
   if (numero && !n) return '1=0'
@@ -114,8 +120,8 @@ function buildWherePratica(pv: PraticaValues): { where: string | null; whereSenz
   const numClause = buildNumeroPraticaClause(pv.tipoPratica, pv.numeroPratica, pv.annoPratica)
   if (numClause) clauses.push(numClause)
   if (pv.articolo) { const art = ARTICOLI_PRATICA.find(a => a.id === pv.articolo); if (art) clauses.push(`(${art.whereClause})`) }
-  if (!clauses.length) return { where: null, whereSenzaPunto: null, hasUserCriteria: false }
-  const whereSenzaPunto = clauses.join(' AND ')
+  // Nessun criterio (Tipo pratica «Tutti» e campi vuoti): tutte le pratiche del profilo con un punto in mappa.
+  const whereSenzaPunto = clauses.length ? clauses.join(' AND ') : '1=1'
   // Solo pratiche con un punto in mappa. Il campo salvato req_point non è affidabile per le
   // pratiche Survey (può essere vuoto fino alla prima modifica dell'IT): il criterio è ricalcolato
   // dalle violazioni, con la stessa regola condivisa usata dalla mappa (computeReqPoint).
@@ -123,17 +129,10 @@ function buildWherePratica(pv: PraticaValues): { where: string | null; whereSenz
   return { where: clauses.join(' AND '), whereSenzaPunto, hasUserCriteria: true }
 }
 
-// Nome breve della pratica per il messaggio "senza punto in mappa": il numero del rapporto o
-// dell'atto quando la ricerca era per quel tipo, altrimenti la rilevazione (81-TR).
-function descriviPraticaSenzaPunto(attrs: any, tipo: TipoPratica, oidField: string): string {
-  const a = attrs || {}
-  const oid = a[oidField] ?? a.OBJECTID ?? a.objectid
-  const origine = Number(a.origine_pratica) === 2 ? 'IT' : 'TR'
-  const rapporto = txt(a.numero_rapporto_tecnico).trim()
-  const atto = txt(a.accertamento_numero).trim()
-  if (tipo === 'rapporto' && rapporto) return rapporto
-  if ((tipo === 'accertamento' || tipo === 'verbale') && atto) return atto
-  return oid != null ? `Rilevazione ${oid}-${origine}` : 'Pratica'
+// «1 pratica» / «3 pratiche» (o elemento/elementi per le altre ricerche).
+function contaElementi(n: number, isPratica: boolean): string {
+  const [uno, molti] = isPratica ? ['pratica', 'pratiche'] : ['elemento', 'elementi']
+  return n === 1 ? `1 ${uno}` : `${n.toLocaleString('it-IT')} ${molti}`
 }
 const COLLATOR = new Intl.Collator('it', { numeric: true, sensitivity: 'base' })
 
@@ -952,12 +951,12 @@ export default function Widget(props: Props) {
     }
     const missing = validFields.filter(f => f.required && !txt(activeValues[f.id]).trim())
     if (missing.length) {
-      setStatus({ kind: 'warn', text: `Compilare i campi obbligatori: ${missing.map(f => f.label || f.fieldName).join(', ')}.` })
+      setStatus({ kind: 'warn', text: `Compila i campi obbligatori: ${missing.map(f => f.label || f.fieldName).join(', ')}.` })
       return
     }
       const hasAny = validFields.some(f => txt(activeValues[f.id]).trim())
       if (!hasAny) {
-        setStatus({ kind: 'warn', text: 'Impostare almeno un criterio di ricerca.' })
+        setStatus({ kind: 'warn', text: 'Inserisci almeno un criterio di ricerca.' })
         return
       }
       where = buildWhere(layer, validFields, activeValues)
@@ -965,7 +964,7 @@ export default function Widget(props: Props) {
 
     try {
       setBusy(true)
-      setStatus({ kind: 'loading', text: 'Ricerca feature...' })
+      setStatus({ kind: 'loading', text: 'Ricerca in corso…' })
       clearHighlight()
       const q = layer.createQuery()
       q.where = where
@@ -980,25 +979,20 @@ export default function Widget(props: Props) {
         // (violazioni che non richiedono la localizzazione), lo si dice invece di "nessun risultato".
         if (isPratica && whereSenzaPunto) {
           try {
-            const oidField = txt(layer.objectIdField) || 'OBJECTID'
+            // Come per i risultati in mappa, si indica quante pratiche sono state trovate, non quali.
             const qs = layer.createQuery()
             qs.where = whereSenzaPunto
-            qs.outFields = [oidField, 'origine_pratica', 'numero_rapporto_tecnico', 'accertamento_numero']
             qs.returnGeometry = false
-            qs.num = 2
-            const rs = await layer.queryFeatures(qs)
-            const senzaPunto: any[] = rs?.features || []
-            if (senzaPunto.length === 1) {
-              setStatus({ kind: 'warn', text: `${descriviPraticaSenzaPunto(senzaPunto[0]?.attributes, praticaValues.tipoPratica, oidField)}: esiste, ma senza punto in mappa` })
-              return
-            }
-            if (senzaPunto.length > 1) {
-              setStatus({ kind: 'warn', text: 'Pratiche trovate, ma senza punto in mappa' })
+            const nSenzaPunto = Number(await layer.queryFeatureCount(qs)) || 0
+            if (nSenzaPunto > 0) {
+              setStatus({ kind: 'warn', text: nSenzaPunto === 1
+                ? '1 pratica trovata, non visualizzata in mappa perché la sua violazione non prevede la geolocalizzazione.'
+                : `${contaElementi(nSenzaPunto, true)} trovate, nessuna visualizzata in mappa perché le loro violazioni non prevedono la geolocalizzazione.` })
               return
             }
           } catch {}
         }
-        setStatus({ kind: 'warn', text: 'Nessuna feature trovata per i criteri impostati.' })
+        setStatus({ kind: 'warn', text: isPratica ? 'Nessuna pratica trovata con i criteri impostati.' : 'Nessun elemento trovato con i criteri impostati.' })
         return
       }
 
@@ -1038,10 +1032,40 @@ export default function Widget(props: Props) {
       }
       const azioni: string[] = []
       const exceeded = Number(res?.exceededTransferLimit) || features.length < totalCount
-      const countText = totalCount === 1 ? '1 risultato trovato' : `${formatResultCount(totalCount)} risultati trovati${exceeded ? ` (visualizzati i primi ${formatResultCount(features.length)})` : ''}`
+      // Ricerca di pratiche: il conteggio comprende anche quelle senza punto in mappa, indicate a parte,
+      // così il messaggio è coerente con il caso in cui nessuna pratica trovata ha il punto.
+      let senzaPunto = 0
+      if (isPratica && whereSenzaPunto) {
+        try {
+          const qs = layer.createQuery()
+          qs.where = whereSenzaPunto
+          qs.returnGeometry = false
+          senzaPunto = Math.max(0, (Number(await layer.queryFeatureCount(qs)) || 0) - totalCount)
+        } catch { senzaPunto = 0 }
+      }
+      const totaleTrovate = totalCount + senzaPunto
+      // Messaggi: quante pratiche (o elementi) sono state trovate; se alcune non sono in mappa, si spiega perché.
+      const trovati = isPratica ? (totaleTrovate === 1 ? 'trovata' : 'trovate') : (totaleTrovate === 1 ? 'trovato' : 'trovati')
+      const limite = exceeded ? ` (visualizzat${isPratica ? 'e le prime' : 'i i primi'} ${formatResultCount(features.length)})` : ''
+      let countText = ''
+      if (isPratica && senzaPunto > 0) {
+        const conPuntoText = exceeded
+          ? `${formatResultCount(totalCount)} in mappa perché le loro violazioni prevedono la geolocalizzazione${limite}`
+          : totalCount === 1
+            ? '1 visualizzata in mappa perché la sua violazione prevede la geolocalizzazione'
+            : `${formatResultCount(totalCount)} visualizzate in mappa perché le loro violazioni prevedono la geolocalizzazione`
+        const senzaPuntoText = senzaPunto === 1
+          ? '1 non visualizzata perché la sua violazione non la prevede'
+          : `${formatResultCount(senzaPunto)} non visualizzate perché le loro violazioni non la prevedono`
+        countText = `${contaElementi(totaleTrovate, true)} ${trovati}: ${conPuntoText}, ${senzaPuntoText}.`
+      } else if (isPratica) {
+        countText = `${contaElementi(totalCount, true)} ${trovati}${limite}.`
+      } else {
+        countText = `${contaElementi(totalCount, false)} ${trovati}${limite}.`
+      }
       setStatus({ kind: 'ok', text: countText })
     } catch (e: any) {
-      setStatus({ kind: 'err', text: `Errore ricerca: ${e?.message || String(e)}` })
+      setStatus({ kind: 'err', text: `La ricerca non è riuscita: ${e?.message || String(e)}` })
     } finally { setBusy(false) }
   }, [layer, activeSearch, activeValues, praticaValues, isPratica, mapView, maxResultFeatures, evidenziaRisultati, zoomAllaRicerca, zoomScale, clearHighlight, cfg.pointColor, cfg.pointTransparency, cfg.pointSize, cfg.pointOutlineColor, cfg.pointOutlineWidth, cfg.polygonFillColor, cfg.polygonFillTransparency, cfg.polygonOutlineColor, cfg.polygonOutlineWidth])
 
@@ -1059,6 +1083,9 @@ export default function Widget(props: Props) {
     radius: num(cfg.borderRadius, 8, 0, 32),
     ph: num(cfg.paddingH, 8, 0, 40),
     pv: num(cfg.paddingV, 6, 0, 40),
+    pt: num(cfg.paddingTop, 2, 0, 40),
+    gap: num(cfg.rowGap, 4, 0, 40),
+    pb: num(cfg.paddingBottom, 4, 0, 40),
     searchLabel: txt(cfg.searchLabel) || 'Tipo ricerca',
     fh: num(cfg.fieldHeight, 28, 20, 48)
   }
@@ -1071,7 +1098,7 @@ export default function Widget(props: Props) {
     .tabBar { display: flex; gap: 6px; padding: ${c.pv}px ${c.ph}px; border-bottom: 1px solid ${c.border}; background: ${c.bg}; flex-wrap: wrap; }
     .tabBtn { border: 1px solid rgba(47,111,237,0.22); background: rgba(47,111,237,0.06); color: ${c.label}; border-radius: 999px; min-height: 26px; padding: 0 11px; font-size: 12px; font-weight: 800; cursor: pointer; }
     .tabBtnActive { background: ${c.btnPrimary}; color: ${c.btnPrimaryText}; border-color: ${c.btnPrimary}; }
-    .row1 { display: flex; align-items: flex-end; gap: 6px; padding: ${c.pv}px ${c.ph}px; flex-wrap: wrap; background: ${c.bg}; }
+    .row1 { display: flex; align-items: flex-end; gap: 6px; padding: ${c.pt}px ${c.ph}px 0; flex-wrap: wrap; background: ${c.bg}; }
     .actionBlock { flex: 1; min-width: 0; }
     .actionInline { display: flex; align-items: center; gap: 6px; height: ${c.fh}px; }
     .searchTypeBlock { min-width: 180px; }
@@ -1086,9 +1113,10 @@ export default function Widget(props: Props) {
     .btn { height: ${c.fh}px; border: 0; border-radius: ${fr}px; padding: 0 12px; font-size: 12px; font-weight: 900; cursor: pointer; white-space: nowrap; }
     .btnPrimary { background: ${c.btnPrimary}; color: ${c.btnPrimaryText}; }
     .btnGhost { background: ${c.btnGhost}; color: ${c.btnGhostText}; border: 1px solid ${c.fieldBorder}; }
-    .status { flex: 1; min-width: 0; border-radius: ${fr}px; height: ${c.fh}px; padding: 0 8px; font-size: ${Math.max(10, c.fh * 0.4)}px; line-height: ${c.fh}px; border: 1px solid rgba(0,0,0,0.10); box-sizing: border-box; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .status { flex: 1; min-width: 0; border-radius: ${fr}px; min-height: ${c.fh}px; padding: ${Math.max(2, Math.round((c.fh - Math.max(10, c.fh * 0.4) * 1.35) / 2))}px 8px; font-size: ${Math.max(10, c.fh * 0.4)}px; line-height: 1.35; border: 1px solid rgba(0,0,0,0.10); box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; }
     .stIdle { background: rgba(0,0,0,0.04); color: #4b5563; } .stLoading { background: rgba(47,111,237,0.08); color: #1d4ed8; } .stOk { background: rgba(5,150,105,0.09); color: #047857; } .stWarn { background: rgba(245,158,11,0.12); color: #92400e; } .stErr { background: rgba(220,38,38,0.10); color: #991b1b; }
-    .praticaRow { display: flex; align-items: flex-end; gap: 6px; padding: ${c.pv}px ${c.ph}px 0; flex-wrap: wrap; background: ${c.bg}; }
+    .praticaRow { display: flex; align-items: flex-end; gap: 6px; padding: ${c.pt}px ${c.ph}px 0; flex-wrap: wrap; background: ${c.bg}; }
+    .statusRow { display: flex; padding: ${c.gap}px ${c.ph}px ${c.pb}px; background: ${c.bg}; }
     .praticaArticoli { padding: ${Math.max(2, c.pv - 2)}px ${c.ph}px ${c.pv}px; background: ${c.bg}; display: none; }
     .praticaArticoliLabel { font-size: 13px; font-weight: 800; color: ${c.label}; margin-right: 4px; white-space: nowrap; }
     .praticaChip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid ${c.fieldBorder}; background: ${c.fieldBg}; color: ${c.fieldText}; font-size: 13px; cursor: pointer; user-select: none; }
@@ -1098,6 +1126,14 @@ export default function Widget(props: Props) {
   `
 
   const currentValues = activeSearch ? values[activeSearch.id] || {} : {}
+  // Esito della ricerca su una riga propria, sotto i campi, sempre visibile (vuota finché non c'è un esito):
+  // ha tutta la larghezza disponibile e l'altezza del widget non cambia dopo la ricerca.
+  const statusKind = (status.kind === 'loading' || status.kind === 'ok' || status.kind === 'warn' || status.kind === 'err') ? status.kind : 'idle'
+  const statusRow = (
+    <div className='statusRow'>
+      <div className={`status st${statusKind.charAt(0).toUpperCase()}${statusKind.slice(1)}`}>{statusKind === 'idle' ? '\u00a0' : status.text}</div>
+    </div>
+  )
 
   return (
     <div css={styles}>
@@ -1167,12 +1203,10 @@ export default function Widget(props: Props) {
                 <div className='actionInline'>
                   <button className='btn btnGhost' type='button' disabled={busy} onClick={clearAll}>Annulla</button>
                   <button className='btn btnPrimary' type='button' disabled={busy || !layer} onClick={applySearch}>Cerca</button>
-                  {(status.kind === 'loading' || status.kind === 'ok' || status.kind === 'warn' || status.kind === 'err') && (
-                    <div className={`status st${status.kind.charAt(0).toUpperCase()}${status.kind.slice(1)}`}>{status.text}</div>
-                  )}
                 </div>
               </div>
             </div>
+            {statusRow}
           </React.Fragment>
         )}
         {activeSearch && !isPratica && (
@@ -1211,13 +1245,11 @@ export default function Widget(props: Props) {
               <div className='actionInline'>
                 <button className='btn btnGhost' type='button' disabled={busy} onClick={clearAll}>Annulla</button>
                 <button className='btn btnPrimary' type='button' disabled={busy || !layer} onClick={applySearch}>Cerca</button>
-                {(status.kind === 'loading' || status.kind === 'ok' || status.kind === 'warn' || status.kind === 'err') && (
-                  <div className={`status st${status.kind.charAt(0).toUpperCase()}${status.kind.slice(1)}`}>{status.text}</div>
-                )}
               </div>
             </div>
           </div>
         )}
+        {activeSearch && !isPratica && statusRow}
       </div>
     </div>
   )

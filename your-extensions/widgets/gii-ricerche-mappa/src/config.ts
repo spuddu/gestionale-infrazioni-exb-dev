@@ -49,6 +49,10 @@ export interface Config {
   borderRadius: number
   paddingH: number
   paddingV: number
+  // Spaziature verticali: sopra i campi, tra campi ed esito della ricerca, sotto l'esito
+  paddingTop: number
+  rowGap: number
+  paddingBottom: number
   searchLabel: string
   fieldHeight: number
   pointColor: string
@@ -88,6 +92,9 @@ export const defaultConfig: IMConfig = makeImmutable<Config>({
   borderRadius: 8,
   paddingH: 8,
   paddingV: 6,
+  paddingTop: 2,
+  rowGap: 4,
+  paddingBottom: 4,
   searchLabel: 'Tipo ricerca',
   fieldHeight: 28,
   pointColor: '#dc2626',

@@ -13,20 +13,34 @@ type TransferActionIconName = 'import' | 'export'
 
 function TransferActionIcon (props: { name: TransferActionIconName, size?: number }): React.ReactElement {
   const size = Number(props.size || 18)
+  // Importa: la freccia entra nel vassoio; esporta: la freccia esce dal vassoio.
   if (props.name === 'import') {
     return (
       <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
         <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
-        <path d='M17 8l-5-5-5 5'/>
-        <path d='M12 3v12'/>
+        <path d='M7 10l5 5 5-5'/>
+        <path d='M12 15V3'/>
       </svg>
     )
   }
   return (
     <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
       <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
-      <path d='M7 10l5 5 5-5'/>
-      <path d='M12 15V3'/>
+      <path d='M17 8l-5-5-5 5'/>
+      <path d='M12 3v12'/>
+    </svg>
+  )
+}
+
+// Icona Aggiorna (frecce circolari), stesso tratto delle icone di esportazione.
+function RefreshActionIcon (props: { size?: number }): React.ReactElement {
+  const size = Number(props.size || 18)
+  return (
+    <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+      <path d='M21 12a9 9 0 0 1-15.36 6.36L3 16'/>
+      <path d='M3 21v-5h5'/>
+      <path d='M3 12a9 9 0 0 1 15.36-6.36L21 8'/>
+      <path d='M21 3v5h-5'/>
     </svg>
   )
 }
@@ -79,7 +93,7 @@ type GiiUserInfo = {
 
 type ReportRecord = Record<string, any>
 type SituationFilter = 'tutte' | 'da_gestire' | 'attesa_altri' | 'ferme' | 'sanzionatoria'
-type SortKey = 'lastUpdate' | 'rilevazioneNumber' | 'reportNumber' | 'verbaleNumber' | 'reportDate' | 'rilevatore' | 'istruttore' | 'area' | 'settore' | 'faseProcedimentale' | 'ruoloCorrente' | 'giorniFermo'
+type SortKey = 'lastUpdate' | 'rilevazioneNumber' | 'origine' | 'istruttoreAmm' | 'reportNumber' | 'verbaleNumber' | 'reportDate' | 'rilevatore' | 'istruttore' | 'area' | 'settore' | 'faseProcedimentale' | 'ruoloCorrente' | 'giorniFermo'
 type SortDir = 'asc' | 'desc'
 type SortRule = { key: SortKey; dir: SortDir }
 
@@ -751,8 +765,8 @@ function buildNumeroRilevazioneReport (d: any): string {
 
   const base = oidPart || stored || '—'
   if (base === '—') return base
-  // Numero di rilevazione senza Settore: 81-TR (dal campo), 82-IT (dal GII).
-  return `${base}-${prefix}`
+  // Numero di rilevazione: solo l'OID (es. 83); l'origine TR/IT è nella colonna Origine.
+  return base
 }
 
 function getNumeroRilevazione (d: any): string {
@@ -910,6 +924,24 @@ function getIstruttore (d: any): string {
     'it_assegnato_nome', 'it_assegnato_username',
     'ia_assegnato_nome', 'ia_assegnato_username'
   ])
+}
+
+function getIstruttoreTecnico (d: any): string {
+  return getFirst(d, ['it_assegnato_nome', 'it_assegnato_username'])
+}
+
+function getIstruttoreAmministrativo (d: any): string {
+  return getFirst(d, ['ia_assegnato_nome', 'ia_assegnato_username'])
+}
+
+// Origine della pratica: TR (rilevazione dal campo) o IT (pratica aperta nel GII).
+function getOriginePratica (d: any): string {
+  const op = pickField(d, 'origine_pratica')
+  return (op === 2 || op === '2' || String(op ?? '').trim().toUpperCase() === 'IT') ? 'IT' : 'TR'
+}
+
+function getOriginePraticaEstesa (d: any): string {
+  return getOriginePratica(d) === 'IT' ? 'Istruttore tecnico' : 'Tecnico rilevatore'
 }
 
 function formatDate (ms: number | null): string {
@@ -1132,7 +1164,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (key === 'verbaleNumber') return getNumeroVerbale(row)
       if (key === 'reportDate') return getDataRapportoMs(row) || 0
       if (key === 'rilevatore') return getTecnicoRilevatore(row)
-      if (key === 'istruttore') return getIstruttore(row)
+      if (key === 'istruttore') return getIstruttoreTecnico(row)
+      if (key === 'istruttoreAmm') return getIstruttoreAmministrativo(row)
+      if (key === 'origine') return getOriginePratica(row)
       if (key === 'area') return getAreaDisplay(row, domainLabels)
       if (key === 'settore') return getSettoreDisplay(row, domainLabels)
       if (key === 'faseProcedimentale') return faseProcedimentaleLabel(row)
@@ -1303,13 +1337,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const exportCsv = () => {
     const headers = [
       'N. rilevazione',
-      'N. rapporto',
-      'N. atto',
+      'Origine',
       'Data rilevazione',
-      'Tecnico rilevatore',
-      'Istruttore tecnico',
       'Area',
       'Settore',
+      'N. rapporto',
+      'Istruttore tecnico',
+      'N. atto',
+      'Istruttore amministrativo',
       'Fase procedimentale',
       'Competenza attuale',
       'Ultimo aggiornamento',
@@ -1317,13 +1352,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     ]
     const rows = filtered.map(r => [
       getNumeroRilevazione(r),
-      getNumeroRapporto(r),
-      getNumeroVerbale(r),
+      getOriginePratica(r),
       formatDate(getDataRapportoMs(r)),
-      getTecnicoRilevatore(r),
-      getIstruttore(r),
       getAreaDisplay(r, domainLabels),
       getSettoreDisplay(r, domainLabels),
+      getNumeroRapporto(r),
+      getIstruttoreTecnico(r),
+      getNumeroVerbale(r),
+      getIstruttoreAmministrativo(r),
       faseProcedimentaleLabel(r),
       ruoloPressoLabel(r),
       formatDateTime(getLastTouchMs(r)),
@@ -1384,8 +1420,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           dividerWidth={Math.max(0, Number(cfg.titleDividerWidth ?? 2))}
           style={{ marginBottom: 7, flex: '0 0 auto' }}
           rightContent={<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 0 }}>
-            <button onClick={() => setNonce(n => n + 1)} style={{ border: `1px solid ${cfg.cardBorder}`, background: 'rgba(255,255,255,0.08)', color: cfg.textColor, borderRadius: 12, padding: '8px 12px', fontWeight: 700, cursor: 'pointer' }}>Aggiorna</button>
-            <button onClick={exportCsv} disabled={filtered.length === 0} style={{ border: `1px solid ${cfg.cardBorder}`, background: filtered.length ? cfg.accentColor : 'rgba(255,255,255,0.08)', color: filtered.length ? '#111827' : cfg.mutedColor, borderRadius: 12, padding: '8px 12px', fontWeight: 800, cursor: filtered.length ? 'pointer' : 'not-allowed' }}>Esporta CSV</button>
+            <button type='button' onClick={() => setNonce(n => n + 1)} title='Aggiorna' aria-label='Aggiorna' style={{ width: 36, height: 36, padding: 0, boxSizing: 'border-box', border: `1px solid ${cfg.cardBorder}`, background: 'rgba(255,255,255,0.08)', color: cfg.textColor, borderRadius: 8, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><RefreshActionIcon /></button>
+            <button type='button' onClick={exportCsv} disabled={filtered.length === 0} title='Esporta CSV' aria-label='Esporta CSV' style={{ width: 36, height: 36, padding: 0, boxSizing: 'border-box', border: `1px solid ${cfg.cardBorder}`, background: filtered.length ? cfg.accentColor : 'rgba(255,255,255,0.08)', color: filtered.length ? '#111827' : cfg.mutedColor, borderRadius: 8, cursor: filtered.length ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><TransferActionIcon name='export' /></button>
           </div>}
         />
         {lastLoad && <div style={{ color: cfg.mutedColor, fontSize: 12, whiteSpace: 'nowrap', marginBottom: 10, flexShrink: 0 }}>Ultimo aggiornamento: {new Date(lastLoad).toLocaleString('it-IT')}</div>}
@@ -1466,31 +1502,35 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             </div>
           </div>
           <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed', flexShrink: 0 }}>
+            {/* Intestazione e corpo riservano lo stesso spazio per la barra di scorrimento: le colonne restano allineate. */}
+            <div style={{ flexShrink: 0, overflowY: 'hidden', overflowX: 'hidden', scrollbarGutter: 'stable' } as any}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
               <colgroup>
-                <col style={{ width: '7%' }} />
-                <col style={{ width: '7%' }} />
-                <col style={{ width: '7%' }} />
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '9%' }} />
-                <col style={{ width: '9%' }} />
                 <col style={{ width: '6%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '12%' }} />
+                <col style={{ width: '5%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '5%' }} />
                 <col style={{ width: '10%' }} />
-                <col style={{ width: '8%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '11%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '9%' }} />
                 <col style={{ width: '5%' }} />
               </colgroup>
               <thead style={{ background: cfg.cardBg }}>
                 <tr style={{ textAlign: 'left' }}>
                   {th('N. rilevazione', 'rilevazioneNumber')}
-                  {th('N. rapporto', 'reportNumber')}
-                  {th('N. atto', 'verbaleNumber')}
+                  {th('Origine', 'origine')}
                   {th('Data rilevazione', 'reportDate')}
-                  {th('Tecnico rilevatore', 'rilevatore')}
-                  {th('Istruttore tecnico', 'istruttore')}
                   {th('Area', 'area')}
                   {th('Settore', 'settore')}
+                  {th('N. rapporto', 'reportNumber')}
+                  {th('Istruttore tecnico', 'istruttore')}
+                  {th('N. atto', 'verbaleNumber')}
+                  {th('Istruttore amministrativo', 'istruttoreAmm')}
                   {th('Fase procedimentale', 'faseProcedimentale')}
                   {th('Competenza attuale', 'ruoloCorrente')}
                   {th('Ultimo aggiornamento', 'lastUpdate')}
@@ -1498,20 +1538,22 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 </tr>
               </thead>
             </table>
-            <div style={{ overflowY: 'auto', overflowX: 'hidden', flex: '1 1 auto', minHeight: 0 }}>
+            </div>
+            <div style={{ overflowY: 'auto', overflowX: 'hidden', flex: '1 1 auto', minHeight: 0, scrollbarGutter: 'stable' } as any}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
               <colgroup>
-                <col style={{ width: '7%' }} />
-                <col style={{ width: '7%' }} />
-                <col style={{ width: '7%' }} />
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '9%' }} />
-                <col style={{ width: '9%' }} />
                 <col style={{ width: '6%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '12%' }} />
+                <col style={{ width: '5%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '5%' }} />
                 <col style={{ width: '10%' }} />
-                <col style={{ width: '8%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '11%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '9%' }} />
                 <col style={{ width: '5%' }} />
               </colgroup>
               <tbody>
@@ -1539,13 +1581,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                       style={{ borderBottom: `1px solid rgba(255,255,255,0.07)`, background: rowBg, boxShadow: selected ? `inset 3px 0 0 ${cfg.accentColor}` : 'none', cursor: 'pointer', outline: 'none', transition: 'background 120ms ease, box-shadow 120ms ease' }}
                     >
                       <td title={getNumeroRilevazione(r)} style={{ padding: '8px 7px', color: cfg.textColor, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getNumeroRilevazione(r)}</td>
-                      <td title={getNumeroRapporto(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, fontWeight: getNumeroRapporto(r) !== '—' ? 800 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getNumeroRapporto(r)}</td>
-                      <td title={getNumeroVerbale(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, fontWeight: getNumeroVerbale(r) !== '—' ? 800 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getNumeroVerbale(r)}</td>
+                      <td title={getOriginePraticaEstesa(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getOriginePratica(r)}</td>
                       <td style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatDate(getDataRapportoMs(r))}</td>
-                      <td title={getTecnicoRilevatore(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getTecnicoRilevatore(r)}</td>
-                      <td title={getIstruttore(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getIstruttore(r)}</td>
                       <td title={getAreaDisplay(r, domainLabels)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getAreaDisplay(r, domainLabels)}</td>
                       <td title={getSettoreDisplay(r, domainLabels)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getSettoreDisplay(r, domainLabels)}</td>
+                      <td title={getNumeroRapporto(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, fontWeight: getNumeroRapporto(r) !== '—' ? 800 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getNumeroRapporto(r)}</td>
+                      <td title={getIstruttoreTecnico(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getIstruttoreTecnico(r)}</td>
+                      <td title={getNumeroVerbale(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, fontWeight: getNumeroVerbale(r) !== '—' ? 800 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getNumeroVerbale(r)}</td>
+                      <td title={getIstruttoreAmministrativo(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getIstruttoreAmministrativo(r)}</td>
                       <td title={faseProcedimentaleLabel(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{faseProcedimentaleLabel(r)}</td>
                       <td title={ruoloPressoLabel(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ruoloPressoLabel(r)}</td>
                       <td style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatDateTime(last)}</td>
@@ -1554,7 +1597,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                   )
                 })}
                 {pageRows.length === 0 && (
-                  <tr><td colSpan={12} style={{ padding: 14, color: cfg.mutedColor }}>Nessuna pratica corrisponde ai filtri impostati.</td></tr>
+                  <tr><td colSpan={13} style={{ padding: 14, color: cfg.mutedColor }}>Nessuna pratica corrisponde ai filtri impostati.</td></tr>
                 )}
               </tbody>
               </table>

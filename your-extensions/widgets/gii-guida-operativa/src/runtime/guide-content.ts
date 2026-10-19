@@ -2,7 +2,7 @@ export type GuideRole = '*' | 'TR' | 'IT' | 'CS' | 'RIT' | 'DT' | 'IA' | 'RIA' |
 
 export type GuideBlock =
   | { type: 'heading2' | 'heading3'; id: string; text: string }
-  | { type: 'lead' | 'paragraph' | 'bullet' | 'figure'; text: string }
+  | { type: 'lead' | 'paragraph' | 'bullet' | 'figure'; text: string; inlineFigure?: string }
   | { type: 'step'; number: number | null; text: string; label?: string }
   | { type: 'callout'; title: string; text: string }
   | { type: 'table'; headers: string[]; rows: string[][] }
@@ -10,7 +10,7 @@ export type GuideBlock =
 export interface GuideChapter { id: string; order: number; title: string; roles: GuideRole[]; blocks: GuideBlock[] }
 export interface GuideQuickLink { label: string; description: string; targetChapterId: string }
 
-export const GUIDE_VERSION = '7 ottobre 2026'
+export const GUIDE_VERSION = '19 ottobre 2026'
 
 export const GUIDE_CHAPTERS: GuideChapter[] = [
   {
@@ -23,7 +23,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
     "blocks": [
       {
         "type": "lead",
-        "text": "Questa guida descrive l’utilizzo del Gestionale Infrazioni Irrigue (GII) e accompagna l’utente nelle attività previste per il proprio ruolo, dalla presa in carico della pratica fino alla conclusione del procedimento."
+        "text": "Questa guida descrive l’utilizzo del gestionale e accompagna l’utente nelle attività previste per il proprio ruolo, dalla presa in carico della pratica fino alla conclusione del procedimento."
       },
       {
         "type": "paragraph",
@@ -413,6 +413,44 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "paragraph",
         "text": "Per il significato degli allarmi, degli eventi e degli stati sintetici della pratica vedere Cap. 25."
+      },
+      {
+        "type": "heading2",
+        "id": "cap-2-orientarsi-home-elenco-pratiche-dettaglio-e-allarmi-2-5-il-logo-del-gestionale",
+        "text": "2.5 Il logo del gestionale"
+      },
+      {
+        "type": "paragraph",
+        "text": "Il logo del gestionale nasce da un’unica forma, la goccia, ripetuta due volte con orientamenti opposti.",
+        "inlineFigure": "Logo del gestionale"
+      },
+      {
+        "type": "paragraph",
+        "text": "La goccia blu richiama l’acqua, elemento essenziale dell’attività del Consorzio. La seconda, verde, è la stessa goccia capovolta: con la punta rivolta verso il basso diventa un segnaposto, simbolo di un luogo preciso sul territorio."
+      },
+      {
+        "type": "paragraph",
+        "text": "Le due forme, sfalsate in diagonale, si sovrappongono lasciando al centro uno spazio bianco. Il blu e il verde riprendono i colori del Consorzio di Bonifica della Sardegna Meridionale, mantenendo un legame diretto con la sua identità visiva."
+      },
+      {
+        "type": "paragraph",
+        "text": "Il Consorzio custodisce un territorio fatto di acqua e campi, di canali e reti irrigue, di alberi disposti in filari a protezione delle colture dal vento. Un territorio in cui ogni elemento ha un luogo, una funzione e una storia."
+      },
+      {
+        "type": "paragraph",
+        "text": "Quando viene rilevata un’infrazione, tutto comincia da un punto preciso: un campo, un idrante o un tratto di condotta. È da quel luogo che prende avvio un percorso che coinvolge persone, competenze e responsabilità diverse."
+      },
+      {
+        "type": "paragraph",
+        "text": "Il logo di GII racchiude queste due dimensioni. La goccia rappresenta il Consorzio e il suo legame con l’acqua; il segnaposto rappresenta il territorio e il luogo da cui nasce ogni pratica."
+      },
+      {
+        "type": "paragraph",
+        "text": "Nel punto in cui le due forme si sovrappongono rimane uno spazio bianco. È il simbolo dell’integrazione: il luogo in cui si incontrano le aree tecniche e amministrative, le persone, le informazioni, i documenti e le decisioni. Elementi distinti che, attraverso GII, diventano parte di un unico procedimento."
+      },
+      {
+        "type": "paragraph",
+        "text": "È in questo incontro che prende forma la Gestione Integrata delle Infrazioni: dal primo rilievo sul territorio fino alla conclusione della pratica."
       }
     ]
   },
@@ -569,6 +607,10 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "paragraph",
         "text": "Una rilevazione effettuata dal Tecnico rilevatore tramite l’applicazione Esri Survey123, utilizzando il rilevamento \"Infrazioni\", entra nel gestionale e viene indirizzata al Capo Settore del Settore individuato dalla posizione del punto. All’arrivo il gestionale ricava automaticamente dalla posizione rilevata i dati catastali (Comune, Sezione, Foglio e Mappale). Il Capo Settore riceve l’allarme “Nuova rilevazione ricevuta”. In questo caso la pratica non è ancora assegnata a un Istruttore tecnico."
+      },
+      {
+        "type": "paragraph",
+        "text": "Quando il punto ricade in un’area in cui sono presenti distretti, tratti di rete o manufatti di più Settori, il Tecnico rilevatore sceglie nel Survey il Settore della rilevazione. Se l’Istruttore tecnico ritiene che la rilevazione sia di competenza di un altro Settore, lo segnala al Capo Settore (Cap. 5.4), che decide sull’eventuale trasferimento (Cap. 6.2)."
       },
       {
         "type": "heading3",
@@ -794,6 +836,10 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "bullet",
+        "text": "Il punto impostato o spostato deve ricadere nel Settore della pratica: se ricade in un altro Settore il salvataggio è bloccato. Per una rilevazione proveniente dal Tecnico rilevatore che riguarda un altro Settore, annullare lo spostamento del punto e segnalarlo al Capo Settore con l’azione “Settore non competente” (Cap. 5.4)."
+      },
+      {
+        "type": "bullet",
         "text": "Le tessere/matricole previste in alcune Note spese devono rispettare il formato a 5 cifre."
       },
       {
@@ -877,6 +923,56 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "type": "callout",
         "title": "Effetto dell’azione",
         "text": "L’azione Elimina archivia la pratica, registra nell’Iter l’evento “Archiviazione” e la rimuove dagli elenchi ordinari. La pratica resta consultabile dall’Amministratore del sistema."
+      },
+      {
+        "type": "heading2",
+        "id": "cap-5-istruttoria-tecnica-dell-it-5-4-rilevazione-di-competenza-di-un-altro-settore",
+        "text": "5.4 Rilevazione di competenza di un altro Settore"
+      },
+      {
+        "type": "paragraph",
+        "text": "L’Istruttore tecnico lavora soltanto nel Settore della pratica e non può spostarla in un altro Settore. Se ritiene che una rilevazione proveniente dal Tecnico rilevatore sia di competenza di un altro Settore, lo segnala al proprio Capo Settore, che decide se trasferirla."
+      },
+      {
+        "type": "bullet",
+        "text": "L’azione è disponibile solo per le rilevazioni provenienti dal Tecnico rilevatore, prima che sia stato generato il numero del rapporto tecnico, e solo se nel punto il Tecnico rilevatore ha dovuto scegliere fra più Settori della stessa Area."
+      },
+      {
+        "type": "bullet",
+        "text": "Nelle Azioni l’azione riporta il nome del Settore della pratica, ad esempio “Settore Distretto 2 Serramanna non competente”."
+      },
+      {
+        "type": "heading3",
+        "id": "cap-5-istruttoria-tecnica-dell-it-segnalare-settore-non-competente",
+        "text": "Istruttore tecnico — segnalare che la rilevazione è di un altro Settore"
+      },
+      {
+        "type": "step",
+        "number": 1,
+        "text": "Aprire le Azioni e scegliere l’azione “… non competente”.",
+        "label": "Scegliere Settore non competente"
+      },
+      {
+        "type": "step",
+        "number": 2,
+        "text": "Selezionare il Settore ritenuto competente.",
+        "label": "Indicare il Settore competente"
+      },
+      {
+        "type": "step",
+        "number": 3,
+        "text": "Inserire la Motivazione e confermare.",
+        "label": "Motivare e confermare la segnalazione"
+      },
+      {
+        "type": "callout",
+        "title": "Attenzione",
+        "text": "Se il Capo Settore trasferisce la rilevazione, i dati inseriti nell’istruttoria vanno persi (modifiche ai dati, Nota spese, allegati aggiunti, spostamento del punto) e vengono ripristinati i valori arrivati dal Tecnico rilevatore."
+      },
+      {
+        "type": "callout",
+        "title": "Cosa accade dopo",
+        "text": "La pratica torna al Capo Settore, che riceve l’allarme “Istruttoria trasmessa – Settore non competente” con il Settore indicato e la motivazione. L’Iter registra lo stesso evento."
       }
     ]
   },
@@ -966,6 +1062,57 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "figure",
         "text": "Figura – Gestisci istruttoria del Capo Settore"
+      },
+      {
+        "type": "heading2",
+        "id": "cap-6-verifica-del-capo-settore-6-2-rilevazione-di-competenza-di-un-altro-settore",
+        "text": "6.2 Rilevazione di competenza di un altro Settore"
+      },
+      {
+        "type": "paragraph",
+        "text": "Quando l’Istruttore tecnico segnala che la rilevazione è di competenza di un altro Settore (Cap. 5.4), il Capo Settore riceve l’allarme “Istruttoria trasmessa – Settore non competente”. Nelle Azioni sono riportati il Settore indicato dall’Istruttore tecnico e la motivazione."
+      },
+      {
+        "type": "bullet",
+        "text": "In questo caso l’esito positivo e il respingimento non sono disponibili: il Capo Settore può trasferire la rilevazione al Settore indicato oppure rimandarla all’Istruttore tecnico."
+      },
+      {
+        "type": "heading3",
+        "id": "cap-6-verifica-del-capo-settore-trasferire-la-rilevazione",
+        "text": "Capo Settore — trasferire la rilevazione a un altro Settore"
+      },
+      {
+        "type": "step",
+        "number": 1,
+        "text": "Prendere in carico la pratica.",
+        "label": "Prendere in carico la pratica"
+      },
+      {
+        "type": "step",
+        "number": 2,
+        "text": "Valutare la segnalazione: Settore indicato, motivazione e, se utile, posizione del punto nella scheda Mappa del Dettaglio pratica.",
+        "label": "Valutare la segnalazione"
+      },
+      {
+        "type": "step",
+        "number": 3,
+        "text": "Se la segnalazione è fondata, scegliere “Trasferisci al Settore …”, inserire eventuali Ulteriori annotazioni e confermare.",
+        "label": "Trasferire la rilevazione"
+      },
+      {
+        "type": "step",
+        "number": 4,
+        "text": "Se la segnalazione non è fondata, rimandare la pratica all’Istruttore tecnico indicando la motivazione.",
+        "label": "Rimandare all’Istruttore tecnico"
+      },
+      {
+        "type": "callout",
+        "title": "Cosa accade dopo",
+        "text": "Il trasferimento ripristina i dati arrivati dal Tecnico rilevatore (le modifiche dell’istruttoria, la Nota spese, gli allegati aggiunti e lo spostamento del punto vanno persi), porta la pratica nel Settore indicato e toglie l’assegnazione all’Istruttore tecnico. Il Capo Settore di destinazione riceve l’allarme “Nuova rilevazione ricevuta”, con l’indicazione “Trasferita da” e il nome di chi l’ha trasferita, e la assegna come una nuova rilevazione (Cap. 4.1). L’Iter registra “Rilevazione trasferita ad altro Settore”."
+      },
+      {
+        "type": "bullet",
+        "text": "Il Capo Settore che riceve una rilevazione trasferita non può respingerla. Se anche il nuovo Istruttore tecnico ritiene che la rilevazione sia di un altro Settore, può segnalarlo con la stessa procedura."
       }
     ]
   },
@@ -2917,25 +3064,38 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 2,
-        "text": "Impostare almeno un criterio tra Articolo violato, Tipo pratica, Numero pratica, Nominativo/Ragione sociale e CF/P. IVA.",
-        "label": "Impostare i criteri di ricerca"
+        "text": "Impostare i criteri desiderati tra Articolo violato, Tipo pratica, Numero pratica, Anno, Nominativo / Ragione sociale e CF / P. IVA. Con Tipo pratica su Tutti e nessun altro criterio vengono cercate tutte le pratiche.",
+        "label": "Impostare i criteri"
       },
       {
         "type": "step",
         "number": 3,
-        "text": "Se si utilizza Numero pratica, selezionare il Tipo pratica tra Rilevazione, Rapporto tecnico e Atto di accertamento.",
-        "label": "Scegliere il tipo di pratica"
+        "text": "Per cercare una pratica per numero selezionare prima il Tipo pratica (Rilevazione, Rapporto tecnico o Atto di accertamento), poi indicare il Numero pratica e, se utile, l’Anno.",
+        "label": "Cercare per numero"
+      },
+      {
+        "type": "bullet",
+        "text": "Il numero si indica con le sole cifre e la ricerca è esatta: 8 trova la pratica 8, non la 18 o la 81. Per le rilevazioni l’Anno è quello della data di rilevazione; per rapporti tecnici e atti di accertamento è l’anno del numero (ad esempio 2026 in R-25/2026)."
+      },
+      {
+        "type": "bullet",
+        "text": "Scegliendo Rapporto tecnico o Atto di accertamento senza numero vengono cercate tutte le pratiche che hanno un rapporto tecnico o un atto di accertamento."
+      },
+      {
+        "type": "bullet",
+        "text": "L’elenco Articolo violato contiene solo gli articoli le cui violazioni prevedono la geolocalizzazione."
       },
       {
         "type": "step",
         "number": 4,
-        "text": "Eseguire la ricerca delle pratiche."
+        "text": "Eseguire la ricerca con Cerca.",
+        "label": "Eseguire la ricerca"
       },
       {
         "type": "step",
         "number": 5,
-        "text": "Consultare il conteggio e le pratiche visualizzate; quando i risultati sono molti il sistema può indicare che sta mostrando solo i primi elementi.",
-        "label": "Consultare i risultati"
+        "text": "Leggere il messaggio sotto i campi: indica quante pratiche sono state trovate e, se alcune non sono visualizzate in mappa, il motivo; ad esempio “26 pratiche trovate: 19 visualizzate in mappa perché le loro violazioni prevedono la geolocalizzazione, 7 non visualizzate perché le loro violazioni non la prevedono.”. Quando i risultati sono molti il messaggio indica quanti ne sono visualizzati.",
+        "label": "Leggere l’esito della ricerca"
       },
       {
         "type": "step",
@@ -2965,11 +3125,11 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "La Dashboard rispetta la stessa visibilità delle pratiche del profilo. Dispone di due viste: Quadro operativo e Statistiche."
+        "text": "La Dashboard rispetta la stessa visibilità delle pratiche del profilo. Dispone di due viste: Stato operativo e Statistiche."
       },
       {
         "type": "bullet",
-        "text": "Quadro operativo: mostra Pratiche di competenza, In attesa mia, In attesa di altri, pratiche ferme oltre 15 giorni e pratiche in fase sanzionatoria, oltre a distribuzioni per fase/ruolo e pratiche aggiornate di recente."
+        "text": "Stato operativo: mostra Pratiche di competenza, In attesa mia, In attesa di altri, pratiche ferme oltre 15 giorni e pratiche in fase sanzionatoria, oltre alle distribuzioni per fase di lavorazione, ruolo competente e stato delle attività."
       },
       {
         "type": "bullet",
@@ -2977,7 +3137,11 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "bullet",
-        "text": "Aggiorna ricarica il quadro; Azzera filtri elimina i filtri statistici selezionati."
+        "text": "Il pulsante Aggiorna (icona con le frecce circolari) ricarica i dati; Azzera filtri elimina i filtri statistici selezionati."
+      },
+      {
+        "type": "bullet",
+        "text": "Nella vista Statistiche il pulsante Esporta CSV delle statistiche (icona con la freccia che esce dal vassoio) scarica in un file CSV i dati aggregati visualizzati, con il periodo e i filtri attivi: indicatori, pratiche per Settore, per tipologia di infrazione, per fase e per ruolo competente, andamento delle rilevazioni. L’elenco delle pratiche si esporta invece dal Report."
       },
       {
         "type": "heading3",
@@ -2987,8 +3151,8 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Dashboard e restare su Quadro operativo per verificare il carico corrente.",
-        "label": "Aprire il Quadro operativo"
+        "text": "Aprire Dashboard e restare su Stato operativo per verificare il carico corrente.",
+        "label": "Aprire lo Stato operativo"
       },
       {
         "type": "step",
@@ -3011,7 +3175,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 5,
-        "text": "Usare Aggiorna quando è necessario ricaricare i dati dopo lavorazioni recenti.",
+        "text": "Usare Aggiorna quando è necessario ricaricare i dati dopo lavorazioni recenti; in Statistiche usare Esporta CSV delle statistiche per riportare i dati in un foglio elettronico.",
         "label": "Aggiornare i dati"
       },
       {
@@ -3045,7 +3209,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 4,
-        "text": "Consultare la Sintesi procedimentale. Le colonne comprendono N. rilevazione, N. rapporto, N. atto, Data rilevazione, Tecnico rilevatore, Istruttore tecnico, Area, Settore, Fase procedimentale, Competenza attuale, Ultimo aggiornamento e Giorni di fermo.",
+        "text": "Consultare la Sintesi procedimentale. Le colonne sono N. rilevazione, Origine, Data rilevazione, Area, Settore, N. rapporto, Istruttore tecnico, N. atto, Istruttore amministrativo, Fase procedimentale, Competenza attuale, Ultimo aggiornamento e Giorni di fermo. Origine indica TR (rilevazione del Tecnico rilevatore) oppure IT (pratica creata dall’Istruttore tecnico); passando il mouse sulla cella compare la descrizione per esteso.",
         "label": "Consultare la Sintesi procedimentale"
       },
       {
@@ -3057,7 +3221,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 6,
-        "text": "Usare Esporta CSV per ottenere i dati filtrati. Il file usa il punto e virgola come separatore ed è predisposto per l’apertura nei comuni strumenti di foglio elettronico.",
+        "text": "Usare il pulsante Esporta CSV (icona con la freccia che esce dal vassoio) per ottenere i dati filtrati, con le stesse colonne della tabella. Il file usa il punto e virgola come separatore ed è predisposto per l’apertura nei comuni strumenti di foglio elettronico. Il pulsante Aggiorna (icona con le frecce circolari) ricarica i dati.",
         "label": "Esportare il CSV"
       },
       {
@@ -3598,7 +3762,12 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           [
             "Nuova rilevazione ricevuta",
             "Capo Settore",
-            "Può essere una rilevazione proveniente dal Tecnico rilevatore e ancora da assegnare oppure una pratica creata dall’Istruttore tecnico, che risulta già associato. Controllare l’assegnazione prima di agire."
+            "Può essere una rilevazione proveniente dal Tecnico rilevatore e ancora da assegnare, una rilevazione trasferita da un altro Settore (con l’indicazione “Trasferita da”) oppure una pratica creata dall’Istruttore tecnico, che risulta già associato. Controllare l’assegnazione prima di agire."
+          ],
+          [
+            "Istruttoria trasmessa – Settore non competente",
+            "Capo Settore",
+            "L’Istruttore tecnico ritiene la rilevazione di competenza di un altro Settore. Valutare la segnalazione e trasferire la rilevazione oppure rimandarla all’Istruttore tecnico (Cap. 6.2)."
           ],
           [
             "Nuova istruttoria ricevuta",
@@ -3655,6 +3824,14 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           [
             "Istruttoria trasmessa per verifica",
             "L’Istruttore tecnico ha completato e trasmesso la propria istruttoria al Capo Settore."
+          ],
+          [
+            "Istruttoria trasmessa – Settore non competente",
+            "L’Istruttore tecnico ha segnalato al Capo Settore che la rilevazione è di competenza di un altro Settore."
+          ],
+          [
+            "Rilevazione trasferita ad altro Settore",
+            "Il Capo Settore ha trasferito la rilevazione al Settore indicato; i dati sono tornati quelli arrivati dal Tecnico rilevatore."
           ],
           [
             "Istruttoria verificata",
@@ -3780,6 +3957,14 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           [
             "Come elimino una pratica creata per errore?",
             "Cap. 5.3 — l’azione Elimina archivia una pratica creata direttamente dall’Istruttore tecnico e non ancora inoltrata nel procedimento."
+          ],
+          [
+            "Come segnalo che una rilevazione è di un altro Settore?",
+            "Cap. 5.4 — l’Istruttore tecnico usa l’azione “Settore non competente” indicando il Settore e la motivazione."
+          ],
+          [
+            "Come trasferisco una rilevazione a un altro Settore?",
+            "Cap. 6.2 — il Capo Settore valuta la segnalazione dell’Istruttore tecnico e trasferisce la rilevazione oppure la rimanda."
           ],
           [
             "Come completo un’istruttoria tecnica?",
@@ -3972,6 +4157,16 @@ export const GUIDE_QUICK_LINKS: GuideQuickLink[] = [
     "label": "Come elimino una pratica creata per errore?",
     "description": "Cap. 5.3 — l’azione Elimina archivia una pratica creata direttamente dall’Istruttore tecnico e non ancora inoltrata nel procedimento.",
     "targetChapterId": "cap-5-istruttoria-tecnica-dell-it"
+  },
+  {
+    "label": "Come segnalo che una rilevazione è di un altro Settore?",
+    "description": "Cap. 5.4 — l’Istruttore tecnico usa l’azione “Settore non competente” indicando il Settore e la motivazione.",
+    "targetChapterId": "cap-5-istruttoria-tecnica-dell-it"
+  },
+  {
+    "label": "Come trasferisco una rilevazione a un altro Settore?",
+    "description": "Cap. 6.2 — il Capo Settore valuta la segnalazione dell’Istruttore tecnico e trasferisce la rilevazione oppure la rimanda.",
+    "targetChapterId": "cap-6-verifica-del-capo-settore"
   },
   {
     "label": "Come completo un’istruttoria tecnica?",

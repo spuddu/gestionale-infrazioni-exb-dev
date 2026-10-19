@@ -1360,7 +1360,9 @@ export default function Setting(props: Props) {
           <NumInput label='Arrotondamento bordi (px)' value={parseNum(cfg.borderRadius, 8, 0, 32)} min={0} max={32} onChange={v => setCfg({ borderRadius: v })} />
           <NumInput label='Altezza campi (px)' value={parseNum(cfg.fieldHeight, 28, 20, 48)} min={20} max={48} onChange={v => setCfg({ fieldHeight: v })} />
           <NumInput label='Padding orizzontale (px)' value={parseNum(cfg.paddingH, 8, 0, 40)} min={0} max={40} onChange={v => setCfg({ paddingH: v })} />
-          <NumInput label='Padding verticale (px)' value={parseNum(cfg.paddingV, 6, 0, 40)} min={0} max={40} onChange={v => setCfg({ paddingV: v })} />
+          <NumInput label='Padding superiore (px)' value={parseNum(cfg.paddingTop, 2, 0, 40)} min={0} max={40} onChange={v => setCfg({ paddingTop: v })} />
+          <NumInput label='Spazio tra campi ed esito (px)' value={parseNum(cfg.rowGap, 4, 0, 40)} min={0} max={40} onChange={v => setCfg({ rowGap: v })} />
+          <NumInput label='Padding inferiore (px)' value={parseNum(cfg.paddingBottom, 4, 0, 40)} min={0} max={40} onChange={v => setCfg({ paddingBottom: v })} />
           <TextInput label='Etichetta selezione ricerca' value={String(cfg.searchLabel || 'Tipo ricerca')} onChange={v => setCfg({ searchLabel: v })} />
         </div>
         <div style={{ ...P.grid2, marginTop: 8 }}>
@@ -1382,7 +1384,7 @@ export default function Setting(props: Props) {
             colorFieldBackground: '#ffffff', colorFieldText: '#111827',
             colorBtnPrimary: '#2f6fed', colorBtnPrimaryText: '#ffffff',
             colorBtnGhost: 'rgba(0,0,0,0.06)', colorBtnGhostText: '#1f2937',
-            borderRadius: 8, paddingH: 8, paddingV: 6, searchLabel: 'Tipo ricerca', fieldHeight: 28
+            borderRadius: 8, paddingH: 8, paddingV: 6, paddingTop: 2, rowGap: 4, paddingBottom: 4, searchLabel: 'Tipo ricerca', fieldHeight: 28
           })}>Ripristina valori predefiniti</SmallButton>
         </div>
       </div>
