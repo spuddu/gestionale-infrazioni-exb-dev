@@ -892,38 +892,30 @@ function getGiorniFermo (d: any, now: number): string {
   return String(days)
 }
 
-function getRecordSearchText (d: any, domainLabels?: DomainLabelMaps | null): string {
-  const parts: any[] = []
-  Object.keys(d || {}).forEach(k => {
-    const v = d[k]
-    if (v === null || v === undefined || v === '') return
-    parts.push(v)
-    const ms = parseToMs(v)
-    if (ms !== null) {
-      parts.push(formatDate(ms), formatDateTime(ms))
-    }
-  })
-  parts.push(
-    getNumeroRilevazione(d),
-    getNumeroRapporto(d),
-    getNumeroVerbale(d),
-    getObjectId(d),
-    getTecnicoRilevatore(d),
-    getIstruttore(d),
-    formatDate(getDataRapportoMs(d)),
-    getAreaDisplay(d, domainLabels),
-    getSettoreDisplay(d, domainLabels),
-    faseProcedimentaleLabel(d),
-    ruoloPressoLabel(d)
-  )
-  return normalizeText(parts.join(' '))
-}
-
 function getIstruttore (d: any): string {
   return getFirst(d, [
     'it_assegnato_nome', 'it_assegnato_username',
     'ia_assegnato_nome', 'ia_assegnato_username'
   ])
+}
+
+// Parte numerica di un numero di pratica (R-25/2026 → 25, A-12/2026 → 12, 83 → 83).
+function numeroPraticaCifre (v: string): string {
+  const m = String(v || '').trim().match(/^[A-Za-z]*\s*-?\s*(\d+)/)
+  return m ? String(Number(m[1])) : ''
+}
+
+// Ricerca per numero: con il tipo scelto confronta solo quel numero, con "Tutti" i tre numeri; il confronto è esatto.
+// Con un tipo e senza numero: Rapporto e Atto trovano le pratiche che ne hanno uno, Rilevazione tutte.
+function matchNumeroPratica (d: any, tipo: string, cifre: string): boolean {
+  const n = cifre ? String(Number(cifre)) : ''
+  const ril = numeroPraticaCifre(getNumeroRilevazione(d))
+  const rap = getNumeroRapporto(d) !== '—' ? numeroPraticaCifre(getNumeroRapporto(d)) : ''
+  const att = getNumeroVerbale(d) !== '—' ? numeroPraticaCifre(getNumeroVerbale(d)) : ''
+  if (tipo === 'rilevazione') return !n || ril === n
+  if (tipo === 'rapporto') return n ? rap === n : !!rap
+  if (tipo === 'atto') return n ? att === n : !!att
+  return !n || ril === n || rap === n || att === n
 }
 
 function getIstruttoreTecnico (d: any): string {
@@ -952,10 +944,6 @@ function formatDate (ms: number | null): string {
 function formatDateTime (ms: number | null): string {
   if (!ms) return '—'
   try { return new Date(ms).toLocaleString('it-IT') } catch { return '—' }
-}
-
-function normalizeText (v: any): string {
-  return String(v ?? '').trim().toLowerCase()
 }
 
 function csvEscape (v: any): string {
@@ -1041,6 +1029,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [situationFilter, setSituationFilter] = React.useState<SituationFilter>('tutte')
   const [faseFilter, setFaseFilter] = React.useState('tutte')
   const [ruoloFilter, setRuoloFilter] = React.useState('tutte')
+  const [tipoFilter, setTipoFilter] = React.useState('')
+  const [origineFilter, setOrigineFilter] = React.useState('tutte')
   const [sortRules, setSortRules] = React.useState<SortRule[]>(DEFAULT_SORT_RULES)
   const [selectedRowId, setSelectedRowId] = React.useState('')
   const [hoveredRowId, setHoveredRowId] = React.useState('')
@@ -1133,7 +1123,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const now = Date.now()
 
   const filtered = React.useMemo(() => {
-    const q = normalizeText(search)
+    const cifreRicerca = String(search || '').replace(/\D+/g, '')
     const fromMs = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null
     const toMs = toDate ? new Date(`${toDate}T23:59:59`).getTime() : null
 
@@ -1143,7 +1133,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const ruoloCorrente = getRuoloPressoCuiSiTrova(r)
       const isStale = last !== null && (now - last) > staleMs
 
-      if (q && !getRecordSearchText(r, domainLabels).includes(q)) return false
+      if ((cifreRicerca || tipoFilter) && !matchNumeroPratica(r, tipoFilter, cifreRicerca)) return false
+      if (origineFilter !== 'tutte' && getOriginePratica(r) !== origineFilter) return false
       if (areaFilter !== 'tutte' && getAreaCodeFromRecord(r) !== areaFilter) return false
       if (settoreFilter !== 'tutte' && getSettoreCodeFromRecord(r) !== settoreFilter) return false
       if (fromMs !== null && (last === null || last < fromMs)) return false
@@ -1190,7 +1181,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     })
 
     return out
-  }, [records, search, areaFilter, settoreFilter, fromDate, toDate, situationFilter, faseFilter, ruoloFilter, sortRules, user?.username, user?.ruoloLabel, user?.areaCod, user?.settoreCod, cfg.staleDays, domainLabels])
+  }, [records, search, tipoFilter, origineFilter, areaFilter, settoreFilter, fromDate, toDate, situationFilter, faseFilter, ruoloFilter, sortRules, user?.username, user?.ruoloLabel, user?.areaCod, user?.settoreCod, cfg.staleDays, domainLabels])
 
   const tableRows = Math.max(5, Number(cfg.tableRows || 25))
   const pageCount = Math.max(1, Math.ceil(filtered.length / tableRows))
@@ -1202,7 +1193,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     if (!filtered.some(r => getObjectId(r) === selectedRowId)) setSelectedRowId('')
   }, [filtered, selectedRowId])
 
-  React.useEffect(() => { setPage(1) }, [search, areaFilter, settoreFilter, fromDate, toDate, situationFilter, faseFilter, ruoloFilter, sortRules])
+  React.useEffect(() => { setPage(1) }, [search, tipoFilter, origineFilter, areaFilter, settoreFilter, fromDate, toDate, situationFilter, faseFilter, ruoloFilter, sortRules])
 
   const fasiDisponibili = React.useMemo(() => {
     const set = new Set<string>()
@@ -1288,6 +1279,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const clearFilters = () => {
     setSearch('')
+    setTipoFilter('')
+    setOrigineFilter('tutte')
     setAreaFilter('tutte')
     setSettoreFilter('tutte')
     setFromDate('')
@@ -1299,6 +1292,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     setSelectedRowId('')
     setPage(1)
   }
+
+  // Il pulsante Pulisci filtri è acceso solo se c'è almeno un filtro da rimuovere (come Ripristina ordinamento).
+  const hasActiveFilters = !!(search || tipoFilter || origineFilter !== 'tutte' || areaFilter !== 'tutte' || settoreFilter !== 'tutte' || fromDate || toDate || situationFilter !== 'tutte' || faseFilter !== 'tutte' || ruoloFilter !== 'tutte')
 
   const isDefaultSort = sortRules.length === 1 && sortRules[0].key === 'lastUpdate' && sortRules[0].dir === 'desc'
 
@@ -1430,10 +1426,28 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         {error && <div style={{ padding: 10, marginBottom: 10, borderRadius: 14, background: 'rgba(127,29,29,0.40)', border: '1px solid rgba(248,113,113,0.35)', color: '#fecaca', flexShrink: 0 }}>{error}</div>}
 
         <section style={{ background: cfg.cardBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: Number(cfg.cardRadius ?? defaultConfig.cardRadius), padding: 12, marginBottom: 10, flexShrink: 0 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, alignItems: 'end' }}>
+          <div className='gii-report-filtri' style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
+            <style>{`.gii-report-filtri > div { flex: 1 1 130px; min-width: 0; }`}</style>
             <div>
-              <FieldLabel cfg={cfg}>Cerca</FieldLabel>
-              <Input value={search} onChange={setSearch} placeholder='Cerca n. rapporto…' cfg={cfg} />
+              <FieldLabel cfg={cfg}>Tipo</FieldLabel>
+              <Select value={tipoFilter} onChange={setTipoFilter} cfg={cfg}>
+                <option value=''>Tutti</option>
+                <option value='rilevazione'>Rilevazione</option>
+                <option value='rapporto'>Rapporto</option>
+                <option value='atto'>Atto</option>
+              </Select>
+            </div>
+            <div>
+              <FieldLabel cfg={cfg}>Numero</FieldLabel>
+              <Input value={search} onChange={v => setSearch(v.replace(/\D+/g, ''))} placeholder={tipoFilter === 'rapporto' ? 'N. rapporto…' : tipoFilter === 'atto' ? 'N. atto…' : tipoFilter === 'rilevazione' ? 'N. rilevazione…' : 'N. rilevazione, rapporto o atto…'} cfg={cfg} />
+            </div>
+            <div>
+              <FieldLabel cfg={cfg}>Origine</FieldLabel>
+              <Select value={origineFilter} onChange={setOrigineFilter} cfg={cfg}>
+                <option value='tutte'>Tutte</option>
+                <option value='TR'>TR – Tecnico rilevatore</option>
+                <option value='IT'>IT – Istruttore tecnico</option>
+              </Select>
             </div>
             <div>
               <FieldLabel cfg={cfg}>Area</FieldLabel>
@@ -1481,9 +1495,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 {ruoliDisponibili.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
               </Select>
             </div>
-            <div>
+            <div style={{ flex: '0 0 36px' }}>
               <FieldLabel cfg={cfg}>&nbsp;</FieldLabel>
-              <button onClick={clearFilters} style={{ width: '100%', height: 36, border: `1px solid ${cfg.cardBorder}`, background: 'rgba(255,255,255,0.08)', color: cfg.textColor, borderRadius: 10, padding: '7px 10px', fontWeight: 700, cursor: 'pointer' }}>Pulisci filtri</button>
+              <button type='button' onClick={clearFilters} disabled={!hasActiveFilters} title='Pulisci filtri' aria-label='Pulisci filtri' style={{ width: 36, height: 36, padding: 0, boxSizing: 'border-box', border: `1px solid ${hasActiveFilters ? cfg.accentColor : cfg.cardBorder}`, background: hasActiveFilters ? cfg.accentColor : 'rgba(255,255,255,0.04)', color: hasActiveFilters ? '#111827' : cfg.mutedColor, borderRadius: 8, cursor: hasActiveFilters ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: hasActiveFilters ? '0 0 0 2px rgba(254,235,34,0.18)' : 'none' }}>
+                <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'><path d='M13.013 3H2l8 9.46V19l4 2v-8.54l.9-1.055' /><path d='m22 3-5 5' /><path d='m17 3 5 5' /></svg>
+              </button>
             </div>
           </div>
         </section>

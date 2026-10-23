@@ -1580,14 +1580,6 @@ function normalizeSettoreCode(settore: number | null | undefined): string {
   return settore != null ? map[Number(settore)] || "" : "";
 }
 
-function normalizeSearchText(v: any): string {
-  return String(v ?? "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-}
-
 function getFirstValue(d: any, names: string[]): any {
   for (const name of names) {
     const v = pickField(d, name);
@@ -1697,47 +1689,24 @@ function pickTecnicoRilevatore(d: any): string {
   );
 }
 
-function pickPraticaSearchText(r: DataRecord, fieldPratica: string): string {
-  const d = r.getData?.() || {};
-  const parts = [
-    getCodPraticaDisplay(r),
-    getRilevazioneDisplay(r),
-    pickOfficialRapportoNumber(d),
-    pickVerbaleNumber(d),
-    pickField(d, fieldPratica),
-    pickField(d, "OBJECTID"),
-    pickField(d, "objectid"),
-    pickField(d, "objectId"),
-    pickField(d, "numero_rapporto"),
-    pickField(d, "num_rapporto"),
-  ];
-  return normalizeSearchText(
-    parts.filter((v) => v !== null && v !== undefined && v !== "").join(" "),
-  );
+// Parte numerica di un numero di pratica (R-25/2026 → 25, A-12/2026 → 12, 83 → 83).
+function numeroPraticaCifre(v: any): string {
+  const m = String(v ?? "").trim().match(/^[A-Za-z]*\s*-?\s*(\d+)/);
+  return m ? String(Number(m[1])) : "";
 }
 
-function pickTextSearchExtra(
-  d: any,
-  domainLabels?: DomainLabelMaps | null,
-): string {
-  const parts = [
-    pickTecnicoRilevatore(d),
-    pickTecnicoIstruttore(d),
-    getAreaDisplayFromRecord(d, domainLabels),
-    getSettoreDisplayFromRecord(d, domainLabels),
-    getAreaCodeFromRecord(d),
-    getSettoreCodeFromRecord(d),
-    // Trasgressore: la ricerca generale deve consentire di individuare
-    // la pratica anche a partire dall'anagrafica del soggetto.
-    pickField(d, "nome"),
-    pickField(d, "cognome"),
-    pickField(d, "ragione_sociale"),
-    pickField(d, "codice_fiscale"),
-    pickField(d, "cf"),
-    pickField(d, "piva"),
-    pickField(d, "partita_iva"),
-  ];
-  return normalizeSearchText(parts.filter(Boolean).join(" "));
+// Ricerca per numero, come nel Report: con il tipo scelto confronta solo quel numero,
+// con "Tutti" i numeri di rilevazione, rapporto e atto; il confronto è esatto.
+// Con un tipo e senza numero: Rapporto e Atto trovano le pratiche che ne hanno uno, Rilevazione tutte.
+function matchNumeroPratica(d: any, tipo: string, cifre: string): boolean {
+  const n = cifre ? String(Number(cifre)) : "";
+  const ril = numeroPraticaCifre(d?.OBJECTID ?? d?.ObjectId ?? d?.objectid ?? d?.objectId);
+  const rap = numeroPraticaCifre(pickOfficialRapportoNumber(d));
+  const att = numeroPraticaCifre(pickVerbaleNumber(d));
+  if (tipo === "rilevazione") return !n || ril === n;
+  if (tipo === "rapporto") return n ? rap === n : !!rap;
+  if (tipo === "atto") return n ? att === n : !!att;
+  return !n || ril === n || rap === n || att === n;
 }
 
 function pickComparableDisplayValue(
@@ -3138,6 +3107,8 @@ export default function Widget(props: Props) {
   // ── Filtri integrati nell'elenco ─────────────────────────────────────────────
   const [filtersOpen, setFiltersOpen] = React.useState(false);
   const [searchFilter, setSearchFilter] = React.useState("");
+  const [tipoFilter, setTipoFilter] = React.useState("");
+  const [origineFilter, setOrigineFilter] = React.useState("tutte");
   const [areaFilter, setAreaFilter] = React.useState("tutte");
   const [settoreFilter, setSettoreFilter] = React.useState("tutte");
   const [fromDateFilter, setFromDateFilter] = React.useState("");
@@ -4779,7 +4750,7 @@ export default function Widget(props: Props) {
   const passesIntegratedFilters = React.useCallback(
     (r: DataRecord): boolean => {
       const d = r.getData?.() || {};
-      const q = normalizeSearchText(searchFilter);
+      const cifreRicerca = String(searchFilter || "").replace(/\D+/g, "");
       const areaCode = getAreaCodeFromRecord(d);
       const settoreCode = getSettoreCodeFromRecord(d);
       const dateMs = pickReportDateMs(d, fieldDataRil);
@@ -4787,10 +4758,10 @@ export default function Widget(props: Props) {
       const toMs = getDateOnlyMsFromInput(toDateFilter, true);
       const statoLabel = computeDisplaySintetico(d).label;
 
-      if (q) {
-        const searchText = `${pickPraticaSearchText(r, fieldPratica)} ${pickTextSearchExtra(d, domainLabels)}`;
-        if (!searchText.includes(q)) return false;
-      }
+      if ((cifreRicerca || tipoFilter) && !matchNumeroPratica(d, tipoFilter, cifreRicerca))
+        return false;
+      if (origineFilter !== "tutte" && getOriginePraticaPrefix(d) !== origineFilter)
+        return false;
       if (areaFilter !== "tutte" && areaCode !== areaFilter) return false;
       if (settoreFilter !== "tutte" && settoreCode !== settoreFilter)
         return false;
@@ -4801,6 +4772,8 @@ export default function Widget(props: Props) {
     },
     [
       searchFilter,
+      tipoFilter,
+      origineFilter,
       areaFilter,
       settoreFilter,
       fromDateFilter,
@@ -4859,6 +4832,8 @@ export default function Widget(props: Props) {
 
   const resetIntegratedFilters = React.useCallback(() => {
     setSearchFilter("");
+    setTipoFilter("");
+    setOrigineFilter("tutte");
     setAreaFilter("tutte");
     setSettoreFilter("tutte");
     setFromDateFilter("");
@@ -4868,6 +4843,8 @@ export default function Widget(props: Props) {
 
   const hasIntegratedFilters = !!(
     searchFilter.trim() ||
+    tipoFilter ||
+    origineFilter !== "tutte" ||
     areaFilter !== "tutte" ||
     settoreFilter !== "tutte" ||
     fromDateFilter ||
@@ -5840,13 +5817,20 @@ export default function Widget(props: Props) {
     }
 
     .integratedFilters {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      display: flex;
+      flex-wrap: wrap;
       gap: 10px;
-      align-items: end;
+      align-items: flex-end;
       padding: 10px 12px;
       border-bottom: 1px solid rgba(0, 0, 0, 0.08);
       background: #eaf2ff;
+    }
+    .integratedFilters > div {
+      flex: 1 1 130px;
+      min-width: 0;
+    }
+    .integratedFilters > div.clearFiltersCell {
+      flex: 0 0 34px;
     }
     .filterLabel {
       display: block;
@@ -5877,8 +5861,12 @@ export default function Widget(props: Props) {
       box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.12);
     }
     .clearFiltersBtn {
-      width: 100%;
+      width: 34px;
       height: 34px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       border: 1px solid rgba(0, 0, 0, 0.14);
       border-radius: 10px;
       background: ${hasIntegratedFilters ? "#fff" : "rgba(0,0,0,0.03)"};
@@ -6755,15 +6743,49 @@ export default function Widget(props: Props) {
               <div className="integratedFiltersCollapseInner">
                 <div className="integratedFilters">
                   <div>
-                    <label className="filterLabel">Cerca</label>
+                    <label className="filterLabel">Tipo</label>
+                    <select
+                      className="filterSelect"
+                      value={tipoFilter}
+                      onChange={(e: any) => setTipoFilter(e?.target?.value || "")}
+                    >
+                      <option value="">Tutti</option>
+                      <option value="rilevazione">Rilevazione</option>
+                      <option value="rapporto">Rapporto</option>
+                      <option value="atto">Atto</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="filterLabel">Numero</label>
                     <input
                       className="filterInput"
+                      inputMode="numeric"
                       value={searchFilter}
                       onChange={(e: any) =>
-                        setSearchFilter(e?.target?.value || "")
+                        setSearchFilter(String(e?.target?.value || "").replace(/\D+/g, ""))
                       }
-                      placeholder="Cerca pratica, atto o trasgressore…"
+                      placeholder={
+                        tipoFilter === "rapporto"
+                          ? "N. rapporto…"
+                          : tipoFilter === "atto"
+                            ? "N. atto…"
+                            : tipoFilter === "rilevazione"
+                              ? "N. rilevazione…"
+                              : "N. rilevazione, rapporto o atto…"
+                      }
                     />
+                  </div>
+                  <div>
+                    <label className="filterLabel">Origine</label>
+                    <select
+                      className="filterSelect"
+                      value={origineFilter}
+                      onChange={(e: any) => setOrigineFilter(e?.target?.value || "tutte")}
+                    >
+                      <option value="tutte">Tutte</option>
+                      <option value="TR">TR – Tecnico rilevatore</option>
+                      <option value="IT">IT – Istruttore tecnico</option>
+                    </select>
                   </div>
                   <div>
                     <label className="filterLabel">Area</label>
@@ -6839,18 +6861,20 @@ export default function Widget(props: Props) {
                       ))}
                     </select>
                   </div>
-                  <div>
+                  <div className="clearFiltersCell">
                     <label className="filterLabel">&nbsp;</label>
                     <button
                       type="button"
                       className="clearFiltersBtn"
                       disabled={!hasIntegratedFilters}
+                      title="Pulisci filtri"
+                      aria-label="Pulisci filtri"
                       onClick={() => {
                         if (!hasIntegratedFilters) return;
                         resetIntegratedFilters();
                       }}
                     >
-                      Pulisci filtri
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="M13.013 3H2l8 9.46V19l4 2v-8.54l.9-1.055" /><path d="m22 3-5 5" /><path d="m17 3 5 5" /></svg>
                     </button>
                   </div>
                 </div>
