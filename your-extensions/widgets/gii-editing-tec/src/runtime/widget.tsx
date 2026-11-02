@@ -4317,8 +4317,8 @@ function buildPraticaCodeFromData (data: any, oid: number | null | undefined): s
   if (op === 2 || op === '2' || String(op || '').toUpperCase() === 'IT') prefix = 'IT'
   else if (op === 1 || op === '1' || String(op || '').toUpperCase() === 'TR') prefix = 'TR'
 
-  // Numero di rilevazione senza Settore: 81-TR (dal campo), 82-IT (dal GII).
-  return `${Number(oid)}-${prefix}`
+  // Numero di rilevazione: solo l’OID (es. 81). L’origine TR/IT non fa parte del numero.
+  return String(Number(oid))
 }
 
 function buildFascicoloDocumentaleTitleParts (data: any, oid: number | null | undefined): { prefix: string, code: string, full: string } {

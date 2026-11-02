@@ -1957,6 +1957,8 @@ function GeneralCompactPanel (props: {
   area: string
   settore: string
   numeroRilevazione: string
+  rilevataDa: string
+  ruoloRilevatore: string
   dataRilevazione: string
   numeroRapporto: string
   dataRapporto: string
@@ -1970,6 +1972,7 @@ function GeneralCompactPanel (props: {
           <GeneralCompactRow label="Area" value={props.area} singleValue />
           <GeneralCompactRow label="Settore" value={props.settore} singleValue />
           <GeneralCompactRow label="Rilevazione n." value={props.numeroRilevazione} dateLabel="Data e ora:" dateValue={props.dataRilevazione} />
+          <GeneralCompactRow label="Rilevata da" value={props.rilevataDa} dateLabel="Ruolo:" dateValue={props.ruoloRilevatore} />
           <GeneralCompactRow label="Rapporto n." value={props.numeroRapporto} dateLabel="Data e ora:" dateValue={props.dataRapporto} />
           <GeneralCompactRow label="Atto n." value={props.numeroVerbale} dateLabel="Data e ora:" dateValue={props.dataVerbale} />
         </div>
@@ -4657,9 +4660,8 @@ function DetailTabsPanel (props: {
     if (!hasSel || !data || oid == null) return ''
     const origin = normalizeOriginePraticaCod(pickAttrCI(data, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])) || 'TR'
     const settore = normalizeSettoreCod(pickAttrCI(data, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'cod_settore']))
-    const base = String(oid)
-    // Numero di rilevazione senza Settore: 81-TR (dal campo), 82-IT (dal GII).
-    return `${base}-${origin}`
+    // Numero di rilevazione: solo l’OID (es. 81). L’origine è mostrata nella riga Origine.
+    return String(oid)
   }, [hasSel, data, oid])
 
   const numeroRapportoTecnico = React.useMemo(() => {
@@ -5403,6 +5405,13 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
       area: formatAreaLabel(getFieldLabel('area_cod', areaRaw)),
       settore: formatSettoreLabel(getFieldLabel('settore_cod', settoreRaw)),
       numeroRilevazione: numeroRilevazione || '—',
+      // Chi ha effettuato la rilevazione: nominativo registrato nella pratica e ruolo
+      // ricavato dall’origine (1 = Tecnico rilevatore dal Survey, 2 = Istruttore tecnico nel GII).
+      rilevataDa: String(pickAttrCI(data, ['tecnico_rilevatore', 'Tecnico_rilevatore', 'TECNICO_RILEVATORE']) || '').trim() || '—',
+      ruoloRilevatore: (() => {
+        const cod = normalizeOriginePraticaCod(pickAttrCI(data, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA']))
+        return cod === 'IT' ? 'Istruttore tecnico' : cod === 'TR' ? 'Tecnico rilevatore' : '—'
+      })(),
       dataRilevazione: formatDateTimeSafe(dataRil),
       numeroRapporto: numeroRapportoTecnico || '—',
       dataRapporto: formatDateTimeSafe(dataRap),
@@ -5949,6 +5958,8 @@ return (
               area={generalSummary.area}
               settore={generalSummary.settore}
               numeroRilevazione={generalSummary.numeroRilevazione}
+              rilevataDa={generalSummary.rilevataDa}
+              ruoloRilevatore={generalSummary.ruoloRilevatore}
               dataRilevazione={generalSummary.dataRilevazione}
               numeroRapporto={generalSummary.numeroRapporto}
               dataRapporto={generalSummary.dataRapporto}

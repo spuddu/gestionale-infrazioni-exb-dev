@@ -155,8 +155,8 @@ function normalizeRilevazioneCodeForAmm (data: any, oid: number | null): string 
 
   const base = oidPart || stored || '—'
   if (base === '—') return base
-  // Numero di rilevazione senza Settore: 81-TR (dal campo), 82-IT (dal GII).
-  return `${base}-${prefix}`
+  // Numero di rilevazione: solo l’OID (es. 81). L’origine TR/IT non fa parte del numero.
+  return base
 }
 
 function normalizeReportCode (raw: any, oid: number | null): string {

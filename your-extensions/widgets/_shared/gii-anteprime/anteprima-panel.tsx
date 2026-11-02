@@ -234,15 +234,19 @@ function viewerRilevazioneNumberForEditing (data: any, oid?: number | null): str
     'numero_rilevazione', 'Numero_rilevazione', 'NUMERO_RILEVAZIONE',
     'cod_pratica', 'Cod_pratica', 'COD_PRATICA'
   ]))
-  if (explicit) return explicit
+  if (explicit) {
+    // Valori storici del tipo 57-TR o TR-57-D1: si mostra soltanto il numero.
+    const numero = isViewerRilevazioneCodeForEditing(explicit) ? (explicit.match(/\d+/) || [''])[0] : ''
+    return numero || explicit
+  }
   const oidPart = oid != null && Number.isFinite(Number(oid)) ? String(Number(oid)) : ''
   if (!oidPart) return '-'
   const op = pickAttrCI(d, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
   const prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'IT') ? 'IT' : 'TR'
   const area = normalizeAreaCode(firstMeaningfulValue(d.area_cod, d.area))
   const settore = normalizeSettoreCode(area, firstMeaningfulValue(d.settore_cod, d.settore))
-  // Numero di rilevazione senza Settore: 81-TR (dal campo), 82-IT (dal GII).
-  return `${oidPart}-${prefix}`
+  // Numero di rilevazione: solo l’OID (es. 81). L’origine TR/IT non fa parte del numero.
+  return oidPart
 }
 
 function documentViewerTitleForEditing (fileName: string, data: any, oid?: number | null): string {
@@ -252,7 +256,7 @@ function documentViewerTitleForEditing (fileName: string, data: any, oid?: numbe
   const prefix = `Rapporto n. ${rapporto || '-'}`
   if (lower.includes('determinaz')) return `${prefix} • Bozza di determinazione`
   if (lower.includes('proposta') && lower.includes('contestaz')) return `${prefix} • Proposta di contestazione`
-  if (lower.includes('atto') && (lower.includes('accert') || lower.includes('contestaz'))) return `${prefix} • Atto di accertamento/contestazione`
+  if (lower.includes('atto') && (lower.includes('accert') || lower.includes('contestaz'))) return `${prefix} • Atto di accertamento`
   if (lower.includes('mappa')) return `${prefix} • Mappa della rilevazione n. ${rilevazione || '-'}`
   if (lower.includes('allegat')) return `${prefix} • Allegati della rilevazione n. ${rilevazione || '-'}`
   if (lower.includes('nota')) return `${prefix} • Nota spese della rilevazione n. ${rilevazione || '-'}`
@@ -1206,7 +1210,7 @@ export default function GiiAnteprimaPanel (p: {
 
     if (wantsProposta && !propostaContestazioneAttachment) throw new Error('PDF della Proposta di contestazione non disponibile.')
     if (wantsDeterminazione && !bozzaDeterminazioneAttachment) throw new Error('PDF della bozza di determinazione non disponibile.')
-    if (wantsAttoContestazione && !attoContestazioneAttachment) throw new Error('PDF dell’Atto di accertamento/contestazione non disponibile.')
+    if (wantsAttoContestazione && !attoContestazioneAttachment) throw new Error('PDF dell’Atto di accertamento non disponibile.')
 
     const items: Array<{ blob: Blob; fileName: string }> = []
     if (wantsFascicoloContent) {
@@ -1251,9 +1255,9 @@ export default function GiiAnteprimaPanel (p: {
 
     if (wantsAttoContestazione && attoContestazioneAttachment) {
       const layer = await resolveFeatureLayerForAttachments(p.ds, p.layerUrlHint)
-      if (!layer) throw new Error('FeatureLayer non disponibile per l’Atto di accertamento/contestazione.')
+      if (!layer) throw new Error('FeatureLayer non disponibile per l’Atto di accertamento.')
       const atto = await fetchAttachmentBlob(layer, p.ds, Number(p.oid), attoContestazioneAttachment, 2)
-      if (!atto) throw new Error('PDF dell’Atto di accertamento/contestazione non disponibile.')
+      if (!atto) throw new Error('PDF dell’Atto di accertamento non disponibile.')
       items.push(atto)
     }
 

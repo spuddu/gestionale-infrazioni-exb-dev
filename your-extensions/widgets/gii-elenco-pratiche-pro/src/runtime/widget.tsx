@@ -87,14 +87,25 @@ function pickVerbaleNumber(d: any): string {
   ).trim();
 }
 
-function getRilevazioneDisplay(rec: DataRecord): string {
+function getRilevazioneOid(rec: DataRecord): number | null {
   const a: any = rec?.getData?.() || {};
-  const oid = a?.OBJECTID ?? a?.ObjectId ?? a?.objectid ?? a?.objectId;
-  const prefix = getOriginePraticaPrefix(a, rec);
-  const settore = getSettoreCodeFromRecord(a);
-  const base = oid != null ? `${oid}-${prefix}` : `?-${prefix}`;
-  // Numero di rilevazione senza Settore: 81-TR (dal campo), 82-IT (dal GII).
-  return base;
+  const oid = Number(a?.OBJECTID ?? a?.ObjectId ?? a?.objectid ?? a?.objectId);
+  return Number.isFinite(oid) ? oid : null;
+}
+
+// Numero di rilevazione: solo l'OID (es. 81), come nel Report, nella Dashboard e
+// nel popup della Mappa. L'origine TR/IT è mostrata nella colonna Origine.
+function getRilevazioneDisplay(rec: DataRecord): string {
+  const oid = getRilevazioneOid(rec);
+  return oid != null ? String(oid) : "?";
+}
+
+function getOrigineDisplay(rec: DataRecord): "TR" | "IT" {
+  return getOriginePraticaPrefix(rec?.getData?.() || {}, rec);
+}
+
+function getOrigineEstesa(rec: DataRecord): string {
+  return getOrigineDisplay(rec) === "IT" ? "Istruttore tecnico" : "Tecnico rilevatore";
 }
 
 function getTipoPraticaDisplay(rec: DataRecord): string {
@@ -130,6 +141,7 @@ const V_RUOLO_OPERATIVO = "__ruolo_operativo__";
 const V_FASE = "__fase_istruttoria__";
 const V_TIPO_PRATICA = "__tipo_pratica__";
 const V_NUMERO_RILEVAZIONE = "__numero_rilevazione__";
+const V_ORIGINE = "__origine__";
 const V_NUMERO_PRATICA = "__numero_pratica__";
 const V_NUMERO_VERBALE = "__accertamento_numero_display__";
 const V_NUMERO_VERBALE_LEGACY = "__numero_atto_accertamento_display__";
@@ -948,6 +960,12 @@ function migrateColumns(cfg: any): ColumnDef[] {
       },
       findByField(V_NUMERO_RILEVAZIONE) || findByField(V_TIPO_PRATICA),
     ),
+    take({
+      id: "col_origine",
+      label: "Origine",
+      field: V_ORIGINE,
+      width: 80,
+    }),
     takeFixedField(
       {
         id: "col_numero",
@@ -4664,7 +4682,8 @@ export default function Widget(props: Props) {
       return getPersonaRoleSortValue(d, field);
     if (field === V_FASE) return computeFaseIstruttoria(d);
     if (field === V_TIPO_PRATICA) return getTipoPraticaDisplay(r);
-    if (field === V_NUMERO_RILEVAZIONE) return getRilevazioneDisplay(r);
+    if (field === V_NUMERO_RILEVAZIONE) return getRilevazioneOid(r) ?? -1;
+    if (field === V_ORIGINE) return getOrigineDisplay(r);
     if (field === V_NUMERO_PRATICA) return getNumeroRapportoDisplay(r);
     if (isNumeroAttoVirtualField(field)) return getNumeroVerbaleDisplay(r);
     if (field === V_ULTIMO) return computeUltimoAggMs(d);
@@ -7387,6 +7406,18 @@ export default function Widget(props: Props) {
                                   key={col.id}
                                   className={ci === 0 ? "cell first" : "cell"}
                                   title={val}
+                                >
+                                  {val}
+                                </div>
+                              );
+                            }
+                            if (f === V_ORIGINE) {
+                              const val = getOrigineDisplay(r);
+                              return (
+                                <div
+                                  key={col.id}
+                                  className={ci === 0 ? "cell first" : "cell"}
+                                  title={getOrigineEstesa(r)}
                                 >
                                   {val}
                                 </div>

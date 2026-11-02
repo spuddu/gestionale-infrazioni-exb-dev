@@ -5340,8 +5340,8 @@ function normalizeRilevazioneCodeForAmm (data: any, oid: number | null): string 
 
   const base = oidPart || stored || '—'
   if (base === '—') return base
-  // Numero di rilevazione senza Settore: 81-TR (dal campo), 82-IT (dal GII).
-  return `${base}-${prefix}`
+  // Numero di rilevazione: solo l’OID (es. 81). L’origine TR/IT non fa parte del numero.
+  return base
 }
 
 function normalizeReportCode (raw: any, oid: number | null): string {
@@ -7127,13 +7127,13 @@ function IaVerificationSummary (props: {
   })()
   const attoContestazioneOutcomeCycle = isDeterminazioneAdottata(d) && attoContestazioneWorkflowState(d) !== ''
   const riaApprovalOutcomeText = attoContestazioneOutcomeCycle
-    ? 'Atto di contestazione approvato. Pratica restituita all’Istruttore amministrativo per la trasmissione al Direttore.'
+    ? 'Atto di accertamento approvato. Pratica restituita all’Istruttore amministrativo per la trasmissione al Direttore.'
     : 'Istruttoria amministrativa approvata. Pratica restituita per la protocollazione del fascicolo e il completamento della determinazione.'
   const riaReturnOutcomeText = attoContestazioneOutcomeCycle
-    ? 'Richieste integrazioni o rettifiche all’Atto di contestazione. Pratica restituita all’Istruttore amministrativo per le modifiche necessarie.'
+    ? 'Richieste integrazioni o rettifiche all’Atto di accertamento. Pratica restituita all’Istruttore amministrativo per le modifiche necessarie.'
     : 'Richieste integrazioni o rettifiche alla Proposta di contestazione e/o alla bozza di determinazione. Pratica restituita per le modifiche necessarie.'
   const riaRejectedOutcomeText = attoContestazioneOutcomeCycle
-    ? 'Atto di contestazione non approvato. Pratica restituita per i conseguenti adempimenti.'
+    ? 'Atto di accertamento non approvato. Pratica restituita per i conseguenti adempimenti.'
     : 'Istruttoria amministrativa non approvata. Pratica restituita per i conseguenti adempimenti.'
   const riaConsequenceText = riaHaApprovato
     ? riaApprovalOutcomeText
@@ -7157,14 +7157,14 @@ function IaVerificationSummary (props: {
   const riaEsitoLabel = riaEsitoCode === 1
     ? 'Integrazioni/rettifiche richieste'
     : riaEsitoCode === 2
-      ? (attoContestazioneOutcomeCycle ? 'Atto di contestazione approvato' : 'Istruttoria amministrativa approvata')
+      ? (attoContestazioneOutcomeCycle ? 'Atto di accertamento approvato' : 'Istruttoria amministrativa approvata')
       : riaEsitoCode === 3
-        ? (attoContestazioneOutcomeCycle ? 'Atto di contestazione non approvato' : 'Istruttoria amministrativa non approvata')
+        ? (attoContestazioneOutcomeCycle ? 'Atto di accertamento non approvato' : 'Istruttoria amministrativa non approvata')
         : (hasAdminValue(riaEsitoRaw) ? String(riaEsitoRaw) : '')
   const riaNoteTitle = riaEsitoCode === 1
     ? (attoContestazioneOutcomeCycle ? 'Richiesta di integrazioni/rettifiche dell’Atto' : 'Richiesta di integrazioni/rettifiche')
     : riaEsitoCode === 2
-      ? (attoContestazioneOutcomeCycle ? 'Approvazione dell’Atto di contestazione' : 'Approvazione dell’istruttoria amministrativa')
+      ? (attoContestazioneOutcomeCycle ? 'Approvazione dell’Atto di accertamento' : 'Approvazione dell’istruttoria amministrativa')
       : 'Esito della verifica del Responsabile'
   const riaNoteText = riaEsitoCode === 1
     ? `${riaReturnOutcomeText}${riaNoteClean ? `\nMotivazione: ${riaNoteClean}` : ''}`
@@ -7232,7 +7232,7 @@ function IaVerificationSummary (props: {
     ? 'Esito del Responsabile dell’istruttoria amministrativa'
     : iaSummaryTitle
   const primaryEsitoLabel = showRiaOutcomeAsPrimary
-    ? (riaHaApprovato ? (attoContestazioneOutcomeCycle ? 'Atto di contestazione approvato' : 'Istruttoria amministrativa approvata') : 'Integrazioni/rettifiche richieste')
+    ? (riaHaApprovato ? (attoContestazioneOutcomeCycle ? 'Atto di accertamento approvato' : 'Istruttoria amministrativa approvata') : 'Integrazioni/rettifiche richieste')
     : (displayedIaOutcomeLabel || '—')
   const primaryOperatoreLabel = showRiaOutcomeAsPrimary
     ? 'Responsabile dell’istruttoria amministrativa'

@@ -67,6 +67,7 @@ function Sel(p: { value:string; onChange:(v:string)=>void; options:Array<{value:
 
 const VIRTUAL_FIELDS: FieldOpt[] = [
   { name:'__numero_rilevazione__', alias:'⚙ N. rilevazione (calcolato)', type:'virtual' },
+  { name:'__origine__', alias:'⚙ Origine TR/IT (calcolato)', type:'virtual' },
   { name:'__numero_pratica__', alias:'⚙ N. rapporto (calcolato)', type:'virtual' },
   { name:'__tipo_pratica__', alias:'⚙ Tipo pratica (calcolato)', type:'virtual' },
   { name:'__accertamento_numero_display__', alias:'⚙ N. atto (calcolato)', type:'virtual' },
@@ -311,6 +312,7 @@ function normalizeColumnLabel (label: any, field?: any): string {
   const s = String(label || '').trim()
   const f = String(field || '').trim().toLowerCase()
   if (f === '__numero_rilevazione__') return 'N. rilevazione'
+  if (f === '__origine__') return 'Origine'
   if (f === '__numero_pratica__') return 'N. rapporto'
   if (f === '__stato_sint__') return 'Il mio stato'
   if (f === '__causale__') return 'Stato pratica'

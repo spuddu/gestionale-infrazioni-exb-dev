@@ -184,8 +184,8 @@ function buildRilevazioneNumberFromData (data: any, oid: number | null | undefin
 
   const base = oidPart || rawCandidate || '—'
   if (base === '—') return base
-  // Numero di rilevazione senza Settore: 81-TR (dal campo), 82-IT (dal GII).
-  return `${base}-${prefix}`
+  // Numero di rilevazione: solo l’OID (es. 81). L’origine TR/IT non fa parte del numero.
+  return base
 }
 
 function buildPracticeCodeFromData (data: any, oid: number | null | undefined): string {

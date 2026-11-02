@@ -316,7 +316,7 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
             <div style={{ display: 'grid', gap: 8, padding: safeDocsBodyPadding }}>
               {renderDocCheckbox('includePropostaContestazione', 'Proposta di contestazione')}
               {renderDocCheckbox('includeDeterminazione', 'Determinazione dirigenziale')}
-              {renderDocCheckbox('includeAttoContestazione', 'Atto di accertamento/contestazione')}
+              {renderDocCheckbox('includeAttoContestazione', 'Atto di accertamento')}
               <div style={{ minWidth: 0 }}>
                 {renderDocCheckbox('includeAllegaiainistrativi', 'Allegati')}
                 {docOptions.includeAllegaiainistrativi && administrativeAttachments.length > 0 && (
