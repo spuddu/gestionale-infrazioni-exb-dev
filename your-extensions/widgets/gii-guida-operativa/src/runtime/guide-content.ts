@@ -65,7 +65,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "rows": [
           [
             "Tecnico rilevatore",
-            "Effettua la rilevazione sul territorio tramite l’applicazione Esri Survey123, utilizzando il rilevamento “Infrazioni” predisposto per smartphone e tablet. Indica sulla mappa il punto dell’infrazione e può aggiungere annotazioni tecniche. I Dati tecnici rilevati, cioè il distretto in cui ricade il punto e gli elementi di rete e i manufatti presenti entro 2 metri dal punto, vengono acquisiti automaticamente e determinano il Settore di competenza. Se dai Dati tecnici risultano più Settori, il Tecnico rilevatore sceglie il Settore a cui inviare la rilevazione. Se non risulta alcun Settore, perché il punto ricade fuori dal comprensorio e non sono presenti reti o manufatti del Consorzio entro 2 metri, la rilevazione non può essere inviata. Quando il Settore di destinazione è stato acquisito correttamente, la rilevazione viene trasmessa al gestionale, che ricava automaticamente i dati catastali dalla posizione del punto, e viene gestita dal Capo Settore competente."
+            "Effettua la rilevazione sul territorio tramite l’applicazione Esri Survey123, utilizzando il rilevamento “Infrazioni” predisposto per smartphone e tablet. Indica sulla mappa il punto dell’infrazione e può aggiungere annotazioni tecniche."
           ],
           [
             "Istruttore tecnico",
@@ -77,7 +77,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           ],
           [
             "Responsabile dell’istruttoria tecnica",
-            "Valida l’istruttoria tecnica e la trasmette al Direttore tecnico. Può richiedere integrazioni e, quando previsto, modifica i dati di Occorrenza e Grado di gravità."
+            "Valorizza i dati di Occorrenza e Grado di gravità, quando previsti per il tipo di infrazione, valida l’istruttoria tecnica e la trasmette al Direttore tecnico. Può richiedere integrazioni."
           ],
           [
             "Direttore tecnico",
@@ -430,7 +430,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "Le due forme, sfalsate in diagonale, si sovrappongono lasciando al centro uno spazio bianco. Il blu e il verde riprendono i colori del Consorzio di Bonifica della Sardegna Meridionale, mantenendo un legame diretto con la sua identità visiva."
+        "text": "Le due forme, sfalsate in diagonale, si sovrappongono lasciando al centro uno spazio bianco. Il blu e il verde riprendono i colori del logo del Consorzio di Bonifica della Sardegna Meridionale, mantenendo un legame diretto con la sua identità visiva."
       },
       {
         "type": "paragraph",
@@ -476,7 +476,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "rows": [
           [
             "Origine",
-            "Il Tecnico rilevatore invia la rilevazione al Capo Settore tramite Esri Survey123, utilizzando il rilevamento “Infrazioni”. In alternativa, l’Istruttore tecnico crea la pratica direttamente nel gestionale.",
+            "La pratica può avere origine in due modi distinti, ciascuno previsto in funzione del tipo di infrazione e, conseguentemente, del ruolo che può rilevarla: il Tecnico rilevatore invia la rilevazione al Capo Settore tramite Esri Survey123, utilizzando il rilevamento “Infrazioni”; l’Istruttore tecnico crea la pratica direttamente nel gestionale.",
             "La rilevazione è disponibile nel gestionale."
           ],
           [
@@ -487,7 +487,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           [
             "Verifica",
             "Capo Settore → Responsabile dell’istruttoria tecnica",
-            "L’istruttoria è verificata. Alla prima verifica con esito positivo il gestionale attribuisce il numero ufficiale del rapporto tecnico, se non è già stato attribuito."
+            "L’istruttoria è verificata. Quando il Capo Settore esprime per la prima volta esito positivo, il gestionale attribuisce il numero ufficiale del rapporto tecnico."
           ],
           [
             "Validazione",
@@ -561,7 +561,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           [
             "Istruttore amministrativo",
             "Responsabile dell’istruttoria amministrativa",
-            "Il Responsabile dell’istruttoria amministrativa esamina la richiesta; la pratica torna poi all’Istruttore amministrativo per le correzioni necessarie"
+            "Il Responsabile dell’istruttoria amministrativa esamina la non conformità segnalata e trasmette l’esito all’Istruttore amministrativo, che prende nuovamente in carico la pratica e ripete la propria valutazione."
           ],
           [
             "Responsabile dell’istruttoria amministrativa — aspetti amministrativi",
@@ -577,7 +577,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "Le trasmissioni, le verifiche e le richieste di integrazione si effettuano tramite le Azioni disponibili per la pratica. I ruoli che devono esprimere una valutazione utilizzano Gestisci istruttoria, che consente di scegliere l’esito previsto e, quando necessario, di indicare la motivazione o gli aspetti da integrare. I comandi da utilizzare in ciascun passaggio sono descritti nei capitoli dedicati ai singoli ruoli."
+        "text": "Le trasmissioni, le verifiche e le richieste di integrazione si effettuano tramite le Azioni disponibili per la pratica. I ruoli che devono esprimere una valutazione utilizzano il pannello Gestisci istruttoria, che consente di scegliere l’esito previsto e, quando necessario, di indicare la motivazione o gli aspetti da integrare. I comandi da utilizzare in ciascun passaggio sono descritti nei capitoli dedicati ai singoli ruoli."
       },
       {
         "type": "paragraph",
@@ -606,11 +606,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "La rilevazione effettuata dal Tecnico rilevatore tramite l’applicazione Esri Survey123, con il rilevamento “Infrazioni”, viene trasmessa al gestionale e indirizzata al Capo Settore del Settore individuato dalla posizione del punto. All’arrivo della rilevazione il gestionale ricava automaticamente dalla posizione del punto i dati catastali (Comune, Sezione, Foglio e Mappale). Il Capo Settore riceve l’allarme “Nuova rilevazione ricevuta”. In questo caso la pratica non è ancora assegnata a un Istruttore tecnico."
-      },
-      {
-        "type": "paragraph",
-        "text": "Quando il punto ricade in un’area in cui sono presenti distretti, tratti di rete o manufatti di più Settori, è il Tecnico rilevatore a scegliere nel Survey il Settore della rilevazione. Se l’Istruttore tecnico ritiene che la rilevazione sia di competenza di un altro Settore, lo segnala al proprio Capo Settore con la procedura descritta nel Cap. 5.4; il Capo Settore decide sull’eventuale trasferimento con la procedura descritta nel Cap. 6.2."
+        "text": "La rilevazione effettuata dal Tecnico rilevatore tramite l’applicazione Esri Survey123, con il rilevamento “Infrazioni”, viene trasmessa al gestionale e indirizzata al Capo Settore del Settore individuato dalla posizione del punto. I Dati tecnici rilevati, cioè il distretto in cui ricade il punto e gli elementi di rete e i manufatti presenti entro 2 metri dal punto, vengono acquisiti automaticamente e determinano il Settore di competenza. Se dai Dati tecnici risultano più Settori, il Tecnico rilevatore sceglie il Settore a cui inviare la rilevazione. Se non risulta alcun Settore, perché il punto ricade fuori dal comprensorio e non sono presenti reti o manufatti del Consorzio entro 2 metri, la rilevazione non può essere inviata. Quando il Settore di destinazione è stato acquisito correttamente e la rilevazione è stata correttamente trasmessa, il gestionale ricava automaticamente i dati catastali dalla posizione del punto. Il Capo Settore riceve l’allarme “Nuova rilevazione ricevuta”."
       },
       {
         "type": "heading3",
@@ -649,7 +645,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "callout",
         "title": "Cosa accade dopo",
-        "text": "L’Istruttore tecnico riceve la pratica assegnata, che risulta da prendere in carico. L’assegnazione viene registrata nell’Iter insieme al nominativo del destinatario."
+        "text": "L’Iter registra l’evento “Istruttoria assegnata” con il nominativo dell’Istruttore tecnico selezionato. L’Istruttore tecnico riceve l’allarme “Nuova istruttoria ricevuta” e trova la pratica nella scheda In attesa mia, nello stato Da prendere in carico."
       },
       {
         "type": "callout",
@@ -741,7 +737,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
   {
     "id": "cap-5-istruttoria-tecnica-dell-it",
     "order": 5,
-    "title": "5. Istruttoria tecnica dell’Istruttore tecnico",
+    "title": "5. Istruttoria tecnica",
     "roles": [
       "IT",
       "ADMIN"
@@ -752,55 +748,13 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "text": "L’Istruttore tecnico è il ruolo che compila la pratica nella fase tecnica. Può lavorare una pratica quando questa gli è stata assegnata e risulta in carico a lui. Se riceve una richiesta di integrazione, può apportare le correzioni richieste dopo aver preso nuovamente in carico la pratica; non può invece aprire a sua volta una richiesta di integrazione."
       },
       {
-        "type": "heading2",
-        "id": "cap-5-istruttoria-tecnica-dell-it-5-1-dati-tecnici-modificabili",
-        "text": "5.1 Dati tecnici modificabili"
-      },
-      {
-        "type": "table",
-        "headers": [
-          "Sezione",
-          "Contenuto operativo"
-        ],
-        "rows": [
-          [
-            "Dati generali",
-            "Area e Settore, riferimenti del Tecnico rilevatore, data della rilevazione, Istruttore tecnico e data di trasmissione al Capo Settore."
-          ],
-          [
-            "Trasgressore",
-            "Persona fisica o giuridica, dati fiscali e recapiti, qualifica o rapporto con il fondo, domicilio per le notifiche, rappresentante legale con le relative informazioni e note."
-          ],
-          [
-            "Violazione",
-            "Articoli e fattispecie selezionati, superfici, tipo di abuso, occorrenza, descrizione dettagliata, circostanze rilevanti e presenza del trasgressore."
-          ],
-          [
-            "Luoghi e dati tecnici",
-            "Descrizione del luogo, localizzazione sulla mappa con i dati catastali (Comune, Sezione, Foglio e Mappale) ricavati automaticamente dal punto, Dati tecnici rilevati, Annotazioni tecniche del Tecnico rilevatore, matricola del contatore e matricola della tessera."
-          ],
-          [
-            "Nota spese",
-            "Costi collegati alle violazioni per le quali è prevista la Nota spese, quantità, attrezzature, eventuali cauzioni o risarcimenti e riepilogo degli importi."
-          ],
-          [
-            "Allegati",
-            "Documentazione tecnica, che è possibile aggiungere, rimuovere, sostituire e ruotare; le modifiche agli allegati diventano definitive soltanto con il pulsante Salva."
-          ],
-          [
-            "Anteprima fascicolo",
-            "Consultazione del fascicolo composto con i dati attuali della pratica e con la documentazione disponibile."
-          ]
-        ]
-      },
-      {
         "type": "paragraph",
         "text": "La compilazione della Nota spese è descritta nel Cap. 18. La gestione degli Allegati e dell’Anteprima fascicolo e la consultazione dell’Iter sono descritte nel Cap. 24."
       },
       {
         "type": "heading2",
         "id": "cap-5-istruttoria-tecnica-dell-it-5-2-controlli-al-salvataggio",
-        "text": "5.2 Controlli al salvataggio"
+        "text": "5.1 Controlli al salvataggio"
       },
       {
         "type": "bullet",
@@ -812,7 +766,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "bullet",
-        "text": "Nella Nota spese la stessa matricola di tessera elettronica non può essere indicata più di una volta all’interno della stessa pratica."
+        "text": "Nella Nota spese, la matricola della tessera elettronica, se aggiunta all’elenco delle attrezzature, deve essere composta da 5 cifre e non può essere indicata più di una volta all’interno della stessa pratica."
       },
       {
         "type": "bullet",
@@ -828,7 +782,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "bullet",
-        "text": "Se è stata selezionata almeno una violazione e il campo è richiesto, è obbligatorio indicare se il trasgressore era presente o assente."
+        "text": "Se è stata selezionata almeno una violazione, è obbligatorio indicare se il trasgressore era presente o assente."
       },
       {
         "type": "bullet",
@@ -836,11 +790,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "bullet",
-        "text": "Il punto impostato o spostato deve ricadere nel Settore della pratica: se ricade in un altro Settore, il salvataggio viene bloccato. Se una rilevazione proveniente dal Tecnico rilevatore riguarda un altro Settore, annullare lo spostamento del punto e segnalarlo al Capo Settore con l’azione “Settore non competente”, descritta nel Cap. 5.4."
-      },
-      {
-        "type": "bullet",
-        "text": "In alcune Note spese le matricole delle tessere devono essere composte da 5 cifre."
+        "text": "Il punto impostato o spostato deve ricadere nel Settore della pratica: se ricade in un altro Settore, il salvataggio viene bloccato. Se una rilevazione proveniente dal Tecnico rilevatore riguarda un altro Settore, annullare lo spostamento del punto e segnalarlo al Capo Settore con l’azione “Settore non competente”, descritta nel Cap. 5.3."
       },
       {
         "type": "bullet",
@@ -878,7 +828,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 5,
-        "text": "Tornare alle Azioni. Se si tratta della prima trasmissione di una pratica creata direttamente dall’Istruttore tecnico, utilizzare il comando Trasmetti nuova rilevazione; in tutti gli altri casi utilizzare il comando Trasmetti istruttoria.",
+        "text": "Tornare alle Azioni e utilizzare il comando di trasmissione. Il gestionale propone un solo comando, il cui nome dipende dal caso: Trasmetti nuova rilevazione, per una pratica creata direttamente dall’Istruttore tecnico; Trasmetti istruttoria, per una rilevazione proveniente dal Tecnico rilevatore e assegnata dal Capo Settore. Se la pratica è stata rimandata per integrazione, il comando è invece Trasmetti esito integrazione (Cap. 9).",
         "label": "Trasmettere l’istruttoria tecnica"
       },
       {
@@ -895,7 +845,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "heading2",
         "id": "cap-5-istruttoria-tecnica-dell-it-5-3-archiviare-una-pratica-creata-per-errore",
-        "text": "5.3 Archiviare una pratica creata per errore"
+        "text": "5.2 Archiviare una pratica creata per errore"
       },
       {
         "type": "paragraph",
@@ -927,7 +877,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "heading2",
         "id": "cap-5-istruttoria-tecnica-dell-it-5-4-rilevazione-di-competenza-di-un-altro-settore",
-        "text": "5.4 Rilevazione di competenza di un altro Settore"
+        "text": "5.3 Rilevazione di competenza di un altro Settore"
       },
       {
         "type": "paragraph",
@@ -949,7 +899,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Gestisci istruttoria nell’area Azioni e scegliere l’azione “… non competente”.",
+        "text": "Utilizzare il comando Gestisci istruttoria nell’area Azioni e scegliere l’azione “… non competente”.",
         "label": "Scegliere Settore non competente"
       },
       {
@@ -1039,7 +989,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 4,
-        "text": "Se la pratica è corretta, scegliere Conforme e confermare la trasmissione al Responsabile dell’istruttoria tecnica.",
+        "text": "Se la pratica è corretta, scegliere l’esito Conforme e confermare la trasmissione al Responsabile dell’istruttoria tecnica.",
         "label": "Approvare l’istruttoria"
       },
       {
@@ -1057,7 +1007,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "callout",
         "title": "Cosa accade dopo",
-        "text": "Con esito positivo l’Iter registra l’evento “Istruttoria verificata” e la pratica viene trasmessa al Responsabile dell’istruttoria tecnica. Alla prima verifica con esito positivo il gestionale attribuisce il numero ufficiale del rapporto tecnico e la relativa data, se non sono già stati attribuiti."
+        "text": "Con esito positivo l’Iter registra l’evento “Istruttoria verificata” e la pratica viene trasmessa al Responsabile dell’istruttoria tecnica. Alla prima verifica con esito positivo il gestionale attribuisce il numero ufficiale del rapporto tecnico e la relativa data. Con la richiesta di integrazione l’Iter registra l’evento “Istruttoria rimandata per integrazione” e la pratica torna all’Istruttore tecnico. Con il respingimento l’Iter registra l’evento “Respinta”, insieme alla motivazione indicata; la pratica non prosegue e nell’Elenco pratiche assume lo stato Respinto."
       },
       {
         "type": "figure",
@@ -1070,7 +1020,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "Quando l’Istruttore tecnico segnala che la rilevazione è di competenza di un altro Settore, con la procedura descritta nel Cap. 5.4, il Capo Settore riceve l’allarme “Istruttoria trasmessa – Settore non competente”. In Gestisci istruttoria sono riportati il Settore indicato dall’Istruttore tecnico e la relativa motivazione."
+        "text": "Quando l’Istruttore tecnico segnala che la rilevazione è di competenza di un altro Settore, con la procedura descritta nel Cap. 5.3, il Capo Settore riceve l’allarme “Istruttoria trasmessa – Settore non competente”. Nel pannello Gestisci istruttoria sono riportati il Settore indicato dall’Istruttore tecnico e la relativa motivazione."
       },
       {
         "type": "bullet",
@@ -1127,7 +1077,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
     "blocks": [
       {
         "type": "lead",
-        "text": "Il Responsabile dell’istruttoria tecnica riceve la pratica dopo la verifica del Capo Settore. Nella lavorazione tecnica può modificare soltanto i dati di Occorrenza e Grado di gravità; tutte le altre sezioni tecniche restano in sola lettura."
+        "text": "Il Responsabile dell’istruttoria tecnica riceve la pratica dopo la verifica del Capo Settore. Nella lavorazione tecnica valorizza i dati di Occorrenza e Grado di gravità, quando previsti per il tipo di infrazione; tutte le altre sezioni tecniche restano in sola lettura."
       },
       {
         "type": "heading3",
@@ -1149,8 +1099,8 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 3,
-        "text": "Se necessario, aprire la lavorazione tecnica, modificare soltanto Occorrenza e Grado di gravità e premere il pulsante Salva.",
-        "label": "Modificare Occorrenza e Grado di gravità"
+        "text": "Quando previsti per il tipo di infrazione, aprire la lavorazione tecnica, valorizzare Occorrenza e Grado di gravità e premere il pulsante Salva.",
+        "label": "Valorizzare Occorrenza e Grado di gravità"
       },
       {
         "type": "step",
@@ -1173,7 +1123,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "callout",
         "title": "Cosa accade dopo",
-        "text": "Con esito positivo l’Iter registra l’evento “Istruttoria validata” e la pratica viene trasmessa al Direttore tecnico."
+        "text": "Con esito positivo l’Iter registra l’evento “Istruttoria validata” e la pratica viene trasmessa al Direttore tecnico. Con la richiesta di integrazione l’Iter registra l’evento “Istruttoria rimandata per integrazione” e la pratica torna all’Istruttore tecnico."
       }
     ]
   },
@@ -1222,7 +1172,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 5,
-        "text": "Per richiedere un’integrazione scegliere l’esito che rimanda la pratica per integrazione e indicare gli aspetti da correggere. Se la richiesta riguarda esclusivamente Occorrenza o Grado di gravità, la pratica viene trasmessa al Responsabile dell’istruttoria tecnica; in tutti gli altri casi viene trasmessa all’Istruttore tecnico.",
+        "text": "Per richiedere un’integrazione, aprire il menu a tendina Esito verifica, selezionare Da integrare/rettificare e indicare gli aspetti da correggere. Se la richiesta riguarda esclusivamente Occorrenza o Grado di gravità, la pratica viene trasmessa al Responsabile dell’istruttoria tecnica; in tutti gli altri casi viene trasmessa all’Istruttore tecnico.",
         "label": "Richiedere un’integrazione"
       },
       {
@@ -1234,7 +1184,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "callout",
         "title": "Cosa accade dopo",
-        "text": "Con l’approvazione l’Iter registra l’evento “Istruttoria approvata” e la pratica viene trasmessa al Responsabile dell’istruttoria amministrativa, nella fase amministrativa."
+        "text": "Con l’approvazione l’Iter registra l’evento “Istruttoria approvata” e la pratica viene trasmessa al Responsabile dell’istruttoria amministrativa, nella fase amministrativa. Con la richiesta di integrazione l’Iter registra l’evento “Istruttoria rimandata per integrazione” e la pratica torna al Responsabile dell’istruttoria tecnica oppure all’Istruttore tecnico, secondo gli aspetti da correggere. Con il respingimento l’Iter registra l’evento “Respinta”, insieme alla motivazione indicata; la pratica non prosegue verso la fase amministrativa e nell’Elenco pratiche assume lo stato Respinto."
       }
     ]
   },
@@ -1322,7 +1272,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 5,
-        "text": "Tornare a Gestisci istruttoria e trasmettere l’esito. Se la richiesta era stata formulata da un ruolo successivo, nei passaggi che precedono il ritorno della pratica a quel ruolo l’Iter registra l’evento “Esito integrazione trasmesso”.",
+        "text": "Tornare al pannello Gestisci istruttoria e trasmettere l’esito. Se la richiesta era stata formulata da un ruolo successivo, nei passaggi che precedono il ritorno della pratica a quel ruolo l’Iter registra l’evento “Esito integrazione trasmesso”.",
         "label": "Trasmettere l’esito dell’integrazione"
       },
       {
@@ -1399,23 +1349,14 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "callout",
         "title": "Cosa accade dopo",
-        "text": "L’Iter registra l’evento “Istruttoria assegnata”, l’Istruttore amministrativo selezionato diventa il destinatario e la pratica risulta da prendere in carico per quell’Istruttore amministrativo. Il Responsabile dell’istruttoria amministrativa non modifica direttamente i dati amministrativi nella scheda dell’Istruttore amministrativo: per assegnare, validare o rimandare la pratica utilizza le azioni dell’iter."
-      },
-      {
-        "type": "heading2",
-        "id": "cap-10-ingresso-nella-fase-amministrativa-e-assegnazione-10-1-riassegnazione-e-riapertura",
-        "text": "10.1 Riassegnazione e riapertura"
-      },
-      {
-        "type": "paragraph",
-        "text": "L’assegnazione iniziale è distinta dall’avvio di una nuova istruttoria amministrativa dopo una riapertura. In quest’ultimo caso il Responsabile dell’istruttoria amministrativa seleziona l’Istruttore amministrativo che svolgerà la nuova istruttoria. Lo storico del ricorso, l’esito del CdA e i dati della riapertura restano consultabili. La procedura di riapertura è descritta nel Cap. 17.3."
+        "text": "L’Iter registra l’evento “Istruttoria assegnata” con il nominativo dell’Istruttore amministrativo selezionato. L’Istruttore amministrativo riceve l’allarme “Nuova istruttoria ricevuta” e trova la pratica nella scheda In attesa mia, nello stato Da prendere in carico."
       }
     ]
   },
   {
     "id": "cap-11-istruttoria-amministrativa-dell-ia",
     "order": 11,
-    "title": "11. Istruttoria amministrativa dell’Istruttore amministrativo",
+    "title": "11. Istruttoria amministrativa",
     "roles": [
       "IA",
       "ADMIN"
@@ -1423,69 +1364,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
     "blocks": [
       {
         "type": "lead",
-        "text": "L’Istruttore amministrativo lavora esclusivamente le pratiche che gli sono state assegnate. Può modificare i dati amministrativi quando la pratica risulta In carico a lui, nelle sezioni e nelle fasi in cui la modifica è consentita. Le sezioni Trasgressore, Contestazioni e Dati generali servono invece alla sola consultazione dei dati riepilogati. Dopo la trasmissione al Responsabile dell’istruttoria amministrativa la scheda diventa in sola lettura; se la pratica viene rimandata, prima di poterla modificare occorre prenderla nuovamente in carico."
-      },
-      {
-        "type": "heading2",
-        "id": "cap-11-istruttoria-amministrativa-dell-ia-11-1-struttura-della-lavorazione-amministrativa",
-        "text": "11.1 Struttura della lavorazione amministrativa"
-      },
-      {
-        "type": "table",
-        "headers": [
-          "Sezione",
-          "Uso"
-        ],
-        "rows": [
-          [
-            "Trasgressore",
-            "Consultazione dei dati anagrafici e tecnici già acquisiti nella pratica."
-          ],
-          [
-            "Contestazioni",
-            "Consultazione, in sola lettura, degli importi calcolati, degli estremi e dei valori sanzionatori e delle informazioni di base del procedimento."
-          ],
-          [
-            "Iter approvativo",
-            "Esito dell’Istruttore amministrativo, rimandi e rientri, Proposta di contestazione, bozza di determinazione e passaggi di verifica con il Responsabile dell’istruttoria amministrativa."
-          ],
-          [
-            "Notifica",
-            "Preparazione dell’Atto, modalità di pagamento, tipo e spese di notifica, protocollo ed esito della notifica."
-          ],
-          [
-            "Pagamento",
-            "Piano e posizioni di pagamento e stato del pagamento."
-          ],
-          [
-            "Allegati",
-            "Documentazione amministrativa e tecnica archiviata nella pratica."
-          ],
-          [
-            "Anteprima fascicolo",
-            "Composizione del fascicolo in base ai dati e ai documenti disponibili."
-          ],
-          [
-            "Ricorso",
-            "Registrazione del ricorso o del riesame successivo alla notifica."
-          ],
-          [
-            "CdA",
-            "Esito della decisione e, se previsto, importo e termine rideterminati."
-          ],
-          [
-            "Riapertura",
-            "Ordine e motivazione della riapertura; la compilazione è riservata al Responsabile dell’istruttoria amministrativa."
-          ],
-          [
-            "Definizione",
-            "Incasso e modalità con cui la pratica viene definita."
-          ],
-          [
-            "Dati generali",
-            "Riferimenti generali della pratica e dell’iter."
-          ]
-        ]
+        "text": "L’Istruttore amministrativo lavora esclusivamente le pratiche che gli sono state assegnate. Può modificare i dati amministrativi quando la pratica risulta In carico a lui, nelle sezioni e nelle fasi in cui la modifica è consentita. Le sezioni Trasgressore, Contestazioni, Riapertura e Dati generali sono invece consultabili in sola lettura. Dopo la trasmissione al Responsabile dell’istruttoria amministrativa la scheda diventa in sola lettura; se la pratica viene rimandata, prima di poterla modificare occorre prenderla nuovamente in carico."
       },
       {
         "type": "paragraph",
@@ -1494,12 +1373,12 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "heading2",
         "id": "cap-11-istruttoria-amministrativa-dell-ia-11-2-importi-calcolati-e-dati-manuali",
-        "text": "11.2 Importi calcolati e dati manuali"
+        "text": "11.1 Importi calcolati e dati manuali"
       },
       {
         "type": "callout",
         "title": "Attenzione",
-        "text": "Le sanzioni di base e ridotte, i danni e i riepiloghi collegati ai parametri configurati sono calcolati dal gestionale. L’Istruttore amministrativo deve compilare soltanto i dati amministrativi che l’interfaccia consente di modificare e non deve tentare di correggere manualmente valori che il gestionale ricalcola a partire dai dati della pratica e dai parametri."
+        "text": "Gli importi riportati nella scheda Contestazioni (Sanzione dovuta, Rimborso spese/risarcimento danni, Risarcimento attrezzatura e Totale da pagare) sono calcolati dal gestionale a partire dai dati della pratica e dai parametri sanzionatori configurati. L’Istruttore amministrativo compila soltanto i dati amministrativi che l’interfaccia consente di modificare e non deve correggere manualmente i valori calcolati."
       },
       {
         "type": "heading3",
@@ -1562,9 +1441,6 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       "RIA",
       "IA",
       "RIT",
-      "DT",
-      "CS",
-      "IT",
       "ADMIN"
     ],
     "blocks": [
@@ -1630,7 +1506,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "Se l’Istruttore amministrativo ha espresso l’esito Non conforme, il fascicolo viene trasmesso al Responsabile dell’istruttoria amministrativa, che esamina la richiesta e trasmette l’esito all’Istruttore amministrativo. L’Istruttore amministrativo riceve l’esito, prende nuovamente in carico la pratica, effettua le correzioni e ripete la propria valutazione. L’assegnazione all’Istruttore amministrativo resta invariata."
+        "text": "Se l’Istruttore amministrativo ha espresso l’esito Non conforme, indicandone la motivazione, la pratica viene trasmessa al Responsabile dell’istruttoria amministrativa, che esamina la non conformità segnalata e trasmette l’esito all’Istruttore amministrativo. L’Istruttore amministrativo prende nuovamente in carico la pratica e ripete la propria valutazione. L’assegnazione all’Istruttore amministrativo resta invariata."
       },
       {
         "type": "heading2",
@@ -2386,7 +2262,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 3,
-        "text": "Tornare a Gestisci istruttoria e utilizzare il comando Avvia nuova istruttoria amministrativa.",
+        "text": "Tornare al pannello Gestisci istruttoria e utilizzare il comando Avvia nuova istruttoria amministrativa.",
         "label": "Avviare una nuova istruttoria amministrativa"
       },
       {
@@ -2525,46 +2401,8 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "heading2",
-        "id": "cap-18-nota-spese-18-2-categorie-di-costo",
-        "text": "18.2 Categorie di costo"
-      },
-      {
-        "type": "table",
-        "headers": [
-          "Categoria",
-          "Significato operativo"
-        ],
-        "rows": [
-          [
-            "Attrezzature e trasporti",
-            "Costi relativi ad attrezzature, mezzi e trasporti selezionati dal prezzario."
-          ],
-          [
-            "Materiali da costruzione",
-            "Materiali impiegati nelle lavorazioni, valorizzati con le voci disponibili nel prezzario."
-          ],
-          [
-            "Risorse umane",
-            "Costi del personale e della manodopera previsti dalle voci disponibili nel prezzario."
-          ],
-          [
-            "Semilavorati",
-            "Prodotti o lavorazioni intermedie utilizzati nella composizione della Nota spese."
-          ],
-          [
-            "Prodotti finiti",
-            "Prodotti finiti selezionati dalle voci disponibili nel prezzario."
-          ],
-          [
-            "Attrezzature",
-            "Categoria utilizzata nei casi dell’Art. 30 relativi all’attrezzatura non recuperabile; nel riepilogo il relativo importo compare come Risarcimento attrezzatura."
-          ]
-        ]
-      },
-      {
-        "type": "heading2",
         "id": "cap-18-nota-spese-18-3-art-30-attrezzature-recuperabili-e-non-recuperabili",
-        "text": "18.3 Art. 30: attrezzature recuperabili e non recuperabili"
+        "text": "18.2 Art. 30: attrezzature recuperabili e non recuperabili"
       },
       {
         "type": "bullet",
@@ -2572,7 +2410,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "bullet",
-        "text": "Le matricole delle tessere elettroniche soggette a controllo devono essere composte da 5 cifre."
+        "text": "La matricola della tessera elettronica deve essere composta da 5 cifre."
       },
       {
         "type": "bullet",
@@ -2589,7 +2427,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "heading2",
         "id": "cap-18-nota-spese-18-4-browser-e-carrello",
-        "text": "18.4 Browser e carrello"
+        "text": "18.3 Browser e carrello"
       },
       {
         "type": "heading3",
@@ -2933,7 +2771,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       {
         "type": "step",
         "number": 1,
-        "text": "Aprire Consultazione prezzari."
+        "text": "Aprire la vista Consultazione prezzari."
       },
       {
         "type": "step",
@@ -3668,7 +3506,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "paragraph",
-        "text": "L’Anteprima fascicolo mostra i dati e i documenti già disponibili per la pratica. Durante la creazione di una nuova pratica da parte dell’Istruttore tecnico, l’anteprima diventa utilizzabile dopo il primo salvataggio. Nel Rapporto tecnico la Descrizione dei luoghi è riportata accanto ai Dati tecnici rilevati ed è seguita dai dati catastali: Comune, Sezione, Foglio e Mappale."
+        "text": "L’Anteprima fascicolo mostra i dati e i documenti già disponibili per la pratica. Durante la creazione di una nuova pratica da parte dell’Istruttore tecnico, l’anteprima diventa utilizzabile dopo il primo salvataggio."
       },
       {
         "type": "heading2",
@@ -3693,7 +3531,7 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
       },
       {
         "type": "bullet",
-        "text": "Nella scheda Iter è possibile invertire l’ordine cronologico degli eventi; normalmente gli eventi più recenti sono mostrati per primi."
+        "text": "Nella scheda Iter gli eventi più recenti sono mostrati per primi. Per invertire l’ordine cronologico fare nuovamente clic sulla scheda Iter; il simbolo accanto al nome della scheda indica l’ordine in uso."
       },
       {
         "type": "heading3",
@@ -3874,8 +3712,8 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
             "Il Responsabile dell’istruttoria amministrativa ha approvato l’Atto e lo ha restituito all’Istruttore amministrativo."
           ],
           [
-            "Istruttoria respinta",
-            "La fase tecnica è stata respinta, nel passaggio in cui questo esito è previsto."
+            "Respinta",
+            "Il Capo Settore o il Direttore tecnico ha respinto la pratica indicando la motivazione; la pratica non prosegue nell’iter."
           ],
           [
             "Archiviazione",
@@ -3956,11 +3794,11 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
           ],
           [
             "Come elimino una pratica creata per errore?",
-            "Cap. 5.3 — l’azione Elimina archivia una pratica creata direttamente dall’Istruttore tecnico e non ancora trasmessa ai livelli successivi."
+            "Cap. 5.2 — l’azione Elimina archivia una pratica creata direttamente dall’Istruttore tecnico e non ancora trasmessa ai livelli successivi."
           ],
           [
             "Come segnalo che una rilevazione è di un altro Settore?",
-            "Cap. 5.4 — l’Istruttore tecnico utilizza l’azione “Settore non competente”, indicando il Settore ritenuto competente e la motivazione."
+            "Cap. 5.3 — l’Istruttore tecnico utilizza l’azione “Settore non competente”, indicando il Settore ritenuto competente e la motivazione."
           ],
           [
             "Come trasferisco una rilevazione a un altro Settore?",
@@ -4155,12 +3993,12 @@ export const GUIDE_QUICK_LINKS: GuideQuickLink[] = [
   },
   {
     "label": "Come elimino una pratica creata per errore?",
-    "description": "Cap. 5.3 — l’azione Elimina archivia una pratica creata direttamente dall’Istruttore tecnico e non ancora trasmessa ai livelli successivi.",
+    "description": "Cap. 5.2 — l’azione Elimina archivia una pratica creata direttamente dall’Istruttore tecnico e non ancora trasmessa ai livelli successivi.",
     "targetChapterId": "cap-5-istruttoria-tecnica-dell-it"
   },
   {
     "label": "Come segnalo che una rilevazione è di un altro Settore?",
-    "description": "Cap. 5.4 — l’Istruttore tecnico utilizza l’azione “Settore non competente”, indicando il Settore ritenuto competente e la motivazione.",
+    "description": "Cap. 5.3 — l’Istruttore tecnico utilizza l’azione “Settore non competente”, indicando il Settore ritenuto competente e la motivazione.",
     "targetChapterId": "cap-5-istruttoria-tecnica-dell-it"
   },
   {

@@ -38,10 +38,10 @@ const ROLE_LABELS: Record<string, string> = {
   IT: 'Istruttore tecnico',
   CS: 'Capo Settore',
   RIT: 'Responsabile dell’istruttoria tecnica',
-  DT: 'Direttore Aree Agraria e Tecnica',
+  DT: 'Direttore tecnico',
   IA: 'Istruttore amministrativo',
   RIA: 'Responsabile dell’istruttoria amministrativa',
-  DA: 'Direttore Area AA.GG. e P.F.',
+  DA: 'Direttore amministrativo',
   ADMIN: 'Amministratore del sistema'
 }
 
@@ -179,7 +179,8 @@ function roleBadges(chapter: GuideChapter, accent: string, fontSize = 12.5): Rea
   const roles = chapter.roles || []
   if (roles.includes('*')) return null
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 5, marginTop: 8 }}>
+      <span style={{ fontSize, fontWeight: 600, lineHeight: 1, color: '#475569', marginRight: 2 }}>Ruoli interessati:</span>
       {roles.filter(r => r !== '*').map(r => (
         <span key={r} style={{
           fontSize,
@@ -987,7 +988,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>): React.ReactElem
               {activeChapter ? <Fragment>
                 <div style={{ maxWidth: 1040, margin: '0 auto' }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 5 }}>
-                    <div style={{ minWidth: 0 }}>
+                    <div style={{ minWidth: 0, flex: '1 1 auto' }}>
                       <h1 style={{ color: !activeAnchorId ? accent : titleColor, fontSize: contentChapterTitleFontSize, lineHeight: 1.22, margin: 0, fontWeight: 800, paddingLeft: !activeAnchorId ? 11 : 0, paddingRight: !activeAnchorId ? 6 : 0, background: !activeAnchorId ? `${accent}12` : 'transparent', boxShadow: !activeAnchorId ? `inset 3px 0 0 ${accent}` : 'none', borderRadius: !activeAnchorId ? 4 : 0, boxSizing: 'border-box' }}>{activeChapter.title}</h1>
                       {roleBadges(activeChapter, accent, contentBadgeFontSize)}
                     </div>
