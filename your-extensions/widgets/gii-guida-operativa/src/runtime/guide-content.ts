@@ -609,6 +609,10 @@ export const GUIDE_CHAPTERS: GuideChapter[] = [
         "text": "La rilevazione effettuata dal Tecnico rilevatore tramite l’applicazione Esri Survey123, con il rilevamento “Infrazioni”, viene trasmessa al gestionale e indirizzata al Capo Settore del Settore individuato dalla posizione del punto. I Dati tecnici rilevati, cioè il distretto in cui ricade il punto e gli elementi di rete e i manufatti presenti entro 2 metri dal punto, vengono acquisiti automaticamente e determinano il Settore di competenza. Se dai Dati tecnici risultano più Settori, il Tecnico rilevatore sceglie il Settore a cui inviare la rilevazione. Se non risulta alcun Settore, perché il punto ricade fuori dal comprensorio e non sono presenti reti o manufatti del Consorzio entro 2 metri, la rilevazione non può essere inviata. Quando il Settore di destinazione è stato acquisito correttamente e la rilevazione è stata correttamente trasmessa, il gestionale ricava automaticamente i dati catastali dalla posizione del punto. Il Capo Settore riceve l’allarme “Nuova rilevazione ricevuta”."
       },
       {
+        "type": "figure",
+        "text": "Figura – Rilevazione con Esri Survey123"
+      },
+      {
         "type": "heading3",
         "id": "cap-4-nuova-rilevazione-e-nuova-pratica-cs-assegnare-una-rilevazione-proveniente-dal-tr",
         "text": "Capo Settore — assegnare una rilevazione proveniente dal Tecnico rilevatore"
